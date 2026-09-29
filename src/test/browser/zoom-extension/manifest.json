@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "격리 브라우저 확대 검증",
+  "version": "1.0.0",
+  "permissions": ["tabs"],
+  "background": { "service_worker": "zoom.js" }
+}
