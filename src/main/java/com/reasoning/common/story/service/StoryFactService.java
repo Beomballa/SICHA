@@ -159,7 +159,7 @@ public final class StoryFactService {
     }
 
     /**
-     * 같은 사실 행을 비활성화하거나 복원하며 근거 원고를 참조로 해석하지 않는다.
+     * 활성 채점 규칙에서 참조 중인 사실은 비활성화하지 않으며 근거 원고는 참조로 해석하지 않는다.
      * @param sid 현재 일반 세션 ID
      * @param actor 현재 소유자 또는 EDIT 행위자
      * @param storyCode 대상 사건 코드
@@ -178,6 +178,11 @@ public final class StoryFactService {
         return stories.withVersion(sid, actor, storyCode, versionNo, expectedRev, scope -> {
             Fact before = required(scope, itemKey);
             if (before.activeYn() == active) return result(storyCode, versionNo, scope, scope.rev(), false, requestId);
+            if (!active && db.queryForObject("SELECT EXISTS (SELECT 1 FROM story_rubric r "
+                            + "CROSS JOIN LATERAL jsonb_array_elements(r.rule_data->'claims') claim "
+                            + "CROSS JOIN LATERAL jsonb_array_elements_text(claim->'factCodes') fact(code) "
+                            + "WHERE r.version_id=? AND r.active_yn AND fact.code=?)",
+                    Boolean.class, scope.versionId(), itemKey)) throw AuthException.conflict("REFERENCE_IN_USE");
             db.update("UPDATE story_fact SET active_yn=?,updated_at=clock_timestamp() WHERE version_id=? AND code=?",
                     active, scope.versionId(), itemKey);
             long rev = stories.recordChildChange(scope, actor, "facts", active ? "ITEM_REACTIVATED" : "ITEM_DEACTIVATED",

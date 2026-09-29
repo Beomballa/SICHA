@@ -22,6 +22,8 @@ import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryHintService;
 import com.reasoning.common.story.service.StoryEventService;
 import com.reasoning.common.story.service.StoryFactService;
+import com.reasoning.common.story.service.StoryRubricService;
+import com.reasoning.common.story.service.StoryRubricClueService;
 import com.reasoning.common.story.entity.QStory;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -76,6 +78,8 @@ class StoryIT extends DatabaseContextTest {
     @Autowired StoryHintService hints;
     @Autowired StoryEventService events;
     @Autowired StoryFactService facts;
+    @Autowired StoryRubricService rubrics;
+    @Autowired StoryRubricClueService rubricClues;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired EntityManager entityManager;
@@ -1901,6 +1905,367 @@ class StoryIT extends DatabaseContextTest {
         assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND "
                 + "(route LIKE ? OR route LIKE '%비밀%' OR route LIKE '%afterKey%')",
                 Long.class, owner.principal().accountKey(), "%" + story + "%")).isZero();
+    }
+
+    @Test
+    void rubricsDraftNullableFieldsMergedScoresAndCulpritProtection() {
+        Fixture owner = account(true, false, (byte) -110);
+        String story = create(owner, "소항목 초안");
+        assertThat(rubric(owner, story, "R", "METHOD", 0).warnings().toString())
+                .contains("SCORE_TOTAL", "MISSING_CONTENT", "rubrics.R.maxScore", "rubrics.R.ruleData");
+        assertThat(rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1, "R", UUID.randomUUID())
+                .item().maxScore()).isNull();
+        denied("INVALID_INPUT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "1",
+                mapper.createObjectNode().put("passScore", 1), UUID.randomUUID()));
+        var result = rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "1",
+                mapper.createObjectNode().put("maxScore", 10).put("requiredYn", true).put("passScore", 5), UUID.randomUUID());
+        assertThat(result.editRev()).isEqualTo("2");
+        assertThat(result.warnings().toString()).contains("rubrics.R.passScore", "rubrics.EVIDENCE.requiredYn");
+        denied("INVALID_INPUT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "2",
+                mapper.createObjectNode().put("maxScore", 4), UUID.randomUUID()));
+        denied("INVALID_INPUT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "2",
+                mapper.createObjectNode().put("requiredYn", false), UUID.randomUUID()));
+        rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "2",
+                mapper.createObjectNode().putNull("passScore"), UUID.randomUUID());
+        var culprit = rubrics.createRubric(owner.sid(), owner.principal(), story, 1, "3",
+                mapper.createObjectNode().put("code", "CUL").put("category", "CULPRIT"), UUID.randomUUID());
+        var fixed = rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1, "CUL", UUID.randomUUID()).item();
+        assertThat(fixed.maxScore()).isEqualTo(25);
+        assertThat(fixed.passScore()).isEqualTo(25);
+        assertThat(fixed.requiredYn()).isTrue();
+        assertThat(fixed.ruleData().toString()).contains("SELECTED_CULPRIT", "CONTRADICT_CULPRIT", "UNSUPPORTED_ACCOMPLICE");
+        var same = mapper.createObjectNode().put("maxScore", 25).put("requiredYn", true).put("passScore", 25);
+        same.set("ruleData", fixed.ruleData());
+        assertThat(rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "CUL", "4", same,
+                UUID.randomUUID()).changed()).isFalse();
+        denied("INVALID_INPUT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "CUL", "4",
+                mapper.createObjectNode().putNull("ruleData"), UUID.randomUUID()));
+        denied("INVALID_INPUT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "CUL", "4",
+                mapper.createObjectNode().put("category", "MOTIVE"), UUID.randomUUID()));
+        rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "CUL", "4",
+                mapper.createObjectNode().put("category", "MOTIVE").putNull("ruleData")
+                        .putNull("passScore"), UUID.randomUUID());
+        assertThat(culprit.itemKey()).isEqualTo("CUL");
+    }
+
+    @Test
+    void rubricCluesCreateNullRuleThenValidateLiveReferencesAndUnlinkInOrder() {
+        Fixture owner = account(true, false, (byte) -109);
+        String story = create(owner, "규칙 참조");
+        rubric(owner, story, "R", "EVIDENCE", 0);
+        rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "1",
+                mapper.createObjectNode().put("maxScore", 10), UUID.randomUUID());
+        clue(owner, story, "C", 2);
+        fact(owner, story, "F", 3);
+        JsonNode optionalRule = rubricRule("F", "C");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) optionalRule).putNull("requiredNotice");
+        denied("INVALID_INPUT", () -> rulePatch(owner, story, "R", 4, optionalRule));
+        var relation = rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1, "4",
+                mapper.createObjectNode().put("rubricCode", "R").put("clueCode", "C").put("linkText", "연결"), UUID.randomUUID());
+        assertThat(relation.itemKey()).isEqualTo("R~C");
+        assertThat(rulePatch(owner, story, "R", 5, optionalRule).editRev()).isEqualTo("6");
+        denied("REFERENCE_IN_USE", () -> facts.updateFactActive(owner.sid(), owner.principal(), story, 1,
+                "F", "6", false, UUID.randomUUID()));
+        denied("REFERENCE_IN_USE", () -> clues.updateClueActive(owner.sid(), owner.principal(), story, 1,
+                "C", "6", false, UUID.randomUUID()));
+        denied("REFERENCE_IN_USE", () -> rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1,
+                "R~C", "6", false, UUID.randomUUID()));
+        denied("REFERENCE_IN_USE", () -> rubrics.updateRubricActive(owner.sid(), owner.principal(), story, 1,
+                "R", "6", false, UUID.randomUUID()));
+        rulePatch(owner, story, "R", 6, null);
+        rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1,
+                "R~C", "7", false, UUID.randomUUID());
+        clues.updateClueActive(owner.sid(), owner.principal(), story, 1, "C", "8", false, UUID.randomUUID());
+        denied("INVALID_INPUT", () -> rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1,
+                "R~C", "9", true, UUID.randomUUID()));
+        rubrics.updateRubricActive(owner.sid(), owner.principal(), story, 1, "R", "9", false, UUID.randomUUID());
+        facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "F", "10", false, UUID.randomUUID());
+        denied("ITEM_EXISTS", () -> rubric(owner, story, "R", "METHOD", 11));
+        denied("ITEM_EXISTS", () -> rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1, "11",
+                mapper.createObjectNode().put("rubricCode", "R").put("clueCode", "C"), UUID.randomUUID()));
+    }
+
+    @Test
+    void rubricsRuleSchemaAndReferenceFailuresDoNotAdvanceRevision() {
+        Fixture owner = account(true, false, (byte) -108);
+        String story = create(owner, "규칙 형식");
+        rubric(owner, story, "R", "METHOD", 0);
+        rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "1",
+                mapper.createObjectNode().put("maxScore", 10).put("requiredYn", true), UUID.randomUUID());
+        for (JsonNode invalid : java.util.List.of(mapper.createArrayNode(), mapper.createObjectNode(),
+                rubricRule("MISSING", null), rubricRule("F", "MISSING")))
+            denied("INVALID_INPUT", () -> rulePatch(owner, story, "R", 2, invalid));
+        fact(owner, story, "F", 2);
+        JsonNode malformed = rubricRule("F", null);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) malformed.path("claims").get(0)).put("extra", true);
+        denied("INVALID_REQUEST", () -> rulePatch(owner, story, "R", 3, malformed));
+        for (String field : java.util.List.of("formatNo", "requiredNotice", "claims", "levels", "contradictions")) {
+            JsonNode missing = rubricRule("F", null);
+            ((com.fasterxml.jackson.databind.node.ObjectNode) missing).remove(field);
+            denied("INVALID_INPUT", () -> rulePatch(owner, story, "R", 3, missing));
+        }
+        JsonNode bad = rubricRule("F", null);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) bad.path("levels").get(1)).putArray("routes").addArray().add("MISSING");
+        denied("INVALID_INPUT", () -> rulePatch(owner, story, "R", 3, bad));
+        assertThat(versionRev(story)).isEqualTo(3);
+        assertThat(rulePatch(owner, story, "R", 3, rubricRule("F", null)).editRev()).isEqualTo("4");
+        assertThat(rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1, "R", UUID.randomUUID())
+                .item().ruleData().path("claims").get(0).path("factCodes").get(0).asText()).isEqualTo("F");
+    }
+
+    @Test
+    void rubricsWarningsReflectCurrentRowsAndClearWhenCompleted() {
+        Fixture owner = account(true, false, (byte) -107);
+        String story = create(owner, "규칙 경고");
+        rubric(owner, story, "R", "METHOD", 0);
+        var warnings = rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "1",
+                mapper.createObjectNode().put("maxScore", 20).put("requiredYn", true).put("passScore", 10),
+                UUID.randomUUID()).warnings().toString();
+        assertThat(warnings).contains("rubrics.R.ruleData", "rubrics.R.passScore", "rubrics.EVIDENCE.requiredYn");
+        fact(owner, story, "F", 2);
+        JsonNode complete = rubricRule("F", null);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) complete.path("levels").get(1)).put("score", 20);
+        ((com.fasterxml.jackson.databind.node.ArrayNode) complete.path("levels")).insertObject(1).put("code", "HALF").put("score", 10)
+                .putArray("routes").addArray().add("CLAIM");
+        var saved = rulePatch(owner, story, "R", 3, complete);
+        assertThat(saved.warnings().toString()).doesNotContain("rubrics.R.ruleData", "rubrics.R.passScore",
+                "rubrics.METHOD.requiredYn");
+        assertThat(saved.warnings().toString()).contains("rubrics.EVIDENCE.requiredYn");
+        var removed = rulePatch(owner, story, "R", 4, null);
+        assertThat(removed.warnings().toString()).contains("rubrics.R.ruleData", "rubrics.R.passScore");
+    }
+
+    @Test
+    void rubricCluesSameStringTupleAsciiPaginationAndMetadataOnlyLists() {
+        Fixture owner = account(true, false, (byte) -106);
+        String story = create(owner, "튜플 페이지");
+        rubric(owner, story, "A", "METHOD", 0);
+        rubric(owner, story, "A_", "EVIDENCE", 1);
+        clue(owner, story, "A", 2);
+        clue(owner, story, "Z", 3);
+        for (String[] key : new String[][] {{"A", "A"}, {"A", "Z"}, {"A_", "A"}})
+            rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1,
+                    Long.toString(versionRev(story)), mapper.createObjectNode().put("rubricCode", key[0])
+                            .put("clueCode", key[1]).put("linkText", "비공개 " + key[0] + key[1]), UUID.randomUUID());
+        var list = rubricClues.getRubricClueList(owner.sid(), owner.principal(), story, 1, 1, null, null);
+        assertThat(list.items()).hasSize(1);
+        assertThat(list.items().get(0).itemKey()).isEqualTo("A~A");
+        assertThat(mapper.valueToTree(list).toString()).doesNotContain("비공개", "linkText");
+        assertThat(rubricClues.getRubricClueList(owner.sid(), owner.principal(), story, 1, 1,
+                list.nextAfterKey(), null).items().get(0).itemKey()).isEqualTo("A~Z");
+        assertThat(rubricClues.getRubricClueList(owner.sid(), owner.principal(), story, 1, null,
+                "A~Z", null).items().get(0).itemKey()).isEqualTo("A_~A");
+        assertThat(rubricClues.getRubricClueDetail(owner.sid(), owner.principal(), story, 1,
+                "A~A", UUID.randomUUID()).item().linkText()).isEqualTo("비공개 AA");
+        assertThat(mapper.valueToTree(rubrics.getRubricList(owner.sid(), owner.principal(), story, 1,
+                null, null, null)).toString()).doesNotContain("ruleData", "acceptedText");
+        assertThat(rubrics.getRubricList(owner.sid(), owner.principal(), story, 1, 1,
+                "A", null).items().get(0).code()).isEqualTo("A_");
+        for (Integer size : java.util.List.of(0, 101)) {
+            denied("INVALID_REQUEST", () -> rubricClues.getRubricClueList(owner.sid(), owner.principal(), story, 1,
+                    size, null, null));
+            denied("INVALID_REQUEST", () -> rubrics.getRubricList(owner.sid(), owner.principal(), story, 1,
+                    size, null, null));
+        }
+        denied("INVALID_REQUEST", () -> rubricClues.getRubricClueList(owner.sid(), owner.principal(), story, 1,
+                20, "a~A", null));
+    }
+
+    @Test
+    void rubricsAndRubricCluesNoopRejectStaleRevisionWithoutTouchingAuditOrTime() {
+        Fixture owner = account(true, false, (byte) -105);
+        String story = create(owner, "무변경 규칙");
+        rubric(owner, story, "R", "METHOD", 0);
+        clue(owner, story, "C", 1);
+        rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1, "2",
+                mapper.createObjectNode().put("rubricCode", "R").put("clueCode", "C"), UUID.randomUUID());
+        var before = db.queryForMap("SELECT v.edit_rev,v.updated_at,r.updated_at AS rubric_time,rc.updated_at AS link_time,"
+                + "(SELECT count(*) FROM story_audit a WHERE a.version_id=v.id AND a.action LIKE 'ITEM_%') AS audits "
+                + "FROM story_version v JOIN story_rubric r ON r.version_id=v.id JOIN rubric_clue rc "
+                + "ON rc.version_id=v.id AND rc.rubric_code=r.code WHERE v.story_id=?", storyId(story));
+        assertThat(rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "3",
+                mapper.createObjectNode().putNull("acceptedText"), UUID.randomUUID()).changed()).isFalse();
+        assertThat(rubrics.updateRubricActive(owner.sid(), owner.principal(), story, 1, "R", "3",
+                true, UUID.randomUUID()).changed()).isFalse();
+        assertThat(rubricClues.updateRubricClue(owner.sid(), owner.principal(), story, 1, "R~C", "3",
+                mapper.createObjectNode().putNull("linkText"), UUID.randomUUID()).changed()).isFalse();
+        assertThat(rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1, "R~C", "3",
+                true, UUID.randomUUID()).changed()).isFalse();
+        denied("EDIT_CONFLICT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", "2",
+                mapper.createObjectNode().putNull("acceptedText"), UUID.randomUUID()));
+        denied("EDIT_CONFLICT", () -> rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1,
+                "R~C", "2", true, UUID.randomUUID()));
+        assertThat(db.queryForMap("SELECT v.edit_rev,v.updated_at,r.updated_at AS rubric_time,rc.updated_at AS link_time,"
+                + "(SELECT count(*) FROM story_audit a WHERE a.version_id=v.id AND a.action LIKE 'ITEM_%') AS audits "
+                + "FROM story_version v JOIN story_rubric r ON r.version_id=v.id JOIN rubric_clue rc "
+                + "ON rc.version_id=v.id AND rc.rubric_code=r.code WHERE v.story_id=?", storyId(story))).isEqualTo(before);
+    }
+
+    @Test
+    void rubricsAndRubricCluesAuditFailureRollsBackAllMutationsAndReads() {
+        Fixture owner = account(true, false, (byte) -104);
+        String story = create(owner, "규칙 감사");
+        rubric(owner, story, "R", "METHOD", 0);
+        clue(owner, story, "C", 1);
+        rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1, "2",
+                mapper.createObjectNode().put("rubricCode", "R").put("clueCode", "C"), UUID.randomUUID());
+        db.execute("CREATE FUNCTION fail_rubric_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.detail->>'resource' IN ('rubrics','rubric-clues') THEN "
+                + "RAISE EXCEPTION 'synthetic rubric audit outage'; END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_rubric_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_rubric_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1,
+                    "R", UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> rubricClues.getRubricClueDetail(owner.sid(), owner.principal(), story, 1,
+                    "R~C", UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> rubric(owner, story, "NEW", "METHOD", 3));
+            denied("STORY_UNAVAILABLE", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1,
+                    "R", "3", mapper.createObjectNode().put("acceptedText", "실패"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> rubricClues.updateRubricClue(owner.sid(), owner.principal(), story, 1,
+                    "R~C", "3", mapper.createObjectNode().put("linkText", "실패"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1,
+                    "R~C", "3", false, UUID.randomUUID()));
+        } finally {
+            db.execute("DROP TRIGGER fail_rubric_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_rubric_audit()");
+        }
+        assertThat(versionRev(story)).isEqualTo(3);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_rubric r JOIN story_version v ON v.id=r.version_id "
+                + "WHERE v.story_id=? AND r.code='NEW'", Long.class, storyId(story))).isZero();
+        assertThat(rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1, "R", UUID.randomUUID())
+                .item().acceptedText()).isNull();
+        assertThat(rubricClues.getRubricClueDetail(owner.sid(), owner.principal(), story, 1, "R~C", UUID.randomUUID())
+                .item().linkText()).isNull();
+    }
+
+    @Test
+    void rubricsAndRubricCluesReadScopeRevocationsAndSnapshotGatedWrites() {
+        Fixture owner = account(true, false, (byte) -103);
+        Fixture editor = account(false, false, (byte) -102);
+        Fixture reviewer = account(false, false, (byte) -101);
+        Fixture publisher = account(false, false, (byte) -100);
+        Fixture manager = account(false, true, (byte) -99);
+        String story = create(owner, "규칙 인가");
+        rubric(owner, story, "R", "METHOD", 0);
+        clue(owner, story, "C", 1);
+        rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1, "2",
+                mapper.createObjectNode().put("rubricCode", "R").put("clueCode", "C"), UUID.randomUUID());
+        db.update("UPDATE admin_account SET can_review=true WHERE id=?", reviewer.principal().accountId());
+        db.update("UPDATE admin_account SET can_publish=true WHERE id=?", publisher.principal().accountId());
+        for (var relation : java.util.List.of(java.util.Map.entry(editor, "EDIT"),
+                java.util.Map.entry(reviewer, "REVIEW"), java.util.Map.entry(publisher, "PUBLISH"))) {
+            db.update("INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES (?,?,?,?)",
+                    storyId(story), relation.getKey().principal().accountId(), relation.getValue(),
+                    owner.principal().accountId());
+            assertThat(rubrics.getRubricDetail(relation.getKey().sid(), relation.getKey().principal(), story, 1,
+                    "R", UUID.randomUUID()).item().code()).isEqualTo("R");
+            assertThat(rubricClues.getRubricClueDetail(relation.getKey().sid(), relation.getKey().principal(), story, 1,
+                    "R~C", UUID.randomUUID()).item().clueCode()).isEqualTo("C");
+        }
+        denied("NOT_FOUND", () -> rubrics.getRubricList(manager.sid(), manager.principal(), story, 1,
+                null, null, null));
+        for (Fixture reader : java.util.List.of(reviewer, publisher)) {
+            denied("FORBIDDEN", () -> rubric(reader, story, "NEW", "METHOD", 3));
+            denied("FORBIDDEN", () -> rubricClues.updateRubricClueActive(reader.sid(), reader.principal(), story, 1,
+                    "R~C", "3", false, UUID.randomUUID()));
+        }
+        assertThat(rubrics.updateRubric(editor.sid(), editor.principal(), story, 1, "R", "3",
+                mapper.createObjectNode().put("acceptedText", "editor"), UUID.randomUUID()).editRev()).isEqualTo("4");
+        db.update("UPDATE story_access SET active_yn=false WHERE story_id=? AND admin_id=?",
+                storyId(story), editor.principal().accountId());
+        denied("NOT_FOUND", () -> rubrics.getRubricList(editor.sid(), editor.principal(), story, 1,
+                null, null, null));
+        db.update("UPDATE admin_account SET can_review=false WHERE id=?", reviewer.principal().accountId());
+        denied("NOT_FOUND", () -> rubricClues.getRubricClueList(reviewer.sid(), reviewer.principal(), story, 1,
+                null, null, null));
+        db.update("UPDATE story_version SET active_yn=false WHERE story_id=?", storyId(story));
+        denied("NOT_FOUND", () -> rubrics.getRubricList(publisher.sid(), publisher.principal(), story, 1,
+                null, null, null));
+        assertThat(rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1, "R", UUID.randomUUID())
+                .item().acceptedText()).isEqualTo("editor");
+        denied("STATE_CONFLICT", () -> rubrics.updateRubricActive(owner.sid(), owner.principal(), story, 1,
+                "R", "4", false, UUID.randomUUID()));
+        long version = db.queryForObject("SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(story));
+        long snapshot = db.queryForObject("INSERT INTO review_snapshot(version_id,edit_rev,payload,request_key,created_by) "
+                + "VALUES (?,4,'{}'::jsonb,?,?) RETURNING id", Long.class,
+                version, UUID.randomUUID(), owner.principal().accountId());
+        for (String state : java.util.List.of("REVIEW", "READY", "PUBLISHED")) {
+            db.update("UPDATE story_version SET active_yn=true,status=?,current_snapshot_id=? WHERE id=?",
+                    state, snapshot, version);
+            denied("STATE_CONFLICT", () -> rubric(owner, story, "NEW", "METHOD", 4));
+            denied("STATE_CONFLICT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1,
+                    "R", "4", mapper.createObjectNode().put("acceptedText", "forbidden"), UUID.randomUUID()));
+            denied("STATE_CONFLICT", () -> rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1,
+                    "R~C", "4", false, UUID.randomUUID()));
+        }
+        db.update("UPDATE story_version SET status='DRAFT',current_snapshot_id=null WHERE id=?", version);
+        db.update("UPDATE admin_credential SET auth_rev=auth_rev+1 WHERE account_id=?", owner.principal().accountId());
+        denied("AUTH_REQUIRED", () -> rubrics.getRubricDetail(owner.sid(), owner.principal(), story, 1,
+                "R", UUID.randomUUID()));
+    }
+
+    @Test
+    void rubricsAndRubricCluesUnicodeTextBoundsAndReservedKeys() {
+        Fixture owner = account(true, false, (byte) -98);
+        String story = create(owner, "유니코드 경계");
+        rubric(owner, story, "R", "METHOD", 0);
+        clue(owner, story, "C", 1);
+        var fields = new String[] {"acceptedText", "partialText", "rejectText"};
+        int rev = 2;
+        for (int i = 0; i < fields.length; i++) {
+            String field = fields[i];
+            int length = i == 2 ? 8000 : 12000;
+            String content = "𐐀".repeat(length);
+            assertThat(rubrics.updateRubric(owner.sid(), owner.principal(), story, 1, "R", Integer.toString(rev),
+                    mapper.createObjectNode().put(field, content), UUID.randomUUID()).changed()).isTrue();
+            rev++;
+            int current = rev;
+            denied("INVALID_INPUT", () -> rubrics.updateRubric(owner.sid(), owner.principal(), story, 1,
+                    "R", Integer.toString(current), mapper.createObjectNode().put(field, content + "𐐀"), UUID.randomUUID()));
+        }
+        rubricClues.createRubricClue(owner.sid(), owner.principal(), story, 1, "5",
+                mapper.createObjectNode().put("rubricCode", "R").put("clueCode", "C")
+                        .put("linkText", "𐐀".repeat(4000)), UUID.randomUUID());
+        denied("INVALID_INPUT", () -> rubricClues.updateRubricClue(owner.sid(), owner.principal(), story, 1,
+                "R~C", "6", mapper.createObjectNode().put("linkText", "𐐀".repeat(4001)), UUID.randomUUID()));
+        assertThat(rubricClues.getRubricClueDetail(owner.sid(), owner.principal(), story, 1, "R~C", UUID.randomUUID())
+                .item().linkText().codePointCount(0, 8000)).isEqualTo(4000);
+        rubricClues.updateRubricClueActive(owner.sid(), owner.principal(), story, 1, "R~C", "6", false, UUID.randomUUID());
+        rubrics.updateRubricActive(owner.sid(), owner.principal(), story, 1, "R", "7", false, UUID.randomUUID());
+        denied("ITEM_EXISTS", () -> rubric(owner, story, "R", "METHOD", 8));
+    }
+
+    private StoryRubricService.ItemCreated rubric(Fixture actor, String story, String code, String category, int rev) {
+        return rubrics.createRubric(actor.sid(), actor.principal(), story, 1, Integer.toString(rev),
+                mapper.createObjectNode().put("code", code).put("category", category), UUID.randomUUID());
+    }
+
+    private StoryFactService.ItemCreated fact(Fixture actor, String story, String code, int rev) {
+        return facts.createFact(actor.sid(), actor.principal(), story, 1, Integer.toString(rev),
+                mapper.createObjectNode().put("code", code), UUID.randomUUID());
+    }
+
+    private com.reasoning.common.story.service.StoryService.ContentResult rulePatch(
+            Fixture actor, String story, String code, int rev, JsonNode rule) {
+        var changes = mapper.createObjectNode();
+        if (rule == null) changes.putNull("ruleData");
+        else changes.set("ruleData", rule);
+        return rubrics.updateRubric(actor.sid(), actor.principal(), story, 1, code, Integer.toString(rev),
+                changes, UUID.randomUUID());
+    }
+
+    private JsonNode rubricRule(String fact, String clue) {
+        var rule = mapper.createObjectNode().put("formatNo", 1).put("requiredNotice", "증명하라");
+        var claim = rule.putArray("claims").addObject().put("code", "CLAIM").put("meaning", "사실을 입증한다");
+        claim.putArray("factCodes").add(fact);
+        var examples = claim.putArray("exampleClueRoutes");
+        if (clue != null) examples.addArray().add(clue);
+        rule.putArray("levels").addObject().put("code", "ZERO").put("score", 0).putArray("routes");
+        rule.withArray("levels").addObject().put("code", "FULL").put("score", 10)
+                .putArray("routes").addArray().add("CLAIM");
+        rule.putArray("contradictions");
+        return rule;
     }
 
     /** 전체 자식 원고·부모 시각·수정번호·쓰기 감사를 비교하고 읽기 감사는 제외한다. */

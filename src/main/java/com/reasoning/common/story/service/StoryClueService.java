@@ -166,7 +166,7 @@ public final class StoryClueService {
      * @param active true는 복원, false는 비활성화
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 변경에만 증가하는 원고 없는 결과
-     * @throws AuthException 활성 배정 참조·비활성 인물·감사 실패 시
+     * @throws AuthException 활성 배정·채점 참조, 비활성 인물 또는 감사 실패 시
      */
     public ContentResult updateClueActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
@@ -176,7 +176,8 @@ public final class StoryClueService {
             Clue before = requiredClue(scope, itemKey);
             if (before.activeYn() == active) return result(storyCode, versionNo, scope, scope.rev(), false, requestId);
             if (active) activePerson(scope, before.personCode());
-            else if (activeAssignments(scope, itemKey)) throw AuthException.conflict("REFERENCE_IN_USE");
+            else if (activeAssignments(scope, itemKey) || activeRubricReferences(scope, itemKey))
+                throw AuthException.conflict("REFERENCE_IN_USE");
             db.update("UPDATE story_clue SET active_yn=?,updated_at=clock_timestamp() WHERE version_id=? AND code=?",
                     active, scope.versionId(), itemKey);
             long rev = stories.recordChildChange(scope, actor, "clues", active ? "ITEM_REACTIVATED" : "ITEM_DEACTIVATED",
@@ -347,6 +348,17 @@ public final class StoryClueService {
     private boolean activeAssignments(VersionScope scope, String clue) {
         return db.queryForObject("SELECT count(*) FROM clue_role WHERE version_id=? AND clue_code=? AND active_yn",
                 Integer.class, scope.versionId(), clue) > 0;
+    }
+
+    /** 단서 삭제에 한해 활성 소항목 연결 및 구조화 예시 경로를 확인한다. */
+    private boolean activeRubricReferences(VersionScope scope, String clue) {
+        return db.queryForObject("SELECT EXISTS (SELECT 1 FROM rubric_clue WHERE version_id=? AND clue_code=? AND active_yn) "
+                        + "OR EXISTS (SELECT 1 FROM story_rubric r "
+                        + "CROSS JOIN LATERAL jsonb_array_elements(r.rule_data->'claims') claim "
+                        + "CROSS JOIN LATERAL jsonb_array_elements(claim->'exampleClueRoutes') route "
+                        + "CROSS JOIN LATERAL jsonb_array_elements_text(route) example(code) "
+                        + "WHERE r.version_id=? AND r.active_yn AND example.code=?)",
+                Boolean.class, scope.versionId(), clue, scope.versionId(), clue);
     }
 
     /** 복원과 생성에서 동일 버전 ROLE 단서와 역할 활성 상태를 검사한다. */

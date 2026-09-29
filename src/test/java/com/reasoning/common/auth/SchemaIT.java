@@ -21,7 +21,7 @@ import org.testcontainers.utility.DockerImageName;
 
 class SchemaIT {
     @Test
-    @DisplayName("AUTH-V01/ADMIN-V10/STORY-AUDIT: Flyway V1-V8 match approved schema on disposable PostgreSQL")
+    @DisplayName("AUTH-V01/ADMIN-V10/STORY-AUDIT: Flyway V1-V9 match approved schema on disposable PostgreSQL")
     void appliesH0Schema() throws Exception {
         DockerImageName image = DockerImageName.parse("postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1")
             .asCompatibleSubstituteFor("postgres");
@@ -31,7 +31,7 @@ class SchemaIT {
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
                 .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -45,7 +45,8 @@ class SchemaIT {
                     "admin_recovery_code", "admin_auth_audit", "admin_auth_limit", "admin_auth_grant",
                     "admin_session", "spring_session", "spring_session_attributes", "access_history",
                     "story", "story_access", "story_version", "story_person", "review_snapshot", "story_audit",
-                    "story_role", "story_pair", "story_clue", "clue_role", "story_hint", "story_event", "story_fact");
+                    "story_role", "story_pair", "story_clue", "clue_role", "story_hint", "story_event", "story_fact",
+                    "story_rubric", "rubric_clue");
                 Map<String, Set<String>> expectedColumns = new HashMap<>(Map.of(
                     "story", Set.of("id", "code", "owner_id", "published_id", "view_yn", "active_yn",
                         "created_at", "updated_at", "edit_rev", "play_rev"),
@@ -73,6 +74,11 @@ class SchemaIT {
                     "actual_text", "apparent_text", "active_yn", "created_at", "updated_at"));
                 expectedColumns.put("story_fact", Set.of("version_id", "code", "statement", "truth", "basis",
                     "active_yn", "created_at", "updated_at"));
+                expectedColumns.put("story_rubric", Set.of("version_id", "code", "category", "max_score",
+                    "required_yn", "pass_score", "accepted_text", "partial_text", "reject_text", "rule_data",
+                    "active_yn", "created_at", "updated_at"));
+                expectedColumns.put("rubric_clue", Set.of("version_id", "rubric_code", "clue_code", "link_text",
+                    "active_yn", "created_at", "updated_at"));
                 for (var entry : expectedColumns.entrySet()) {
                     Set<String> columns = new HashSet<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", entry.getKey(), "%")) {
@@ -95,6 +101,8 @@ class SchemaIT {
                 approvedIndexes.put("story_hint", Set.of("pk_story_hint", "uq_story_hint_level"));
                 approvedIndexes.put("story_event", Set.of("pk_story_event"));
                 approvedIndexes.put("story_fact", Set.of("pk_story_fact"));
+                approvedIndexes.put("story_rubric", Set.of("pk_story_rubric"));
+                approvedIndexes.put("rubric_clue", Set.of("pk_rubric_clue"));
                 for (var entry : approvedIndexes.entrySet()) {
                     Set<String> indexes = new HashSet<>();
                     try (ResultSet rs = metadata.getIndexInfo(null, "public", entry.getKey(), false, false)) {
@@ -120,6 +128,8 @@ class SchemaIT {
                 approvedForeignKeys.put("story_hint", Set.of("fk_story_hint_version"));
                 approvedForeignKeys.put("story_event", Set.of("fk_story_event_version"));
                 approvedForeignKeys.put("story_fact", Set.of("fk_story_fact_version"));
+                approvedForeignKeys.put("story_rubric", Set.of("fk_story_rubric_version"));
+                approvedForeignKeys.put("rubric_clue", Set.of("fk_rubric_clue_rubric", "fk_rubric_clue_clue"));
                 int fkCount = 0;
                 for (var entry : approvedForeignKeys.entrySet()) {
                     Set<String> foreignKeys = new HashSet<>();
@@ -130,7 +140,7 @@ class SchemaIT {
                         .containsExactlyInAnyOrderElementsOf(entry.getValue());
                     fkCount += foreignKeys.size();
                 }
-                assertThat(fkCount).isEqualTo(28);
+                assertThat(fkCount).isEqualTo(31);
                 // 복합 참조의 열 순서와 삭제·갱신 차단 정책까지 검사한다.
                 Map<String, List<String>> rolePairFks = new HashMap<>();
                 for (String table : List.of("story_role", "story_pair")) {
@@ -168,6 +178,24 @@ class SchemaIT {
                         (short) 2, "clue_code->story_clue.code"),
                     "fk_clue_role_role", Map.of((short) 1, "version_id->story_role.version_id",
                         (short) 2, "role_code->story_role.code")));
+                Map<String, Map<Short, String>> rubricFks = new HashMap<>();
+                for (String table : List.of("story_rubric", "rubric_clue")) {
+                    try (ResultSet rs = metadata.getImportedKeys(null, "public", table)) {
+                        while (rs.next()) {
+                            assertThat(rs.getInt("DELETE_RULE")).isEqualTo(DatabaseMetaData.importedKeyNoAction);
+                            assertThat(rs.getInt("UPDATE_RULE")).isEqualTo(DatabaseMetaData.importedKeyNoAction);
+                            rubricFks.computeIfAbsent(rs.getString("FK_NAME"), ignored -> new java.util.TreeMap<>())
+                                .put(rs.getShort("KEY_SEQ"), rs.getString("FKCOLUMN_NAME") + "->"
+                                    + rs.getString("PKTABLE_NAME") + "." + rs.getString("PKCOLUMN_NAME"));
+                        }
+                    }
+                }
+                assertThat(rubricFks).containsExactlyInAnyOrderEntriesOf(Map.of(
+                    "fk_story_rubric_version", Map.of((short) 1, "version_id->story_version.id"),
+                    "fk_rubric_clue_rubric", Map.of((short) 1, "version_id->story_rubric.version_id",
+                        (short) 2, "rubric_code->story_rubric.code"),
+                    "fk_rubric_clue_clue", Map.of((short) 1, "version_id->story_clue.version_id",
+                        (short) 2, "clue_code->story_clue.code")));
                 try (ResultSet rs = metadata.getImportedKeys(null, "public", "story_hint")) {
                     assertThat(rs.next()).isTrue();
                     assertThat(rs.getString("FK_NAME")).isEqualTo("fk_story_hint_version");
@@ -204,7 +232,9 @@ class SchemaIT {
                         "clue_role", List.of("version_id", "clue_code", "role_code"),
                         "story_hint", List.of("version_id", "code"),
                         "story_event", List.of("version_id", "code"),
-                        "story_fact", List.of("version_id", "code")).entrySet()) {
+                        "story_fact", List.of("version_id", "code"),
+                        "story_rubric", List.of("version_id", "code"),
+                        "rubric_clue", List.of("version_id", "rubric_code", "clue_code")).entrySet()) {
                     Map<Short, String> primaryKey = new java.util.TreeMap<>();
                     try (ResultSet rs = metadata.getPrimaryKeys(null, "public", entry.getKey())) {
                         while (rs.next()) {
@@ -275,6 +305,47 @@ class SchemaIT {
                 assertThat(factColumns.get("active_yn")).isEqualTo("bool:1:0:true");
                 for (String time : List.of("created_at", "updated_at"))
                     assertThat(factColumns.get(time)).startsWith("timestamptz:").endsWith(":0:now()");
+                for (String table : List.of("story_rubric", "rubric_clue")) {
+                    Map<String, String> columns = new HashMap<>();
+                    try (ResultSet rs = metadata.getColumns(null, "public", table, "%")) {
+                        while (rs.next()) columns.put(rs.getString("COLUMN_NAME"), rs.getString("TYPE_NAME")
+                            + ":" + rs.getInt("COLUMN_SIZE") + ":" + rs.getInt("NULLABLE") + ":" + rs.getString("COLUMN_DEF"));
+                    }
+                    assertThat(columns.get("version_id")).isEqualTo("int8:19:0:null");
+                    assertThat(columns.get("active_yn")).isEqualTo("bool:1:0:true");
+                    for (String time : List.of("created_at", "updated_at"))
+                        assertThat(columns.get(time)).startsWith("timestamptz:").endsWith(":0:now()");
+                    if (table.equals("story_rubric")) {
+                        assertThat(columns.get("code")).isEqualTo("varchar:32:0:null");
+                        assertThat(columns.get("category")).isEqualTo("varchar:12:0:null");
+                        for (String score : List.of("max_score", "pass_score"))
+                            assertThat(columns.get(score)).startsWith("int2:").endsWith(":1:null");
+                        assertThat(columns.get("required_yn")).isEqualTo("bool:1:0:false");
+                        for (String text : List.of("accepted_text", "partial_text", "reject_text"))
+                            assertThat(columns.get(text)).startsWith("text:").endsWith(":1:null");
+                        assertThat(columns.get("rule_data")).startsWith("jsonb:").endsWith(":1:null");
+                    } else {
+                        assertThat(columns.get("rubric_code")).isEqualTo("varchar:32:0:null");
+                        assertThat(columns.get("clue_code")).isEqualTo("varchar:32:0:null");
+                        assertThat(columns.get("link_text")).startsWith("text:").endsWith(":1:null");
+                    }
+                }
+                Map<String, String> rubricChecks = new HashMap<>();
+                try (var statement = connection.createStatement(); ResultSet rs = statement.executeQuery(
+                        "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid IN "
+                        + "('public.story_rubric'::regclass,'public.rubric_clue'::regclass) AND contype='c'")) {
+                    while (rs.next()) rubricChecks.put(rs.getString(1), rs.getString(2));
+                }
+                assertThat(rubricChecks.keySet()).containsExactlyInAnyOrder("ck_story_rubric_code",
+                    "ck_story_rubric_category", "ck_story_rubric_score", "ck_story_rubric_required",
+                    "ck_story_rubric_text", "ck_story_rubric_rule", "ck_rubric_clue_text");
+                assertThat(rubricChecks.get("ck_story_rubric_code")).contains("^[A-Z0-9_]{1,32}$");
+                assertThat(rubricChecks.get("ck_story_rubric_category")).contains("CULPRIT", "METHOD", "EVIDENCE");
+                assertThat(rubricChecks.get("ck_story_rubric_score")).contains("max_score", "pass_score", "100");
+                assertThat(rubricChecks.get("ck_story_rubric_required")).contains("required_yn", "pass_score");
+                assertThat(rubricChecks.get("ck_story_rubric_text")).contains("12000", "8000");
+                assertThat(rubricChecks.get("ck_story_rubric_rule")).contains("jsonb_typeof", "octet_length", "131072");
+                assertThat(rubricChecks.get("ck_rubric_clue_text")).contains("4000");
                 Map<String, String> factChecks = new HashMap<>();
                 try (var statement = connection.createStatement(); ResultSet rs = statement.executeQuery(
                         "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint "
@@ -663,6 +734,74 @@ class SchemaIT {
                         + ownVersion + ",'EMPTY')")).hasMessageContaining("pk_story_fact");
                     assertThat(statement.executeUpdate("INSERT INTO story_fact(version_id,code,basis) VALUES ("
                         + otherVersion + ",'EMPTY','MISSING_CLUE')")).isEqualTo(1);
+                    assertThat(statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category) VALUES ("
+                        + ownVersion + ",'A','METHOD'),(" + otherVersion + ",'OTHER','TIME')")).isEqualTo(2);
+                    try (ResultSet rs = statement.executeQuery("SELECT max_score IS NULL,pass_score IS NULL,"
+                            + "rule_data IS NULL,NOT required_yn,active_yn FROM story_rubric WHERE version_id="
+                            + ownVersion + " AND code='A'")) {
+                        assertThat(rs.next()).isTrue();
+                        for (int column = 1; column <= 5; column++) assertThat(rs.getBoolean(column)).isTrue();
+                    }
+                    assertThat(statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category,max_score,"
+                        + "required_yn,pass_score,accepted_text,partial_text,reject_text,rule_data) VALUES ("
+                        + ownVersion + ",'BOUND','EVIDENCE',100,true,0,repeat('𐐀',12000),"
+                        + "repeat('𐐀',12000),repeat('𐐀',8000),NULL)" )).isEqualTo(1);
+                    for (String sql : List.of(
+                        "('lower','METHOD')", "('BAD','UNKNOWN')", "('BAD','METHOD',-1)",
+                        "('BAD','METHOD',101)", "('BAD','METHOD',5,false,1)",
+                        "('BAD','METHOD',5,true,6)")) {
+                        String columns = sql.split(",").length > 3 ? "code,category,max_score,required_yn,pass_score"
+                            : sql.split(",").length > 2 ? "code,category,max_score" : "code,category";
+                        assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_rubric(version_id,"
+                            + columns + ") VALUES (" + ownVersion + "," + sql.substring(1)))
+                            .hasMessageContaining("ck_story_rubric_");
+                    }
+                    for (String field : List.of("accepted_text", "partial_text", "reject_text")) {
+                        int limit = field.equals("reject_text") ? 8001 : 12001;
+                        assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category,"
+                            + field + ") VALUES (" + ownVersion + ",'BAD','METHOD',repeat('𐐀'," + limit + "))"))
+                            .hasMessageContaining("ck_story_rubric_text");
+                    }
+                    for (String json : List.of("'null'", "'[]'", "'42'", "'\"scalar\"'",
+                        "jsonb_build_object('x',repeat('𐐀',32769))")) {
+                        assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category,"
+                            + "rule_data) VALUES (" + ownVersion + ",'BAD','METHOD'," + json + "::jsonb)"))
+                            .hasMessageContaining("ck_story_rubric_rule");
+                    }
+                    // PostgreSQL JSONB serialization adds spaces after the colon; measure its own text boundary.
+                    int jsonOverhead;
+                    try (ResultSet rs = statement.executeQuery("SELECT octet_length('{\"x\":\"\"}'::jsonb::text)")) {
+                        assertThat(rs.next()).isTrue();
+                        jsonOverhead = rs.getInt(1);
+                    }
+                    int exactChars = (131072 - jsonOverhead) / 4;
+                    int remainder = 131072 - jsonOverhead - exactChars * 4;
+                    String exact = "jsonb_build_object('x',repeat('𐐀'," + exactChars + ") || repeat('a'," + remainder + "))";
+                    assertThat(statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category,rule_data) "
+                        + "VALUES (" + ownVersion + ",'EXACT','METHOD'," + exact + ")")).isEqualTo(1);
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category,rule_data) "
+                        + "VALUES (" + ownVersion + ",'OVER','METHOD',jsonb_build_object('x',repeat('𐐀',"
+                        + exactChars + ") || repeat('a'," + (remainder + 1) + ")))"))
+                        .hasMessageContaining("ck_story_rubric_rule");
+                    assertThat(statement.executeUpdate("INSERT INTO rubric_clue(version_id,rubric_code,clue_code,"
+                        + "link_text) VALUES (" + ownVersion + ",'A','A',repeat('𐐀',4000))")).isEqualTo(1);
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO rubric_clue(version_id,rubric_code,"
+                        + "clue_code,link_text) VALUES (" + ownVersion + ",'BOUND','A',repeat('𐐀',4001))"))
+                        .hasMessageContaining("ck_rubric_clue_text");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO rubric_clue(version_id,rubric_code,"
+                        + "clue_code) VALUES (" + ownVersion + ",'OTHER','A')"))
+                        .hasMessageContaining("fk_rubric_clue_rubric");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO rubric_clue(version_id,rubric_code,"
+                        + "clue_code) VALUES (" + ownVersion + ",'A','OTHER')"))
+                        .hasMessageContaining("fk_rubric_clue_clue");
+                    assertThat(statement.executeUpdate("UPDATE rubric_clue SET active_yn=false WHERE version_id="
+                        + ownVersion + " AND rubric_code='A' AND clue_code='A'")).isEqualTo(1);
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO rubric_clue(version_id,rubric_code,"
+                        + "clue_code) VALUES (" + ownVersion + ",'A','A')")).hasMessageContaining("pk_rubric_clue");
+                    assertThat(statement.executeUpdate("UPDATE story_rubric SET active_yn=false WHERE version_id="
+                        + ownVersion + " AND code='A'")).isEqualTo(1);
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_rubric(version_id,code,category) "
+                        + "VALUES (" + ownVersion + ",'A','METHOD')")).hasMessageContaining("pk_story_rubric");
                 }
             }
         }

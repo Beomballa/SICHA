@@ -271,7 +271,7 @@ public class StoryService {
      * @param scope 현재 트랜잭션에서 잠근 버전이며 별도 작업에 재사용하지 않는다
      * @param actor 현재 잠금으로 확인한 서버 행위자
      * @param action 서버가 고정한 ITEM_* 행동 또는 CONTENT_READ
-     * @param resource 서버에서 고정한 persons, roles, pairs, clues, clue-roles, hints, events 또는 facts 자원명
+     * @param resource 서버에서 고정한 persons, roles, pairs, clues, clue-roles, hints, events, facts, rubrics 또는 rubric-clues 자원명
      * @param key 원문이 아닌 검증된 ASCII 자식 키
      * @param fields 원문 대신 변경한 허용 필드명이며 조회이면 null이다
      * @param requestId 필수 감사에 연결할 null이 아닌 서버 요청 ID
@@ -279,7 +279,7 @@ public class StoryService {
      */
     long recordChildChange(VersionScope scope, AdminPrincipal actor, String resource, String action, String key,
             List<String> fields, UUID requestId) {
-        if (!Set.of("persons", "roles", "pairs", "clues", "clue-roles", "hints", "events", "facts").contains(resource)) throw AuthException.badRequest("INVALID_REQUEST");
+        if (!Set.of("persons", "roles", "pairs", "clues", "clue-roles", "hints", "events", "facts", "rubrics", "rubric-clues").contains(resource)) throw AuthException.badRequest("INVALID_REQUEST");
         boolean change = !"CONTENT_READ".equals(action);
         if (change && scope.rev == Long.MAX_VALUE) throw AuthException.conflict("EDIT_CONFLICT");
         long after = scope.rev + (change ? 1 : 0);
@@ -297,11 +297,13 @@ public class StoryService {
         return after;
     }
 
-    /** 같은 거래의 현재 단서 배정 상태를 다시 읽어 변경 후 경고를 구성한다. */
+    /** 같은 거래의 현재 단서 배정과 채점표 점수를 다시 읽어 변경 후 경고를 구성한다. */
     List<Warning> currentWarnings(VersionScope scope) {
         List<Warning> result = new ArrayList<>();
-        scope.warnings().stream().filter(w -> !"REFERENCE_UNASSIGNED".equals(w.code())).forEach(result::add);
+        scope.warnings().stream().filter(w -> !"REFERENCE_UNASSIGNED".equals(w.code())
+                && !w.field().startsWith("rubrics.")).forEach(result::add);
         result.addAll(unassignedClues(scope.versionId()));
+        result.addAll(StoryRubricService.rubricWarnings(db, scope.versionId()));
         return List.copyOf(result);
     }
 
@@ -313,10 +315,11 @@ public class StoryService {
                 (rs, row) -> new Warning("REFERENCE_UNASSIGNED", "clues." + rs.getString(1)), versionId);
     }
 
-    /** 버전 원고와 현재 활성 단서의 경고를 결합한다. */
+    /** 버전 원고와 현재 활성 단서·채점표의 경고를 결합한다. */
     private List<Warning> warningsWithClues(VersionRow version) {
         List<Warning> result = new ArrayList<>(warnings(version));
         result.addAll(unassignedClues(version.id()));
+        result.addAll(StoryRubricService.rubricWarnings(db, version.id()));
         return List.copyOf(result);
     }
 

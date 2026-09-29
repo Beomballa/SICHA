@@ -131,6 +131,50 @@
         ["basis", "제작자용 근거·단서 언급", "textarea", true],
       ],
     },
+    rubrics: {
+      label: "채점 소항목",
+      keys: ["code"],
+      required: ["code", "category"],
+      guide:
+        "분류와 코드는 필수입니다. 점수는 0~100의 정수 또는 미정이며, 통과 점수는 필수 여부와 최대 점수가 지정된 경우에만 설정합니다. 범인 분류를 만들면 최대·통과 25점, 필수 여부와 규칙이 서버에서 고정됩니다. 범인 분류를 떠나려면 규칙을 명시적으로 교체하거나 비워야 합니다. 규칙은 JSON 객체이며 128 KiB까지 허용됩니다. 전체 규칙의 의미와 참조는 서버가 검증합니다.",
+      options: {
+        category: [
+          ["", "분류 선택"],
+          ["CULPRIT", "CULPRIT · 범인"],
+          ["METHOD", "METHOD · 수법"],
+          ["TIME", "TIME · 시간"],
+          ["MOTIVE", "MOTIVE · 동기"],
+          ["EVIDENCE", "EVIDENCE · 근거"],
+        ],
+        requiredYn: [
+          ["false", "아니요"],
+          ["true", "예"],
+        ],
+      },
+      fields: [
+        ["code", "소항목 코드", "text", false],
+        ["category", "분류", "select", false],
+        ["maxScore", "최대 점수 (0~100)", "number", true],
+        ["requiredYn", "필수 여부", "boolean", false],
+        ["passScore", "통과 점수 (0~100)", "number", true],
+        ["acceptedText", "정답 안내", "textarea", true],
+        ["partialText", "부분 정답 안내", "textarea", true],
+        ["rejectText", "오답 안내", "textarea", true],
+        ["ruleData", "구조화 채점 규칙 JSON", "json", true],
+      ],
+    },
+    "rubric-clues": {
+      label: "소항목 단서 연결",
+      keys: ["rubricCode", "clueCode"],
+      required: ["rubricCode", "clueCode"],
+      guide:
+        "같은 버전의 활성 소항목과 활성 단서를 연결합니다. 소항목 코드~단서 코드의 의미 순서를 유지합니다. 연결 설명은 생성 후에도 수정하거나 비울 수 있습니다.",
+      fields: [
+        ["rubricCode", "활성 소항목 코드", "text", false],
+        ["clueCode", "활성 단서 코드", "text", false],
+        ["linkText", "제작자용 연결 설명", "textarea", true],
+      ],
+    },
   };
   const fields = {
     basic: [
@@ -180,6 +224,11 @@
     apparentText: 8000,
     statement: 4000,
     basis: 8000,
+    rubricCode: 32,
+    acceptedText: 12000,
+    partialText: 12000,
+    rejectText: 8000,
+    linkText: 4000,
   };
 
   /** 자원에 따라 공통 필드명의 원고 길이 계약을 구분한다. */
@@ -191,6 +240,7 @@
 
   /** 숫자 항목의 동일한 상한을 입력 속성과 저장 검사에 제공한다. */
   function numberLimit(section, key) {
+    if (section === "child" && childResource === "rubrics") return 100;
     if (section === "child" && childResource === "hints" && key === "level")
       return 3;
     if (section === "child" && childResource === "events") return 2147483647;
@@ -199,7 +249,9 @@
 
   /** 시간선의 기준점 0분과 다른 숫자 필드의 양수 계약을 구분한다. */
   function numberMinimum(section) {
-    return section === "child" && childResource === "events" ? 0 : 1;
+    return section === "child" && ["events", "rubrics"].includes(childResource)
+      ? 0
+      : 1;
   }
   let csrf;
   let generation = 0;
@@ -270,7 +322,7 @@
   }
 
   /** 같은 출처 API만 호출한다. missing 허용 GET은 호출자가 부모를 다시 인가한 뒤 부재를 사용해야 한다. */
-  async function request(method, path, body, missing = false) {
+  async function request(method, path, body, missing = false, rawRuleData) {
     const headers = { Accept: "application/json" };
     if (method !== "GET") {
       if (!csrf) {
@@ -295,7 +347,14 @@
         headers,
         credentials: "same-origin",
         cache: "no-store",
-        ...(method !== "GET" ? { body: JSON.stringify(body) } : {}),
+        ...(method !== "GET"
+          ? {
+              body:
+                rawRuleData === undefined
+                  ? JSON.stringify(body)
+                  : rubricBody(body, rawRuleData),
+            }
+          : {}),
       });
     } catch {
       throw { status: 503 };
@@ -329,6 +388,19 @@
       throw { status: response.status, code: data?.code };
     }
     return data;
+  }
+
+  /** 검증된 JSON 원문을 규칙 값으로 삽입해 중복 키를 서버의 엄격 파서까지 전달한다. */
+  function rubricBody(body, raw) {
+    const marker = crypto.randomUUID();
+    const part = body.item ? "item" : "changes";
+    const json = JSON.stringify({
+      ...body,
+      [part]: { ...body[part], ruleData: marker },
+    });
+    const token = `"ruleData":"${marker}"`;
+    if (!json.includes(token)) throw new Error("규칙 전송 형식 오류");
+    return json.replace(token, () => `"ruleData":${raw}`);
   }
 
   /** 사건 경로나 원고 대신 고정된 화면 코드만 기록한다. */
@@ -369,7 +441,7 @@
       value == null
         ? "미작성"
         : typeof value === "object"
-          ? JSON.stringify(value)
+          ? JSON.stringify(value, null, 2)
           : String(value);
     list.append(dt, dd);
   }
@@ -526,14 +598,15 @@
         mode.append(option);
       }
       const input = document.createElement(
-        kind === "textarea"
+        kind === "textarea" || kind === "json"
           ? "textarea"
-          : kind === "select"
+          : kind === "select" || kind === "boolean"
             ? "select"
             : "input",
       );
-      if (kind !== "textarea" && kind !== "select") input.type = kind;
-      if (kind === "select") {
+      if (!["textarea", "json", "select", "boolean"].includes(kind))
+        input.type = kind;
+      if (kind === "select" || kind === "boolean") {
         for (const [value, text] of childTypes[childResource].options[key]) {
           const option = document.createElement("option");
           option.value = value;
@@ -549,7 +622,14 @@
         input.min = String(numberMinimum(section));
         input.max = String(numberLimit(section, key));
       }
-      input.value = values?.[key] == null ? "" : String(values[key]);
+      input.value =
+        values?.[key] == null
+          ? kind === "boolean"
+            ? "false"
+            : ""
+          : typeof values[key] === "object"
+            ? JSON.stringify(values[key], null, 2)
+            : String(values[key]);
       const record = document.createElement("p");
       record.className = "report-value";
       record.id = `${id}-record`;
@@ -562,7 +642,9 @@
           ? "아직 작성된 기록이 없습니다."
           : values[key] === ""
             ? "빈 문자열로 저장된 기록입니다."
-            : String(values[key]);
+            : typeof values[key] === "object"
+              ? JSON.stringify(values[key], null, 2)
+              : String(values[key]);
       const clearing = document.createElement("p");
       clearing.className = "clear-record";
       clearing.textContent =
@@ -586,7 +668,8 @@
       }
       mode.addEventListener("change", () => {
         input.readOnly = mode.value !== "value";
-        if (kind === "select") input.disabled = mode.value !== "value";
+        if (kind === "select" || kind === "boolean")
+          input.disabled = mode.value !== "value";
         input.required = mode.value === "value" && !nullable;
         document.getElementById(`${input.id}-error`)?.remove();
         input.removeAttribute("aria-invalid");
@@ -602,7 +685,7 @@
         );
       });
       input.readOnly = true;
-      if (kind === "select") input.disabled = true;
+      if (kind === "select" || kind === "boolean") input.disabled = true;
       input.addEventListener("input", () => {
         document.getElementById(`${input.id}-error`)?.remove();
         input.removeAttribute("aria-invalid");
@@ -695,6 +778,7 @@
       const message =
         {
           MISSING_CONTENT: "미작성",
+          SCORE_TOTAL: "분류별 최대 점수 합계를 확인하세요",
           POLICY_TIME_RANGE: "권장 시간 범위 확인",
           REFERENCE_UNASSIGNED: "역할 배정 없음 · 초안 저장 가능",
         }[item.code] || item.code;
@@ -702,6 +786,18 @@
         const link = document.createElement("a");
         link.href = "#child-resource";
         link.textContent = `단서 ${key} · 역할 배정 없음 (초안 저장 가능). 자료 종류에서 단서 역할 배정을 선택하세요.`;
+        row.append(link);
+        list.append(row);
+        continue;
+      }
+      if (section === "rubrics") {
+        const [, target, property] = item.field.split(".");
+        const link = document.createElement("a");
+        link.href = "#child-resource";
+        const field = childTypes.rubrics.fields.find(
+          ([name]) => name === property,
+        );
+        link.textContent = `${target} · ${field?.[1] || "분류별 점수"} · ${message}. 자료 종류에서 채점 소항목을 선택하고 해당 코드를 여세요.`;
         row.append(link);
         list.append(row);
         continue;
@@ -816,10 +912,10 @@
   function writableSection(section, data = detail) {
     return Boolean(
       data?.storyActiveYn &&
-      data.activeYn &&
-      data.status === "DRAFT" &&
-      (section !== "child" ||
-        (childEditing && (!data.childItem || data.childItem.activeYn))),
+        data.activeYn &&
+        data.status === "DRAFT" &&
+        (section !== "child" ||
+          (childEditing && (!data.childItem || data.childItem.activeYn))),
     );
   }
 
@@ -970,10 +1066,36 @@
       }
       input.closest(".field").dataset.fixed = String(fixed);
     }
+    syncRubricFixedFields();
     if (childEditing)
       document.getElementById("child-state").textContent =
         `${childKey || `새 ${type.label}`} · ${childState(detail?.childItem)} · 수정번호 ${detail?.editRev}${detail?.childItem ? ` · ${displayTime(detail.childItem.updatedAt)}` : ""}`;
     updateDraftSummary();
+  }
+
+  /** 범인 분류의 서버 고정 입력을 잠그되 분류를 되돌리면 미저장 입력을 그대로 복원한다. */
+  function syncRubricFixedFields() {
+    if (childResource !== "rubrics") return;
+    const form = editor.querySelector('[data-section="child"]');
+    const categoryMode = form.querySelector('[data-field="category"]');
+    if (!categoryMode) return;
+    const category =
+      categoryMode.value === "value"
+        ? form.querySelector('[data-value="category"]').value
+        : detail?.childItem?.category;
+    const fixed = category === "CULPRIT";
+    for (const key of ["maxScore", "requiredYn", "passScore", "ruleData"]) {
+      const mode = form.querySelector(`[data-field="${key}"]`);
+      const input = form.querySelector(`[data-value="${key}"]`);
+      mode.disabled = fixed || saveLocked || !writableSection("child");
+      input.readOnly =
+        fixed ||
+        mode.value !== "value" ||
+        saveLocked ||
+        !writableSection("child");
+      if (input.tagName === "SELECT") input.disabled = input.readOnly;
+      input.setAttribute("aria-readonly", String(input.readOnly));
+    }
   }
 
   /** 불확실한 다중 조회는 과거 비교 수락까지 무효화하고 명시적 GET 재시도만 허용한다. */
@@ -1162,7 +1284,9 @@
         ? "null (미작성)"
         : value === ""
           ? "(빈 문자열)"
-          : value;
+          : typeof value === "object"
+            ? JSON.stringify(value, null, 2)
+            : value;
     let shown = 0;
     for (const [section, definitions] of Object.entries(fields)) {
       if (section === "child" && !childEditing) continue;
@@ -1277,7 +1401,7 @@
       const input = form.querySelector(`[data-value="${key}"]`);
       if (!input.reportValidity())
         throw { status: 422, field: key, message: `${key} 입력을 확인하세요.` };
-      if (kind === "select") {
+      if (kind === "select" || kind === "boolean") {
         const allowed = childTypes[childResource].options[key]
           .map(([value]) => value)
           .filter(Boolean);
@@ -1287,7 +1411,39 @@
             field: key,
             message: `${key} 값은 ${allowed.join(" / ")} 중에서 선택하세요.`,
           };
-        result[key] = input.value;
+        result[key] = kind === "boolean" ? input.value === "true" : input.value;
+      } else if (kind === "json") {
+        if (
+          new TextEncoder().encode(
+            input.value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, ""),
+          ).length > 131072
+        )
+          throw {
+            status: 422,
+            field: key,
+            message: "규칙 JSON은 UTF-8 128 KiB를 넘을 수 없습니다.",
+          };
+        let parsed;
+        try {
+          parsed = JSON.parse(input.value);
+        } catch {
+          throw {
+            status: 422,
+            field: key,
+            message: "규칙은 올바른 JSON 객체여야 합니다.",
+          };
+        }
+        if (
+          parsed === null ||
+          Array.isArray(parsed) ||
+          typeof parsed !== "object"
+        )
+          throw {
+            status: 422,
+            field: key,
+            message: "규칙은 JSON 객체여야 합니다.",
+          };
+        result[key] = parsed;
       } else if (kind === "number") {
         const value = Number(input.value);
         const high = numberLimit(section, key);
@@ -1326,6 +1482,7 @@
             "personCode",
             "clueCode",
             "roleCode",
+            "rubricCode",
           ].includes(key) &&
           (key === "personCode" || input.value || !nullable) &&
           !/^[A-Z0-9_]{1,32}$/.test(input.value)
@@ -1368,6 +1525,49 @@
           field: "endMin",
           message: "종료는 시작과 함께 지정하고 시작 이상이어야 합니다.",
         };
+    }
+    if (section === "child" && childResource === "rubrics") {
+      const previous = detail.childItem;
+      const max = Object.hasOwn(result, "maxScore")
+        ? result.maxScore
+        : previous?.maxScore;
+      const pass = Object.hasOwn(result, "passScore")
+        ? result.passScore
+        : previous?.passScore;
+      const required = Object.hasOwn(result, "requiredYn")
+        ? result.requiredYn
+        : (previous?.requiredYn ?? false);
+      const rule = Object.hasOwn(result, "ruleData")
+        ? result.ruleData
+        : previous?.ruleData;
+      const category = Object.hasOwn(result, "category")
+        ? result.category
+        : previous?.category;
+      if (category !== "CULPRIT") {
+        if (pass != null && (!required || max == null || pass > max))
+          throw {
+            status: 422,
+            field: "passScore",
+            message:
+              "통과 점수는 필수 여부와 최대 점수가 지정되고 최대 점수 이하여야 합니다.",
+          };
+        if (rule != null && (max == null || max === 0))
+          throw {
+            status: 422,
+            field: "ruleData",
+            message: "규칙을 작성하려면 1 이상의 최대 점수가 필요합니다.",
+          };
+        if (
+          previous?.category === "CULPRIT" &&
+          !Object.hasOwn(result, "ruleData")
+        )
+          throw {
+            status: 422,
+            field: "ruleData",
+            message:
+              "범인 분류를 떠나려면 규칙 교체 또는 비우기를 명시적으로 선택하세요.",
+          };
+      }
     }
     return result;
   }
@@ -1446,6 +1646,10 @@
     try {
       const child = section === "child";
       const creating = child && !detail.childItem;
+      const rawRuleData =
+        child && childResource === "rubrics" && patch.ruleData != null
+          ? form.querySelector('[data-value="ruleData"]').value
+          : undefined;
       const result = await request(
         child && (creating || operation) ? "POST" : "PATCH",
         editorPath() +
@@ -1456,6 +1660,8 @@
           expectedRev: detail.editRev,
           ...(operation ? {} : creating ? { item: patch } : { changes: patch }),
         },
+        false,
+        rawRuleData,
       );
       if (current !== generation) return;
       document.getElementById("comparison").hidden = false;
@@ -1785,6 +1991,9 @@
       event.preventDefault();
       save(form);
     });
+    document
+      .getElementById("editor")
+      .addEventListener("change", syncRubricFixedFields);
     document.getElementById("accept-latest").addEventListener("click", () => {
       if (
         !latest ||

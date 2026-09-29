@@ -2,6 +2,7 @@ package com.reasoning.admin.story.controller;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reasoning.admin.auth.audit.AccessHistoryFilter;
@@ -15,6 +16,8 @@ import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryHintService;
 import com.reasoning.common.story.service.StoryEventService;
 import com.reasoning.common.story.service.StoryFactService;
+import com.reasoning.common.story.service.StoryRubricService;
+import com.reasoning.common.story.service.StoryRubricClueService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -50,10 +53,13 @@ public final class StoryController {
     private final StoryHintService hints;
     private final StoryEventService events;
     private final StoryFactService facts;
+    private final StoryRubricService rubrics;
+    private final StoryRubricClueService rubricClues;
 
     public StoryController(StoryService stories, AdminSessionAdapter sessions, ObjectMapper mapper,
             StoryPersonService persons, StoryRoleService roles, StoryClueService clues, StoryHintService hints,
-            StoryEventService events, StoryFactService facts) {
+            StoryEventService events, StoryFactService facts, StoryRubricService rubrics,
+            StoryRubricClueService rubricClues) {
         this.stories = stories;
         this.sessions = sessions;
         this.mapper = mapper;
@@ -63,6 +69,8 @@ public final class StoryController {
         this.hints = hints;
         this.events = events;
         this.facts = facts;
+        this.rubrics = rubrics;
+        this.rubricClues = rubricClues;
     }
 
     /**
@@ -687,6 +695,102 @@ public final class StoryController {
                 text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
     }
 
+    /** 소항목 원고를 제외한 ASCII 코드·상태·시각 페이지를 조회한다. */
+    @GetMapping("/{storyCode}/versions/{versionNo}/rubrics")
+    public ResponseEntity<?> getRubricList(@PathVariable String storyCode, @PathVariable int versionNo,
+            @RequestParam(required = false) Integer size, @RequestParam(required = false) String afterKey,
+            @RequestParam(required = false) Boolean activeYn, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(rubrics.getRubricList(actor.id(), actor.principal(), storyCode, versionNo, size, afterKey, activeYn));
+    }
+
+    /** 필수 조회 감사를 확정한 뒤 단건 소항목 원고를 반환한다. */
+    @GetMapping("/{storyCode}/versions/{versionNo}/rubrics/{itemKey}")
+    public ResponseEntity<?> getRubricDetail(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(rubrics.getRubricDetail(actor.id(), actor.principal(), storyCode, versionNo, itemKey, requestId(request)));
+    }
+
+    /** 소항목을 생성하며 ruleData 원본 하위 트리에도 128 KiB 상한을 적용한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/rubrics")
+    public ResponseEntity<?> createRubric(@PathVariable String storyCode, @PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, Set.of("expectedRev", "item"), true);
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .body(rubrics.createRubric(actor.id(), actor.principal(), storyCode, versionNo,
+                        text(payload, "expectedRev"), payload.get("item"), requestId(request)));
+    }
+
+    /** 명시된 소항목 내용만 병합하며 ruleData 원본 하위 트리에도 128 KiB 상한을 적용한다. */
+    @PatchMapping("/{storyCode}/versions/{versionNo}/rubrics/{itemKey}")
+    public ResponseEntity<?> updateRubric(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, PATCH_FIELDS, true);
+        return ok(rubrics.updateRubric(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), payload.get("changes"), requestId(request)));
+    }
+
+    /** 활성 참조를 확인해 소항목을 명시적으로 비활성화·복원한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/rubrics/{itemKey}/{operation:deactivate|reactivate}")
+    public ResponseEntity<?> updateRubricActive(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, @PathVariable String operation, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedRev"));
+        return ok(rubrics.updateRubricActive(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
+    }
+
+    /** 소항목~단서 의미 순서의 ASCII 튜플과 상태·시각만 조회한다. */
+    @GetMapping("/{storyCode}/versions/{versionNo}/rubric-clues")
+    public ResponseEntity<?> getRubricClueList(@PathVariable String storyCode, @PathVariable int versionNo,
+            @RequestParam(required = false) Integer size, @RequestParam(required = false) String afterKey,
+            @RequestParam(required = false) Boolean activeYn, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(rubricClues.getRubricClueList(actor.id(), actor.principal(), storyCode, versionNo, size, afterKey, activeYn));
+    }
+
+    /** 소항목과 단서의 연결 설명을 필수 감사 후 단건으로 반환한다. */
+    @GetMapping("/{storyCode}/versions/{versionNo}/rubric-clues/{itemKey}")
+    public ResponseEntity<?> getRubricClueDetail(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(rubricClues.getRubricClueDetail(actor.id(), actor.principal(), storyCode, versionNo, itemKey, requestId(request)));
+    }
+
+    /** 최대 512 KiB 본문에서 활성 소항목과 단서를 명시적으로 연결한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/rubric-clues")
+    public ResponseEntity<?> createRubricClue(@PathVariable String storyCode, @PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, Set.of("expectedRev", "item"));
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .body(rubricClues.createRubricClue(actor.id(), actor.principal(), storyCode, versionNo,
+                        text(payload, "expectedRev"), payload.get("item"), requestId(request)));
+    }
+
+    /** 키는 유지하고 소항목·단서 연결의 linkText만 명시적으로 수정한다. */
+    @PatchMapping("/{storyCode}/versions/{versionNo}/rubric-clues/{itemKey}")
+    public ResponseEntity<?> updateRubricClue(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, PATCH_FIELDS);
+        return ok(rubricClues.updateRubricClue(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), payload.get("changes"), requestId(request)));
+    }
+
+    /** 규칙 참조를 보존하면서 연결을 명시적으로 해제하거나 양 끝을 확인해 복원한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/rubric-clues/{itemKey}/{operation:deactivate|reactivate}")
+    public ResponseEntity<?> updateRubricClueActive(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, @PathVariable String operation, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedRev"));
+        return ok(rubricClues.updateRubricClueActive(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
+    }
+
     /**
      * 단서 코드·역할 코드 튜플의 ASCII 페이지를 원고 없이 조회한다.
      * @param storyCode 부모 사건 코드
@@ -792,8 +896,14 @@ public final class StoryController {
      * @param fields 정확히 포함해야 하는 최상위 필드 이름
      * @return 중복 필드와 뒤따르는 토큰이 없는 JSON 객체
      * @throws AuthException 바이트 상한 초과 시 PAYLOAD_TOO_LARGE, 잘못된 인코딩·JSON·필드 시 INVALID_REQUEST, 본문 읽기 실패 시 STORY_UNAVAILABLE
+     *     소항목의 원본 ruleData가 128 KiB를 초과하면 INVALID_INPUT(422)을 반환한다
      */
     private JsonNode body(HttpServletRequest request, int maxBytes, Set<String> fields) {
+        return body(request, maxBytes, fields, false);
+    }
+
+    /** rubric 요청에 한해 정규화 전 ruleData 원본도 검사한다. 초과 시 INVALID_INPUT(422)이다. */
+    private JsonNode body(HttpServletRequest request, int maxBytes, Set<String> fields, boolean checkRuleData) {
         String contentType = request.getContentType();
         if (contentType == null || !contentType.matches("(?i)application/json(?:\\s*;\\s*charset=utf-8)?"))
             throw AuthException.badRequest("INVALID_REQUEST");
@@ -814,12 +924,40 @@ public final class StoryController {
                         || parser.nextToken() != null)
                     throw AuthException.badRequest("INVALID_REQUEST");
                 for (String name : fields) if (!value.has(name)) throw AuthException.badRequest("INVALID_REQUEST");
+                if (checkRuleData) checkRuleDataBytes(bytes);
                 return value;
             }
         } catch (CharacterCodingException | JsonProcessingException exception) {
             throw AuthException.badRequest("INVALID_REQUEST");
         } catch (IOException exception) {
             throw AuthException.unavailable("STORY_UNAVAILABLE");
+        }
+    }
+
+    /** 원본 UTF-8 파서의 바이트 위치로 item/changes.ruleData 값 자체의 전송 크기를 잰다. */
+    private void checkRuleDataBytes(byte[] bytes) throws IOException {
+        try (JsonParser parser = mapper.getFactory().createParser(bytes)) {
+            parser.nextToken();
+            while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                String name = parser.currentName();
+                JsonToken token = parser.nextToken();
+                if (!("item".equals(name) || "changes".equals(name)) || token != JsonToken.START_OBJECT) {
+                    parser.skipChildren();
+                    continue;
+                }
+
+                while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                    String field = parser.currentName();
+                    parser.nextToken();
+                    long start = parser.currentTokenLocation().getByteOffset();
+                    parser.skipChildren();
+                    // 문자열의 지연 해독까지 끝내 닫는 따옴표 뒤 위치를 얻는다.
+                    if (parser.currentToken() == JsonToken.VALUE_STRING) parser.getText();
+                    long end = parser.currentLocation().getByteOffset();
+                    if ("ruleData".equals(field) && end - start > 128 * 1024)
+                        throw AuthException.unprocessable("INVALID_INPUT");
+                }
+            }
         }
     }
 
