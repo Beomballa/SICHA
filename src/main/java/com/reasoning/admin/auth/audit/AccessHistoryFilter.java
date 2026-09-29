@@ -38,6 +38,7 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
     private static final Pattern STORY_CLUE_ROLE = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/clue-roles(?:/([A-Z0-9_]{1,32}~[A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private static final Pattern STORY_HINT = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/hints(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private static final Pattern STORY_EVENT = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/events(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
+    private static final Pattern STORY_FACT = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/facts(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private final JdbcTemplate db;
 
     public AccessHistoryFilter(JdbcTemplate db) {
@@ -173,6 +174,12 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/events"
                     + (event.group(1) == null ? "" : "/{itemKey}")
                     + (event.group(2) == null ? "" : "/" + event.group(2));
+        }
+        Matcher fact = STORY_FACT.matcher(path);
+        if (fact.matches()) {
+            return "/admin/api/stories/{storyCode}/versions/{versionNo}/facts"
+                    + (fact.group(1) == null ? "" : "/{itemKey}")
+                    + (fact.group(2) == null ? "" : "/" + fact.group(2));
         }
         Matcher story = STORY.matcher(path);
         if (story.matches()) {

@@ -50,6 +50,13 @@
       label: "단서",
       keys: ["code"],
       required: ["code", "title"],
+      options: {
+        scope: [
+          ["", "공개 범위 선택"],
+          ["ROLE", "ROLE · 지정 역할에게 공개"],
+          ["COMMON", "COMMON · 모든 역할에게 공개"],
+        ],
+      },
       guide:
         "코드와 제목은 필수입니다. 본문은 플레이어에게 표시되며 12,000자까지, 제작자용 출처 메모는 400자까지입니다. ROLE 단서는 배정이 없어도 초안으로 저장할 수 있습니다.",
       fields: [
@@ -103,6 +110,27 @@
         ["apparentText", "제작자용 표면 사건·오해", "textarea", true],
       ],
     },
+    facts: {
+      label: "사실 원장",
+      keys: ["code"],
+      required: ["code"],
+      guide:
+        "코드는 생성 뒤 고정됩니다. 명제는 4,000자, 근거는 8,000자까지이며 모두 제작자 전용입니다. 분류는 참·거짓·오해 또는 미정입니다. 근거의 단서 언급은 문서 기록이며 자동 연결·수정되지 않습니다.",
+      options: {
+        truth: [
+          ["", "분류 선택"],
+          ["TRUE", "TRUE · 참"],
+          ["FALSE", "FALSE · 거짓"],
+          ["MISREAD", "MISREAD · 오해"],
+        ],
+      },
+      fields: [
+        ["code", "사실 코드", "text", false],
+        ["statement", "제작자용 명제", "textarea", true],
+        ["truth", "명제 분류", "select", true],
+        ["basis", "제작자용 근거·단서 언급", "textarea", true],
+      ],
+    },
   };
   const fields = {
     basic: [
@@ -150,6 +178,8 @@
     roleCode: 32,
     actualText: 8000,
     apparentText: 8000,
+    statement: 4000,
+    basis: 8000,
   };
 
   /** 자원에 따라 공통 필드명의 원고 길이 계약을 구분한다. */
@@ -504,11 +534,7 @@
       );
       if (kind !== "textarea" && kind !== "select") input.type = kind;
       if (kind === "select") {
-        for (const [value, text] of [
-          ["", "공개 범위 선택"],
-          ["ROLE", "ROLE · 지정 역할에게 공개"],
-          ["COMMON", "COMMON · 모든 역할에게 공개"],
-        ]) {
+        for (const [value, text] of childTypes[childResource].options[key]) {
           const option = document.createElement("option");
           option.value = value;
           option.textContent = text;
@@ -1252,11 +1278,14 @@
       if (!input.reportValidity())
         throw { status: 422, field: key, message: `${key} 입력을 확인하세요.` };
       if (kind === "select") {
-        if (!["COMMON", "ROLE"].includes(input.value))
+        const allowed = childTypes[childResource].options[key]
+          .map(([value]) => value)
+          .filter(Boolean);
+        if (!allowed.includes(input.value))
           throw {
             status: 422,
             field: key,
-            message: "공개 범위를 COMMON 또는 ROLE 중에서 선택하세요.",
+            message: `${key} 값은 ${allowed.join(" / ")} 중에서 선택하세요.`,
           };
         result[key] = input.value;
       } else if (kind === "number") {

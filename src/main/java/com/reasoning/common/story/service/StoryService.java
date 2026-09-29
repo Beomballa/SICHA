@@ -271,7 +271,7 @@ public class StoryService {
      * @param scope 현재 트랜잭션에서 잠근 버전이며 별도 작업에 재사용하지 않는다
      * @param actor 현재 잠금으로 확인한 서버 행위자
      * @param action 서버가 고정한 ITEM_* 행동 또는 CONTENT_READ
-     * @param resource 서버에서 고정한 persons, roles, pairs, clues, clue-roles, hints 또는 events 자원명
+     * @param resource 서버에서 고정한 persons, roles, pairs, clues, clue-roles, hints, events 또는 facts 자원명
      * @param key 원문이 아닌 검증된 ASCII 자식 키
      * @param fields 원문 대신 변경한 허용 필드명이며 조회이면 null이다
      * @param requestId 필수 감사에 연결할 null이 아닌 서버 요청 ID
@@ -279,7 +279,7 @@ public class StoryService {
      */
     long recordChildChange(VersionScope scope, AdminPrincipal actor, String resource, String action, String key,
             List<String> fields, UUID requestId) {
-        if (!Set.of("persons", "roles", "pairs", "clues", "clue-roles", "hints", "events").contains(resource)) throw AuthException.badRequest("INVALID_REQUEST");
+        if (!Set.of("persons", "roles", "pairs", "clues", "clue-roles", "hints", "events", "facts").contains(resource)) throw AuthException.badRequest("INVALID_REQUEST");
         boolean change = !"CONTENT_READ".equals(action);
         if (change && scope.rev == Long.MAX_VALUE) throw AuthException.conflict("EDIT_CONFLICT");
         long after = scope.rev + (change ? 1 : 0);

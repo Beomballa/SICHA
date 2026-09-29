@@ -21,6 +21,7 @@ import com.reasoning.common.story.service.StoryRoleService;
 import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryHintService;
 import com.reasoning.common.story.service.StoryEventService;
+import com.reasoning.common.story.service.StoryFactService;
 import com.reasoning.common.story.entity.QStory;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -74,6 +75,7 @@ class StoryIT extends DatabaseContextTest {
     @Autowired StoryClueService clues;
     @Autowired StoryHintService hints;
     @Autowired StoryEventService events;
+    @Autowired StoryFactService facts;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired EntityManager entityManager;
@@ -1558,6 +1560,355 @@ class StoryIT extends DatabaseContextTest {
     private Instant eventUpdatedAt(String story, String key) {
         return db.queryForObject("SELECT e.updated_at FROM story_event e JOIN story_version v ON v.id=e.version_id "
                 + "WHERE v.story_id=? AND e.code=?", (rs, row) -> rs.getTimestamp(1).toInstant(), storyId(story), key);
+    }
+
+    /** 사실의 nullable 원고·분류 네 상태와 코드포인트/Unicode 경계를 확인한다. */
+    @Test
+    void factsNullableTruthsTextBoundsAndStrictFields() {
+        Fixture owner = account(true, false, (byte) 124);
+        String story = create(owner, "사실 원장");
+        var created = facts.createFact(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        assertThat(created.editRev()).isEqualTo("1");
+        assertThat(created.warnings()).isNotEmpty();
+        var empty = facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID()).item();
+        assertThat(empty.statement()).isNull();
+        assertThat(empty.truth()).isNull();
+        assertThat(empty.basis()).isNull();
+        String statement = "𐐀".repeat(4000);
+        String basis = "𐐀".repeat(8000);
+        assertThat(facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", "1",
+                mapper.createObjectNode().put("statement", statement).put("truth", "TRUE")
+                        .put("basis", basis), UUID.randomUUID()).editRev()).isEqualTo("2");
+        var detail = facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID()).item();
+        assertThat(detail.statement()).isEqualTo(statement);
+        assertThat(detail.truth()).isEqualTo("TRUE");
+        assertThat(detail.basis()).isEqualTo(basis);
+        for (String truth : java.util.List.of("FALSE", "MISREAD")) {
+            facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", Long.toString(versionRev(story)),
+                    mapper.createObjectNode().put("truth", truth), UUID.randomUUID());
+            assertThat(facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID())
+                    .item().truth()).isEqualTo(truth);
+        }
+        assertThat(facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", "4",
+                mapper.createObjectNode().put("statement", "첫째\r\n둘째").put("basis", "")
+                        .putNull("truth"), UUID.randomUUID()).editRev()).isEqualTo("5");
+        detail = facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID()).item();
+        assertThat(detail.statement()).isEqualTo("첫째\n둘째");
+        assertThat(detail.basis()).isEmpty();
+        assertThat(detail.truth()).isNull();
+        assertThat(facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", "5",
+                mapper.createObjectNode().put("basis", "근거만"), UUID.randomUUID()).editRev()).isEqualTo("6");
+        assertThat(facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID())
+                .item().statement()).isEqualTo("첫째\n둘째");
+        for (var bad : java.util.List.of(mapper.createObjectNode().put("truth", true),
+                mapper.createObjectNode().put("truth", "true"),
+                mapper.createObjectNode().put("truth", ""),
+                mapper.createObjectNode().put("truth", "UNKNOWN"),
+                mapper.createObjectNode().put("statement", "𐐀".repeat(4001)),
+                mapper.createObjectNode().put("basis", "𐐀".repeat(8001)),
+                mapper.createObjectNode().put("statement", "\uD800"),
+                mapper.createObjectNode().put("basis", "\0"),
+                mapper.createObjectNode().put("basis", false))) {
+            denied("INVALID_INPUT", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1,
+                    "A", "6", bad, UUID.randomUUID()));
+        }
+        denied("INVALID_REQUEST", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1,
+                "A", "6", mapper.createObjectNode(), UUID.randomUUID()));
+        denied("INVALID_REQUEST", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1,
+                "A", "6", mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+        denied("INVALID_INPUT", () -> facts.createFact(owner.sid(), owner.principal(), story, 1, "6",
+                mapper.createObjectNode().put("code", "lower"), UUID.randomUUID()));
+        denied("INVALID_REQUEST", () -> facts.createFact(owner.sid(), owner.principal(), story, 1, "6",
+                mapper.createObjectNode().put("code", "B").put("activeYn", false), UUID.randomUUID()));
+        assertThat(versionRev(story)).isEqualTo(6);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? "
+                + "AND (detail::text LIKE '%근거만%' OR detail::text LIKE '%첫째%' OR detail::text LIKE '%𐐀%')",
+                Long.class, storyId(story))).isZero();
+    }
+
+    /** 원고 없는 ASCII 목록의 기본 크기와 비활성 코드 예약·복원을 확인한다. */
+    @Test
+    void factsAsciiPaginationAndInactiveReservation() {
+        Fixture owner = account(true, false, (byte) 125);
+        String story = create(owner, "사실 목록");
+        for (int i = 0; i < 21; i++) {
+            facts.createFact(owner.sid(), owner.principal(), story, 1, Integer.toString(i),
+                    mapper.createObjectNode().put("code", String.format("F%02d", i))
+                            .put("statement", "비밀 명제").put("basis", "없는 단서"), UUID.randomUUID());
+        }
+        var page = facts.getFactList(owner.sid(), owner.principal(), story, 1, null, null, null);
+        assertThat(page.items()).hasSize(20);
+        assertThat(page.nextAfterKey()).isEqualTo("F19");
+        assertThat(page.hasNext()).isTrue();
+        assertThat(json(page).toString()).doesNotContain("비밀 명제", "없는 단서", "statement", "truth", "basis");
+        assertThat(facts.getFactList(owner.sid(), owner.principal(), story, 1, 1, "F19", true).items())
+                .extracting(StoryFactService.FactKey::code).containsExactly("F20");
+        assertThat(facts.getFactList(owner.sid(), owner.principal(), story, 1, 100, null, true).items()).hasSize(21);
+        for (int size : new int[] {0, 101})
+            denied("INVALID_REQUEST", () -> facts.getFactList(owner.sid(), owner.principal(), story, 1,
+                    size, null, null));
+        denied("INVALID_REQUEST", () -> facts.getFactList(owner.sid(), owner.principal(), story, 1,
+                1, "lower", null));
+        assertThat(facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "F00", "21", false,
+                UUID.randomUUID()).editRev()).isEqualTo("22");
+        assertThat(facts.getFactList(owner.sid(), owner.principal(), story, 1, null, null, false).items())
+                .extracting(StoryFactService.FactKey::code).containsExactly("F00");
+        assertThat(facts.getFactList(owner.sid(), owner.principal(), story, 1, null, null, true).items()).hasSize(20);
+        denied("ITEM_EXISTS", () -> facts.createFact(owner.sid(), owner.principal(), story, 1, "22",
+                mapper.createObjectNode().put("code", "F00"), UUID.randomUUID()));
+        denied("STATE_CONFLICT", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1, "F00", "22",
+                mapper.createObjectNode().putNull("statement"), UUID.randomUUID()));
+        assertThat(facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "F00", "22", true,
+                UUID.randomUUID()).editRev()).isEqualTo("23");
+    }
+
+    /** 무변경과 오래된 수정번호는 시각·부모 번호·업무 감사를 보존한다. */
+    @Test
+    void factsNoopTimestampRevisionAndStaleWrites() {
+        Fixture owner = account(true, false, (byte) 126);
+        String story = create(owner, "사실 무변경");
+        facts.createFact(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        var before = factState(story, "A");
+        assertThat(facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", "1",
+                mapper.createObjectNode().putNull("statement"), UUID.randomUUID()).changed()).isFalse();
+        assertThat(facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "A", "1", true,
+                UUID.randomUUID()).changed()).isFalse();
+        assertThat(factState(story, "A")).isEqualTo(before);
+        denied("EDIT_CONFLICT", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", "0",
+                mapper.createObjectNode().putNull("statement"), UUID.randomUUID()));
+        denied("EDIT_CONFLICT", () -> facts.updateFactActive(owner.sid(), owner.principal(), story, 1,
+                "A", "0", true, UUID.randomUUID()));
+        assertThat(factState(story, "A")).isEqualTo(before);
+        facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "A", "1", false, UUID.randomUUID());
+        before = factState(story, "A");
+        assertThat(facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "A", "2", false,
+                UUID.randomUUID()).changed()).isFalse();
+        assertThat(factState(story, "A")).isEqualTo(before);
+        denied("EDIT_CONFLICT", () -> facts.updateFactActive(owner.sid(), owner.principal(), story, 1,
+                "A", "1", false, UUID.randomUUID()));
+        assertThat(factState(story, "A")).isEqualTo(before);
+        facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "A", "2", true, UUID.randomUUID());
+        before = factState(story, "A");
+        assertThat(facts.updateFactActive(owner.sid(), owner.principal(), story, 1, "A", "3", true,
+                UUID.randomUUID()).changed()).isFalse();
+        assertThat(factState(story, "A")).isEqualTo(before);
+    }
+
+    /** 단서 코드는 근거 설명에 쓰인 문서 문자열일 뿐 단서 삭제·복원을 막지 않는다. */
+    @Test
+    void factsDocumentaryBasisDoesNotCreateClueReference() {
+        Fixture owner = account(true, false, (byte) 127);
+        String story = create(owner, "근거 설명");
+        String basis = "MISSING_CLUE, REAL_CLUE 근거\n연결 설명";
+        facts.createFact(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "F").put("basis", basis), UUID.randomUUID());
+        clue(owner, story, "REAL_CLUE", 1);
+        assertThat(clues.updateClueActive(owner.sid(), owner.principal(), story, 1, "REAL_CLUE", "2", false,
+                UUID.randomUUID()).editRev()).isEqualTo("3");
+        assertThat(facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "F", UUID.randomUUID())
+                .item().basis()).isEqualTo(basis);
+        clues.updateClueActive(owner.sid(), owner.principal(), story, 1, "REAL_CLUE", "3", true, UUID.randomUUID());
+        assertThat(facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "F", UUID.randomUUID())
+                .item().basis()).isEqualTo(basis);
+        assertThat(db.queryForObject("SELECT basis FROM story_fact f JOIN story_version v ON v.id=f.version_id "
+                + "WHERE v.story_id=? AND f.code='F'", String.class, storyId(story))).isEqualTo(basis);
+    }
+
+    /** 관계 및 자격 회수는 즉시 반영하고 비초안은 실제 사본과 결속해 차단한다. */
+    @Test
+    void factsPermissionsParentStateAndRevocation() {
+        Fixture owner = account(true, false, (byte) -128);
+        Fixture editor = account(false, false, (byte) -127);
+        Fixture reviewer = account(false, false, (byte) -126);
+        Fixture publisher = account(false, false, (byte) -125);
+        Fixture manager = account(false, true, (byte) -124);
+        String story = create(owner, "사실 권한");
+        facts.createFact(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A").put("basis", "비공개"), UUID.randomUUID());
+        db.update("UPDATE admin_account SET can_review=true WHERE id=?", reviewer.principal().accountId());
+        db.update("UPDATE admin_account SET can_publish=true WHERE id=?", publisher.principal().accountId());
+        for (var relation : java.util.List.of(java.util.Map.entry(editor, "EDIT"),
+                java.util.Map.entry(reviewer, "REVIEW"), java.util.Map.entry(publisher, "PUBLISH"))) {
+            db.update("INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES (?,?,?,?)",
+                    storyId(story), relation.getKey().principal().accountId(), relation.getValue(),
+                    owner.principal().accountId());
+            assertThat(facts.getFactDetail(relation.getKey().sid(), relation.getKey().principal(), story, 1,
+                    "A", UUID.randomUUID()).item().basis()).isEqualTo("비공개");
+        }
+        denied("NOT_FOUND", () -> facts.getFactDetail(manager.sid(), manager.principal(), story, 1,
+                "A", UUID.randomUUID()));
+        for (Fixture reader : java.util.List.of(reviewer, publisher)) {
+            denied("FORBIDDEN", () -> facts.createFact(reader.sid(), reader.principal(), story, 1, "1",
+                    mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+            denied("FORBIDDEN", () -> facts.updateFactActive(reader.sid(), reader.principal(), story, 1,
+                    "A", "1", false, UUID.randomUUID()));
+        }
+        assertThat(facts.updateFact(editor.sid(), editor.principal(), story, 1, "A", "1",
+                mapper.createObjectNode().put("truth", "FALSE"), UUID.randomUUID()).editRev()).isEqualTo("2");
+        db.update("UPDATE admin_account SET can_review=false WHERE id=?", reviewer.principal().accountId());
+        denied("NOT_FOUND", () -> facts.getFactDetail(reviewer.sid(), reviewer.principal(), story, 1,
+                "A", UUID.randomUUID()));
+        db.update("UPDATE story_access SET active_yn=false WHERE story_id=? AND admin_id=?",
+                storyId(story), editor.principal().accountId());
+        denied("NOT_FOUND", () -> facts.getFactList(editor.sid(), editor.principal(), story, 1,
+                null, null, null));
+        db.update("UPDATE story_version SET active_yn=false WHERE story_id=?", storyId(story));
+        denied("NOT_FOUND", () -> facts.getFactDetail(publisher.sid(), publisher.principal(), story, 1,
+                "A", UUID.randomUUID()));
+        assertThat(facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID())
+                .item().truth()).isEqualTo("FALSE");
+        denied("STATE_CONFLICT", () -> facts.updateFactActive(owner.sid(), owner.principal(), story, 1,
+                "A", "2", false, UUID.randomUUID()));
+        long version = db.queryForObject("SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(story));
+        long snapshot = db.queryForObject("INSERT INTO review_snapshot(version_id,edit_rev,payload,request_key,created_by) "
+                + "VALUES (?,2,'{}'::jsonb,?,?) RETURNING id", Long.class,
+                version, UUID.randomUUID(), owner.principal().accountId());
+        for (String state : java.util.List.of("REVIEW", "READY", "PUBLISHED")) {
+            db.update("UPDATE story_version SET active_yn=true,status=?,current_snapshot_id=? WHERE id=?",
+                    state, snapshot, version);
+            denied("STATE_CONFLICT", () -> facts.createFact(owner.sid(), owner.principal(), story, 1, "2",
+                    mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+            denied("STATE_CONFLICT", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1, "A", "2",
+                    mapper.createObjectNode().putNull("basis"), UUID.randomUUID()));
+            denied("STATE_CONFLICT", () -> facts.updateFactActive(owner.sid(), owner.principal(), story, 1,
+                    "A", "2", false, UUID.randomUUID()));
+        }
+        db.update("UPDATE story_version SET status='DRAFT',current_snapshot_id=null WHERE id=?", version);
+        db.update("UPDATE admin_credential SET auth_rev=auth_rev+1 WHERE account_id=?", owner.principal().accountId());
+        denied("AUTH_REQUIRED", () -> facts.getFactDetail(owner.sid(), owner.principal(), story, 1,
+                "A", UUID.randomUUID()));
+    }
+
+    /** 읽기 및 모든 쓰기 감사 장애가 원고와 부모 수정번호를 함께 롤백한다. */
+    @Test
+    void factsMandatoryAuditFailureRollsBackAllWrites() {
+        Fixture owner = account(true, false, (byte) -123);
+        String story = create(owner, "사실 감사");
+        facts.createFact(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A").put("statement", "원본"), UUID.randomUUID());
+        var original = factState(story, "A");
+        db.execute("CREATE FUNCTION fail_fact_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.detail->>'resource'='facts' THEN RAISE EXCEPTION 'synthetic fact audit outage'; "
+                + "END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_fact_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_fact_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> facts.getFactDetail(owner.sid(), owner.principal(), story, 1,
+                    "A", UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> facts.createFact(owner.sid(), owner.principal(), story, 1, "1",
+                    mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> facts.updateFact(owner.sid(), owner.principal(), story, 1,
+                    "A", "1", mapper.createObjectNode().put("statement", "실패 원고"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> facts.updateFactActive(owner.sid(), owner.principal(), story, 1,
+                    "A", "1", false, UUID.randomUUID()));
+            assertThat(factState(story, "A")).isEqualTo(original);
+            assertThat(db.queryForObject("SELECT count(*) FROM story_fact f JOIN story_version v ON v.id=f.version_id "
+                    + "WHERE v.story_id=? AND f.code='B'", Long.class, storyId(story))).isZero();
+        } finally {
+            db.execute("DROP TRIGGER fail_fact_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_fact_audit()");
+        }
+        assertThat(facts.getFactDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID())
+                .item().statement()).isEqualTo("원본");
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? "
+                + "AND detail::text LIKE '%원본%'", Long.class, storyId(story))).isZero();
+    }
+
+    /** 고정 HTTP 경로의 엄격 JSON·바이트 상한·감사 경로와 원고 비노출을 확인한다. */
+    @Test
+    void factsHttpFixedRoutesStrictBodyAndAccessHistory() throws Exception {
+        Fixture owner = account(true, false, (byte) -122);
+        String story = create(owner, "HTTP 사실 원장");
+        String base = "/admin/api/stories/" + story + "/versions/1/facts";
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(owner);
+        String first = "{\"expectedRev\":\"0\",\"item\":{\"code\":\"A\",\"statement\":\"비밀 명제\","
+                + "\"truth\":\"MISREAD\",\"basis\":\"합성 근거\"}}";
+        mvc.perform(post(base).secure(true).cookie(session).contentType("application/json").content(first))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(base).secure(true)).andExpect(status().isUnauthorized());
+        mvc.perform(write(post(base), session, csrf, token, first)).andExpect(status().isCreated())
+                .andDo(r -> {
+                    assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+                    assertThat(r.getResponse().getContentAsString()).doesNotContain("비밀 명제", "합성 근거");
+                });
+        long reads = auditCount(story, "CONTENT_READ");
+        mvc.perform(get(base + "?size=1&afterKey=0").secure(true).cookie(session)).andExpect(status().isOk())
+                .andDo(r -> {
+                    assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+                    assertThat(mapper.readTree(r.getResponse().getContentAsString()).path("items").get(0).size())
+                            .isEqualTo(3);
+                    assertThat(r.getResponse().getContentAsString()).doesNotContain("statement", "truth", "basis");
+                });
+        assertThat(auditCount(story, "CONTENT_READ")).isEqualTo(reads);
+        mvc.perform(get(base + "/A").secure(true).cookie(session)).andExpect(status().isOk())
+                .andDo(r -> {
+                    assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+                    assertThat(mapper.readTree(r.getResponse().getContentAsString())
+                            .path("item").path("statement").asText()).isEqualTo("비밀 명제");
+                });
+        assertThat(auditCount(story, "CONTENT_READ")).isEqualTo(reads + 1);
+        mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"),
+                session, csrf, token, "{\"expectedRev\":\"1\",\"changes\":{\"truth\":null,\"basis\":\"\"}}"))
+                .andExpect(status().isOk());
+        mvc.perform(write(post(base + "/A/deactivate"), session, csrf, token, "{\"expectedRev\":\"2\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(write(post(base + "/A/reactivate"), session, csrf, token, "{\"expectedRev\":\"3\"}"))
+                .andExpect(status().isOk());
+        String second = "{\"expectedRev\":\"4\",\"item\":{\"code\":\"B\"}}";
+        mvc.perform(write(post(base), session, csrf, token, "{}")
+                .content(("\uFEFF" + second).getBytes(java.nio.charset.StandardCharsets.UTF_16LE)))
+                .andExpect(status().isBadRequest());
+        mvc.perform(write(post(base), session, csrf, token, "{}")
+                .content(new byte[] {'{', '"', (byte) 0xc3, (byte) 0x28, '"', '}'}))
+                .andExpect(status().isBadRequest());
+        for (String invalid : java.util.List.of(
+                "{\"expectedRev\":\"4\",\"expectedRev\":\"4\",\"item\":{\"code\":\"B\"}}",
+                "{\"expectedRev\":\"4\",\"item\":{\"code\":\"B\",\"code\":\"C\"}}",
+                "{\"expectedRev\":\"4\",\"item\":{\"code\":\"B\",\"extra\":1}}",
+                "{\"expectedRev\":\"4\",\"unknown\":1,\"item\":{\"code\":\"B\"}}")) {
+            mvc.perform(write(post(base), session, csrf, token, invalid)).andExpect(status().isBadRequest());
+        }
+        mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"),
+                session, csrf, token, "{\"expectedRev\":\"4\",\"changes\":{\"truth\":true}}"))
+                .andExpect(status().isUnprocessableEntity());
+        mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"),
+                session, csrf, token, "{\"expectedRev\":\"4\",\"changes\":{\"unknown\":1}}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(write(post(base + "/A/deactivate"), session, csrf, token,
+                "{\"expectedRev\":\"4\",\"unknown\":1}")).andExpect(status().isBadRequest());
+        mvc.perform(write(post(base), session, csrf, token, second + " ".repeat(512 * 1024 - second.length())))
+                .andExpect(status().isCreated());
+        mvc.perform(write(post(base), session, csrf, token, second + " ".repeat(512 * 1024 - second.length() + 1)))
+                .andExpect(status().isPayloadTooLarge());
+        String state = "{\"expectedRev\":\"5\"}";
+        mvc.perform(write(post(base + "/B/deactivate"), session, csrf, token,
+                state + " ".repeat(8192 - state.length()))).andExpect(status().isOk());
+        state = "{\"expectedRev\":\"6\"}";
+        mvc.perform(write(post(base + "/B/reactivate"), session, csrf, token,
+                state + " ".repeat(8192 - state.length() + 1))).andExpect(status().isPayloadTooLarge());
+        assertThat(versionRev(story)).isEqualTo(6);
+        for (String suffix : java.util.List.of("facts", "facts/{itemKey}",
+                "facts/{itemKey}/deactivate", "facts/{itemKey}/reactivate")) {
+            assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND route=?",
+                    Long.class, owner.principal().accountKey(),
+                    "/admin/api/stories/{storyCode}/versions/{versionNo}/" + suffix)).isPositive();
+        }
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND "
+                + "(route LIKE ? OR route LIKE '%비밀%' OR route LIKE '%afterKey%')",
+                Long.class, owner.principal().accountKey(), "%" + story + "%")).isZero();
+    }
+
+    /** 전체 자식 원고·부모 시각·수정번호·쓰기 감사를 비교하고 읽기 감사는 제외한다. */
+    private java.util.Map<String, Object> factState(String story, String key) {
+        return db.queryForMap("SELECT v.edit_rev,v.updated_at,f.updated_at AS fact_time,f.active_yn,f.statement,f.truth,f.basis,"
+                + "(SELECT count(*) FROM story_audit a WHERE a.version_id=v.id AND a.action LIKE 'ITEM_%') AS audits "
+                + "FROM story_version v JOIN story_fact f ON f.version_id=v.id WHERE v.story_id=? AND f.code=?",
+                storyId(story), key);
     }
 
     /** 합성 일반 세션을 제품 어댑터의 보안 쿠키로 변환한다. */

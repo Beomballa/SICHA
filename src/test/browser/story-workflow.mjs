@@ -8,6 +8,7 @@ import { exerciseRolePairs } from "./story-role-pair.mjs";
 import { exerciseClueAssignments } from "./story-clue-assignment.mjs";
 import { exerciseHints } from "./story-hints.mjs";
 import { exerciseEvents } from "./story-events.mjs";
+import { exerciseFacts } from "./story-facts.mjs";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -923,6 +924,17 @@ try {
     loseResponse,
   });
   await exerciseEvents({
+    page,
+    apiPath,
+    baseUrl: fixture.url,
+    api: childApi,
+    edit,
+    save,
+    notice,
+    layout,
+    loseResponse,
+  });
+  await exerciseFacts({
     page,
     apiPath,
     baseUrl: fixture.url,

@@ -14,6 +14,7 @@ import com.reasoning.common.story.service.StoryRoleService;
 import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryHintService;
 import com.reasoning.common.story.service.StoryEventService;
+import com.reasoning.common.story.service.StoryFactService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -48,10 +49,11 @@ public final class StoryController {
     private final StoryClueService clues;
     private final StoryHintService hints;
     private final StoryEventService events;
+    private final StoryFactService facts;
 
     public StoryController(StoryService stories, AdminSessionAdapter sessions, ObjectMapper mapper,
             StoryPersonService persons, StoryRoleService roles, StoryClueService clues, StoryHintService hints,
-            StoryEventService events) {
+            StoryEventService events, StoryFactService facts) {
         this.stories = stories;
         this.sessions = sessions;
         this.mapper = mapper;
@@ -60,6 +62,7 @@ public final class StoryController {
         this.clues = clues;
         this.hints = hints;
         this.events = events;
+        this.facts = facts;
     }
 
     /**
@@ -596,6 +599,91 @@ public final class StoryController {
         CurrentSession actor = current(request);
         JsonNode payload = body(request, 8192, Set.of("expectedRev"));
         return ok(events.updateEventActive(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
+    }
+
+    /**
+     * 사실 원고를 제외하고 ASCII 키·상태·시각을 조회한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 양의 버전 번호
+     * @param size 1~100이며 생략 시 20
+     * @param afterKey 마지막 사실 코드 또는 null
+     * @param activeYn null이면 활성 사실만 선택
+     * @param request 현재 인증된 세션 요청
+     * @return 부모 수정번호와 키 페이지
+     */
+    @GetMapping("/{storyCode}/versions/{versionNo}/facts")
+    public ResponseEntity<?> getFactList(@PathVariable String storyCode, @PathVariable int versionNo,
+            @RequestParam(required = false) Integer size, @RequestParam(required = false) String afterKey,
+            @RequestParam(required = false) Boolean activeYn, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(facts.getFactList(actor.id(), actor.principal(), storyCode, versionNo, size, afterKey, activeYn));
+    }
+
+    /**
+     * 필수 조회 감사를 확정한 뒤 사실 원고를 반환한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 양의 버전 번호
+     * @param itemKey ASCII 사실 코드
+     * @param request 현재 세션과 서버 요청 ID를 가진 요청
+     * @return 부모 수정번호와 단건 원고
+     */
+    @GetMapping("/{storyCode}/versions/{versionNo}/facts/{itemKey}")
+    public ResponseEntity<?> getFactDetail(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(facts.getFactDetail(actor.id(), actor.principal(), storyCode, versionNo, itemKey, requestId(request)));
+    }
+
+    /**
+     * 필수 코드와 선택적인 사실 원고를 생성한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 활성 DRAFT 버전의 양의 번호
+     * @param request expectedRev·item만 포함하는 최대 512 KiB 엄격 UTF-8 JSON
+     * @return 201과 생성 키·확정 수정번호, 원고는 반환하지 않는다
+     */
+    @PostMapping("/{storyCode}/versions/{versionNo}/facts")
+    public ResponseEntity<?> createFact(@PathVariable String storyCode, @PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, Set.of("expectedRev", "item"));
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .body(facts.createFact(actor.id(), actor.principal(), storyCode, versionNo,
+                        text(payload, "expectedRev"), payload.get("item"), requestId(request)));
+    }
+
+    /**
+     * 사실 코드를 유지하며 명시된 원고 필드만 수정한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 활성 DRAFT 버전의 양의 번호
+     * @param itemKey 변경 불가능한 사실 코드
+     * @param request expectedRev·changes만 포함하는 최대 512 KiB 엄격 UTF-8 JSON
+     * @return 원고 없는 변경 여부와 확정 수정번호
+     */
+    @PatchMapping("/{storyCode}/versions/{versionNo}/facts/{itemKey}")
+    public ResponseEntity<?> updateFact(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, PATCH_FIELDS);
+        return ok(facts.updateFact(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), payload.get("changes"), requestId(request)));
+    }
+
+    /**
+     * 같은 사실 행을 명시적으로 비활성화하거나 복원한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 활성 DRAFT 버전의 양의 번호
+     * @param itemKey 예약된 ASCII 사실 코드
+     * @param operation deactivate 또는 reactivate
+     * @param request expectedRev만 포함하는 최대 8 KiB 엄격 UTF-8 JSON
+     * @return 원고 없는 상태 변경 여부와 확정 수정번호
+     */
+    @PostMapping("/{storyCode}/versions/{versionNo}/facts/{itemKey}/{operation:deactivate|reactivate}")
+    public ResponseEntity<?> updateFactActive(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, @PathVariable String operation, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedRev"));
+        return ok(facts.updateFactActive(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
                 text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
     }
 
