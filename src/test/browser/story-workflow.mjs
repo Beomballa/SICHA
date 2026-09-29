@@ -11,6 +11,7 @@ import { exerciseEvents } from "./story-events.mjs";
 import { exerciseFacts } from "./story-facts.mjs";
 import { exerciseRubrics } from "./story-rubrics.mjs";
 import { exerciseGradeSamples } from "./story-grade-samples.mjs";
+import { exerciseStoryAccess } from "./story-access.mjs";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -968,6 +969,14 @@ try {
     notice,
     layout,
     loseResponse,
+  });
+
+  await exerciseStoryAccess({
+    page,
+    baseUrl: fixture.url,
+    api: childApi,
+    notice,
+    layout,
   });
 
   await page.goto(`${fixture.url}/admin/stories`);

@@ -296,6 +296,11 @@
   let childEditing = false;
   let childRequest = 0;
   let childAfter;
+  let viewer;
+  let selectedStory;
+  let manageSnapshot;
+  let manageAfterKey;
+  let manageEpoch = 0;
 
   /** 원문을 넣지 않은 상태 문구와 오류 강조 여부를 표시한다. */
   function status(text, error = false) {
@@ -313,6 +318,8 @@
     ++childRequest;
     csrf = undefined;
     createKey = createTitle = undefined;
+    selectedStory = manageSnapshot = viewer = undefined;
+    ++manageEpoch;
     document.getElementById("create-form")?.reset();
     document.getElementById("create-check")?.setAttribute("hidden", "");
     if (editor) {
@@ -327,12 +334,15 @@
       document.getElementById("create-jump").hidden = true;
       document.getElementById("filter-form").hidden = true;
       document.getElementById("next").hidden = true;
+      document.getElementById("manage-panel").hidden = true;
     }
     status(text + (code === 401 ? " 로그인 화면으로 이동하세요." : ""), true);
   }
 
   /** HTTP 실패를 자동 재전송 없는 고정 안내 문구로 변환한다. */
   function errorMessage(error) {
+    if (error.code === "REAUTH_REQUIRED")
+      return "최근 재인증이 필요합니다. 입력은 유지되며 재인증 뒤 현재 상태를 다시 조회하고 직접 실행하세요.";
     if (error.code === "REFERENCE_IN_USE")
       return "참조 중인 자료입니다. 범인·역할 조합·단서 배정 등 활성 연결을 먼저 직접 해제하세요.";
     if (error.code === "ITEM_EXISTS")
@@ -396,6 +406,7 @@
       if (missing && method === "GET" && response.status === 404) return null;
       if (
         [401, 403, 404].includes(response.status) &&
+        data?.code !== "REAUTH_REQUIRED" &&
         !(
           method === "POST" &&
           path === "" &&
@@ -1804,6 +1815,227 @@
     }
   }
 
+  /** 인증된 소유자·운영자의 관계 목록을 읽고 복원 영향의 전체 수를 명확히 표시한다. */
+  async function loadAccess(append = false) {
+    if (!selectedStory) return;
+    const epoch = manageEpoch;
+    const code = selectedStory.storyCode;
+    const after = append ? manageAfterKey : undefined;
+    const query = new URLSearchParams({ size: "20" });
+    if (after) query.set("afterKey", after);
+    const data = await request(
+      "GET",
+      `/${encodeURIComponent(code)}/access?${query}`,
+    );
+    if (epoch !== manageEpoch) return;
+    if (append && manageSnapshot && data.storyRev !== manageSnapshot.storyRev) {
+      manageSnapshot = undefined;
+      manageAfterKey = undefined;
+      document.getElementById("state-impact-reviewed").checked = false;
+      document.getElementById("access-next").hidden = true;
+      status(
+        "관계 목록을 읽는 동안 사건 수정번호가 바뀌었습니다. 현재 관계를 처음부터 다시 조회하세요.",
+        true,
+      );
+      return;
+    }
+    manageSnapshot = data;
+    if (!append) {
+      document.getElementById("access-rows").replaceChildren();
+      document.getElementById("state-impact-reviewed").checked = false;
+    }
+    document.getElementById("manage-code").textContent = data.storyCode;
+    document.getElementById("manage-summary").textContent =
+      `사건 수정번호 ${data.storyRev} · ${data.activeYn ? "활성" : "비활성"} · 소유자 ${data.ownerAccountKey}`;
+    document.getElementById("access-impact").textContent =
+      `활성 접근 관계 ${data.activeRelationCount}건. 비활성 관계도 아래 목록에 표시되며, 복원하면 남은 활성 관계가 다시 접근할 수 있습니다.`;
+    const rows = document.getElementById("access-rows");
+    for (const item of data.items) {
+      const entry = document.createElement("li");
+      entry.textContent = `${item.accountKey} · ${item.permission} · ${item.activeYn ? "활성" : "회수됨"}`;
+      rows.append(entry);
+    }
+    if (!rows.childElementCount) {
+      const empty = document.createElement("li");
+      empty.textContent = "기록된 접근 관계가 없습니다.";
+      rows.append(empty);
+    }
+    manageAfterKey = data.nextAfterKey;
+    document.getElementById("access-next").hidden = !data.hasNext;
+    const owner = viewer?.accountKey === data.ownerAccountKey;
+    const state = document.getElementById("story-state-actions");
+    state.hidden =
+      !owner ||
+      selectedStory.versionNo !== 1 ||
+      selectedStory.status !== "DRAFT" ||
+      !selectedStory.versionActiveYn;
+    document.getElementById("state-change").textContent = data.activeYn
+      ? "사건 논리 삭제"
+      : "사건 복원";
+    const permission = document.getElementById("access-permission");
+    for (const option of permission.options)
+      option.disabled =
+        option.value === "EDIT"
+          ? !owner
+          : !viewer?.permissions?.includes("MANAGE");
+    if (permission.selectedOptions[0]?.disabled)
+      permission.value = owner ? "EDIT" : "REVIEW";
+    document.getElementById("manage-panel").hidden = false;
+    if (!append) document.getElementById("manage-heading").focus();
+  }
+
+  /** 목록 행의 현재 상태를 직접 조회하며 쓰기 충돌 뒤 자동 재전송하지 않는다. */
+  async function openManage(item) {
+    selectedStory = item;
+    manageSnapshot = undefined;
+    manageAfterKey = undefined;
+    ++manageEpoch;
+    document.getElementById("manage-panel").hidden = true;
+    document.getElementById("manage-result").textContent = "";
+    try {
+      await loadAccess();
+    } catch (error) {
+      if (error.code === "REAUTH_REQUIRED")
+        document.getElementById("story-reauth").showModal();
+      status(errorMessage(error), true);
+    }
+  }
+
+  /** 현재 수정번호와 검토한 관계 영향을 이용해 단일 사건 상태 변경을 명시적으로 제출한다. */
+  async function changeStoryState(button) {
+    if (!selectedStory || !manageSnapshot || button.disabled) return;
+    const input = document.getElementById("state-reference");
+    if (!input.reportValidity()) return;
+    const active = manageSnapshot.activeYn;
+    if (!active && !document.getElementById("state-impact-reviewed").checked) {
+      status("복원 전 남은 활성 관계 수와 목록을 확인하세요.", true);
+      return;
+    }
+    if (
+      !confirm(
+        active
+          ? "최초 초안 사건만 논리 삭제합니까? 원고와 관계는 유지되며 자동 재전송하지 않습니다."
+          : `활성 접근 관계 ${manageSnapshot.activeRelationCount}건의 접근이 다시 가능해집니다. 사건을 복원합니까?`,
+      )
+    )
+      return;
+    button.disabled = true;
+    const operation = active ? "deactivate" : "reactivate";
+    try {
+      const result = await request(
+        "POST",
+        `/${encodeURIComponent(selectedStory.storyCode)}/${operation}`,
+        {
+          expectedStoryRev: manageSnapshot.storyRev,
+          expectedRev: selectedStory.editRev,
+          reasonCode: active ? "DRAFT_WITHDRAWN" : "WORK_RESUMED",
+          verificationRef: input.value,
+        },
+      );
+      input.value = "";
+      document.getElementById("manage-panel").hidden = true;
+      selectedStory = manageSnapshot = undefined;
+      ++manageEpoch;
+      await loadList();
+      status(
+        `현재 사건 ${result.activeYn ? "복원" : "논리 삭제"} ${result.changed ? "확정" : "무변경"} · 사건 수정번호 ${result.storyRev}.`,
+      );
+    } catch (error) {
+      if (error.code === "REAUTH_REQUIRED")
+        document.getElementById("story-reauth").showModal();
+      document.getElementById("manage-result").textContent =
+        `${errorMessage(error)} 현재 사건·관계를 다시 조회한 뒤 직접 결정하세요.`;
+      status(errorMessage(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  /** 관계 변경은 서버 현재 사건 수정번호 한 번만 사용하고 결과가 불확실하면 조회로 멈춘다. */
+  async function changeAccess(form) {
+    if (!selectedStory || !manageSnapshot) return;
+    const button = document.getElementById("access-submit");
+    if (button.disabled) return;
+    const input = Object.fromEntries(new FormData(form));
+    const operation = input.operation;
+    const reason = input.reasonCode;
+    if (operation === "grant" && reason !== "ASSIGNMENT_CHANGE") {
+      status("부여 사유는 담당 변경만 선택할 수 있습니다.", true);
+      return;
+    }
+    if (
+      !confirm(
+        `${input.permission} 관계를 ${operation === "grant" ? "부여" : "회수"}합니까? 자동 재전송하지 않습니다.`,
+      )
+    )
+      return;
+    button.disabled = true;
+    try {
+      const result = await request(
+        "POST",
+        `/${encodeURIComponent(selectedStory.storyCode)}/access/${operation}`,
+        {
+          expectedStoryRev: manageSnapshot.storyRev,
+          accountKey: input.accountKey,
+          permission: input.permission,
+          reasonCode: reason,
+          verificationRef: input.verificationRef,
+        },
+      );
+      form.elements.verificationRef.value = "";
+      await loadAccess();
+      const message =
+        result.auditStatus === "UNCONFIRMED"
+          ? "접근 차단은 확정됐으나 업무 감사가 미확정입니다. 운영 점검이 필요합니다."
+          : result.changed
+            ? `관계 변경 확정 · 사건 수정번호 ${result.storyRev}.`
+            : "관계는 이미 요청한 상태입니다. 변경하지 않았습니다.";
+      document.getElementById("manage-result").textContent = message;
+      status(message, result.auditStatus === "UNCONFIRMED");
+    } catch (error) {
+      if (error.code === "REAUTH_REQUIRED")
+        document.getElementById("story-reauth").showModal();
+      document.getElementById("manage-result").textContent =
+        `${errorMessage(error)} 현재 관계를 다시 조회하고 직접 결정하세요.`;
+      status(errorMessage(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  /** 정확한 인증 입력만 별도 인증 API에 보내고 이전 변경 요청을 재실행하지 않는다. */
+  async function reauthenticate(form) {
+    if (!csrf) {
+      const response = await fetch("/admin/api/auth/csrf", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw { status: response.status };
+      csrf = await response.json();
+    }
+    const response = await fetch("/admin/api/auth/reauth", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        [csrf.headerName]: csrf.token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        password: form.elements.password.value,
+        totp: form.elements.totp.value,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw { status: response.status, code: payload?.code };
+    csrf = undefined;
+    form.reset();
+    document.getElementById("story-reauth").close();
+    status(
+      "재인증했습니다. 현재 사건·관계를 다시 조회한 뒤 변경을 직접 실행하세요.",
+    );
+  }
+
   /** 정확한 코드와 활성 조건으로 ID 역순 커서 목록 한 페이지를 조회한다. */
   async function loadList(append = false) {
     const current = generation;
@@ -1819,6 +2051,7 @@
       for (const item of data.items) {
         const row = document.createElement("article");
         row.className = "story-row";
+        row.dataset.ownerKey = item.ownerAccountKey;
         const heading = document.createElement("h3");
         const link = document.createElement("a");
         link.href = `/admin/stories/${encodeURIComponent(item.storyCode)}/versions/${item.versionNo}`;
@@ -1849,6 +2082,15 @@
         summary.className = "muted";
         summary.textContent = `난이도 ${item.difficulty ?? "미정"} · 수정번호 ${item.editRev} · ${displayTime(item.updatedAt)}`;
         row.append(badges, heading, code, summary);
+        const manage = document.createElement("button");
+        manage.type = "button";
+        manage.className = "secondary manage-open";
+        manage.textContent = "접근·상태 관리";
+        manage.hidden =
+          item.ownerAccountKey !== viewer?.accountKey &&
+          !viewer?.permissions?.includes("MANAGE");
+        manage.addEventListener("click", () => openManage(item));
+        row.append(manage);
         rows.append(row);
       }
       if (!rows.childElementCount) {
@@ -1961,6 +2203,13 @@
       }
       if (!response.ok) throw { status: response.status };
       const me = await response.json();
+      viewer = me;
+      for (const button of document.querySelectorAll(".manage-open")) {
+        const row = button.closest(".story-row");
+        const owner = row.dataset.ownerKey;
+        button.hidden =
+          owner !== me.accountKey && !me.permissions?.includes("MANAGE");
+      }
       const allowed = me.permissions?.includes("CREATE") === true;
       document.getElementById("create-panel").hidden = !allowed;
       document.getElementById("create-jump").hidden = !allowed;
@@ -2066,6 +2315,96 @@
     });
     loadDetail().then(navigation).catch(detailFailure);
   } else {
+    document
+      .getElementById("manage-refresh")
+      .addEventListener("click", async () => {
+        if (!selectedStory) return;
+        try {
+          const state = await request(
+            "GET",
+            `?${new URLSearchParams({ code: selectedStory.storyCode, activeYn: String(manageSnapshot?.activeYn ?? selectedStory.activeYn) })}`,
+          );
+          selectedStory = state.items[0];
+          if (!selectedStory) {
+            document.getElementById("manage-panel").hidden = true;
+            status(
+              "사건 상태를 확인할 수 없습니다. 목록을 다시 조회하세요.",
+              true,
+            );
+            return;
+          }
+          await loadAccess();
+          document.getElementById("manage-result").textContent =
+            "현재 사건과 접근 관계를 조회했습니다. 입력을 확인한 뒤 직접 실행하세요.";
+        } catch (error) {
+          if (error.code === "REAUTH_REQUIRED")
+            document.getElementById("story-reauth").showModal();
+          status(errorMessage(error), true);
+        }
+      });
+    document.getElementById("manage-close").addEventListener("click", () => {
+      document.getElementById("manage-panel").hidden = true;
+      selectedStory = manageSnapshot = undefined;
+      ++manageEpoch;
+    });
+    document
+      .getElementById("access-next")
+      .addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await loadAccess(true);
+        } catch (error) {
+          status(errorMessage(error), true);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    document
+      .getElementById("access-operation")
+      .addEventListener("change", (event) => {
+        if (event.currentTarget.value === "grant")
+          document.getElementById("access-reason").value = "ASSIGNMENT_CHANGE";
+        for (const option of document.getElementById("access-reason").options)
+          option.disabled =
+            event.currentTarget.value === "grant" &&
+            option.value !== "ASSIGNMENT_CHANGE";
+      });
+    document
+      .getElementById("access-form")
+      .addEventListener("submit", (event) => {
+        event.preventDefault();
+        changeAccess(event.currentTarget);
+      });
+    document
+      .getElementById("state-change")
+      .addEventListener("click", (event) => {
+        changeStoryState(event.currentTarget);
+      });
+    document
+      .getElementById("story-reauth-close")
+      .addEventListener("click", () => {
+        document.getElementById("story-reauth").close();
+      });
+    document.getElementById("story-reauth").addEventListener("close", () => {
+      document.getElementById("story-reauth-form").reset();
+      document.getElementById("story-reauth-error").textContent = "";
+    });
+    document
+      .getElementById("story-reauth-form")
+      .addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('[type="submit"]');
+        button.disabled = true;
+        try {
+          await reauthenticate(event.currentTarget);
+        } catch (error) {
+          document.getElementById("story-reauth-error").textContent =
+            errorMessage(error);
+        } finally {
+          button.disabled = false;
+        }
+      });
     document
       .getElementById("filter-form")
       .addEventListener("submit", (event) => {

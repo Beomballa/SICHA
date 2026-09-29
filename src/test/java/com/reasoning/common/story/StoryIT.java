@@ -25,6 +25,7 @@ import com.reasoning.common.story.service.StoryFactService;
 import com.reasoning.common.story.service.StoryRubricService;
 import com.reasoning.common.story.service.StoryRubricClueService;
 import com.reasoning.common.story.service.StoryGradeSampleService;
+import com.reasoning.common.story.service.StoryAccessService;
 import com.reasoning.common.story.entity.QStory;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -82,6 +83,7 @@ class StoryIT extends DatabaseContextTest {
     @Autowired StoryRubricService rubrics;
     @Autowired StoryRubricClueService rubricClues;
     @Autowired StoryGradeSampleService gradeSamples;
+    @Autowired StoryAccessService access;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired EntityManager entityManager;
@@ -2481,6 +2483,314 @@ class StoryIT extends DatabaseContextTest {
         var sample = gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID());
         assertThat(sample.item().inputData().path("formatNo").asInt()).isEqualTo(1);
         assertThat(sample.item().expectData().path("formatNo").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void initialDraftWithdrawalKeepsContentAndRelationsUntilExplicitRestore() {
+        Fixture owner = account(true, false, (byte) -88);
+        Fixture editor = account(false, false, (byte) -87);
+        Fixture outsider = account(false, false, (byte) -86);
+        String story = create(owner, "최초 초안 철회");
+        long id = storyId(story);
+        db.update("INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES (?,?,'EDIT',?)",
+                id, editor.principal().accountId(), owner.principal().accountId());
+        patch(owner, story, "basic", "0", "{\"intro\":\"보존할 원고\"}");
+        denied("NOT_FOUND", () -> stories.updateStoryActive(outsider.sid(), outsider.principal(), story,
+                "0", "1", false, "DRAFT_WITHDRAWN", "CHECK_0001", UUID.randomUUID()));
+        denied("FORBIDDEN", () -> stories.updateStoryActive(editor.sid(), editor.principal(), story,
+                "0", "1", false, "DRAFT_WITHDRAWN", "CHECK_0001", UUID.randomUUID()));
+        denied("INVALID_REQUEST", () -> stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "0", "1", false, "WORK_RESUMED", "CHECK_0001", UUID.randomUUID()));
+        var withdrawn = stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "0", "1", false, "DRAFT_WITHDRAWN", "CHECK_0001", UUID.randomUUID());
+        assertThat(withdrawn).extracting("storyRev", "activeYn", "changed", "auditStatus")
+                .containsExactly("1", false, true, "RECORDED");
+        assertThat(versionRev(story)).isEqualTo(1);
+        assertThat(json(stories.getStoryList(owner.sid(), owner.principal(), null, null, story, false))
+                .path("items")).hasSize(1);
+        assertThat(json(stories.getStoryList(editor.sid(), editor.principal(), null, null, story, true))
+                .path("items")).isEmpty();
+        denied("NOT_FOUND", () -> stories.getStoryDetail(editor.sid(), editor.principal(), story, 1, UUID.randomUUID()));
+        denied("STATE_CONFLICT", () -> patch(owner, story, "basic", "1", "{\"intro\":\"불가\"}"));
+        assertThat(json(stories.getStoryDetail(owner.sid(), owner.principal(), story, 1, UUID.randomUUID()))
+                .path("sections").path("basic").path("intro").asText()).isEqualTo("보존할 원고");
+        assertThat(stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "1", "1", false, "DRAFT_WITHDRAWN", "CHECK_0001", UUID.randomUUID()).changed()).isFalse();
+        denied("EDIT_CONFLICT", () -> stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "0", "1", true, "WORK_RESUMED", "CHECK_0002", UUID.randomUUID()));
+        denied("EDIT_CONFLICT", () -> stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "1", "0", true, "WORK_RESUMED", "CHECK_0002", UUID.randomUUID()));
+        var restored = stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "1", "1", true, "WORK_RESUMED", "CHECK_0002", UUID.randomUUID());
+        assertThat(restored).extracting("storyRev", "activeYn", "changed", "auditStatus")
+                .containsExactly("2", true, true, "RECORDED");
+        assertThat(db.queryForObject("SELECT count(*) FROM story_access WHERE story_id=? AND admin_id=? AND active_yn",
+                Integer.class, id, editor.principal().accountId())).isEqualTo(1);
+        assertThat(json(stories.getStoryDetail(editor.sid(), editor.principal(), story, 1, UUID.randomUUID()))
+                .path("sections").path("basic").path("intro").asText()).isEqualTo("보존할 원고");
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? AND "
+                + "action IN ('STORY_DEACTIVATED','STORY_REACTIVATED')", Integer.class, id)).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? AND "
+                + "detail::text LIKE '%보존할 원고%'", Integer.class, id)).isZero();
+    }
+
+    @Test
+    void storyStateRejectsExpiredReauthReviewHistoryAndAuditFailure() {
+        Fixture owner = account(true, false, (byte) -85);
+        String story = create(owner, "검수 이력 보호");
+        long id = storyId(story);
+        db.update("UPDATE admin_session SET started_at=started_at-interval '6 minutes',"
+                        + "expires_at=expires_at-interval '6 minutes',reauth_at=reauth_at-interval '6 minutes' "
+                        + "WHERE session_key=?",
+                owner.principal().sessionKey());
+        denied("REAUTH_REQUIRED", () -> stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "0", "0", false, "DRAFT_WITHDRAWN", "CHECK_0003", UUID.randomUUID()));
+        db.update("UPDATE admin_session SET reauth_at=clock_timestamp() WHERE session_key=?",
+                owner.principal().sessionKey());
+        db.execute("CREATE FUNCTION fail_story_state_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.action='STORY_DEACTIVATED' THEN RAISE EXCEPTION 'synthetic state audit outage'; END IF; "
+                + "RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_story_state BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_story_state_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                    "0", "0", false, "DRAFT_WITHDRAWN", "CHECK_0003", UUID.randomUUID()));
+        } finally {
+            db.execute("DROP TRIGGER fail_story_state ON story_audit");
+            db.execute("DROP FUNCTION fail_story_state_audit()");
+        }
+        assertThat(db.queryForMap("SELECT active_yn,edit_rev FROM story WHERE id=?", id))
+                .containsEntry("active_yn", true).containsEntry("edit_rev", 0L);
+        long version = db.queryForObject("SELECT id FROM story_version WHERE story_id=?", Long.class, id);
+        db.update("INSERT INTO review_snapshot(version_id,edit_rev,payload,request_key,created_by) "
+                        + "VALUES (?,0,'{}'::jsonb,?,?)", version, UUID.randomUUID(), owner.principal().accountId());
+        denied("STATE_CONFLICT", () -> stories.updateStoryActive(owner.sid(), owner.principal(), story,
+                "0", "0", false, "DRAFT_WITHDRAWN", "CHECK_0004", UUID.randomUUID()));
+        assertThat(db.queryForObject("SELECT active_yn FROM story WHERE id=?", Boolean.class, id)).isTrue();
+    }
+
+    @Test
+    void storyStateHttpRequiresFreshSessionAndReturnsOnlyReceipt() throws Exception {
+        Fixture owner = account(true, false, (byte) -84);
+        String story = create(owner, "상태 변경 HTTP 원고");
+        String route = "/admin/api/stories/" + story;
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(owner);
+        String withdraw = "{\"expectedStoryRev\":\"0\",\"expectedRev\":\"0\","
+                + "\"reasonCode\":\"DRAFT_WITHDRAWN\",\"verificationRef\":\"CHECK_0005\"}";
+        mvc.perform(post(route + "/deactivate").secure(true).cookie(session).contentType("application/json")
+                .content(withdraw)).andExpect(status().isForbidden());
+        mvc.perform(write(post(route + "/deactivate"), session, csrf, token,
+                withdraw.substring(0, withdraw.length() - 1) + ",\"title\":\"노출\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(write(post(route + "/deactivate"), session, csrf, token, withdraw))
+                .andExpect(status().isOk()).andDo(r -> {
+                    String body = r.getResponse().getContentAsString();
+                    assertThat(body).contains("\"storyRev\":\"1\"", "\"auditStatus\":\"RECORDED\"")
+                            .doesNotContain("상태 변경 HTTP 원고", "CHECK_0005");
+                    assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+                });
+        mvc.perform(write(post(route + "/deactivate"), session, csrf, token, withdraw))
+                .andExpect(status().isConflict());
+        String restore = "{\"expectedStoryRev\":\"1\",\"expectedRev\":\"0\","
+                + "\"reasonCode\":\"WORK_RESUMED\",\"verificationRef\":\"CHECK_0006\"}";
+        mvc.perform(write(post(route + "/reactivate"), session, csrf, token, restore))
+                .andExpect(status().isOk()).andDo(r -> assertThat(r.getResponse().getContentAsString())
+                        .contains("\"storyRev\":\"2\"").doesNotContain("상태 변경 HTTP 원고"));
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND route=?",
+                Long.class, owner.principal().accountKey(), "/admin/api/stories/{storyCode}/deactivate")).isPositive();
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND route=?",
+                Long.class, owner.principal().accountKey(), "/admin/api/stories/{storyCode}/reactivate")).isPositive();
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? AND "
+                + "detail->>'verificationRef' IN ('CHECK_0005','CHECK_0006')", Long.class,
+                storyId(story))).isEqualTo(2);
+    }
+
+    @Test
+    void accessGrantsAreScopedAndRevocationsKeepContentAndAccountGenerations() {
+        Fixture owner = account(true, false, (byte) -83);
+        Fixture editor = account(false, false, (byte) -82);
+        Fixture manager = account(false, true, (byte) -81);
+        Fixture outsider = account(false, false, (byte) -80);
+        String story = create(owner, "접근 지정");
+        UUID key = editor.principal().accountKey();
+        long rev = editor.principal().authRev();
+        denied("NOT_FOUND", () -> access.getAccessList(outsider.sid(), outsider.principal(), story, null, null));
+        denied("FORBIDDEN", () -> access.grantAccess(manager.sid(), manager.principal(), story, "0", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0007", UUID.randomUUID()));
+        denied("FORBIDDEN", () -> access.grantAccess(owner.sid(), owner.principal(), story, "0", key,
+                "REVIEW", "ASSIGNMENT_CHANGE", "CHECK_0007", UUID.randomUUID()));
+        denied("OWNER_RELATION_FIXED", () -> access.grantAccess(owner.sid(), owner.principal(), story, "0",
+                owner.principal().accountKey(), "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0007", UUID.randomUUID()));
+        var grant = access.grantAccess(owner.sid(), owner.principal(), story, "0", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0007", UUID.randomUUID());
+        assertThat(grant).extracting("storyRev", "changed", "auditStatus")
+                .containsExactly("1", true, "RECORDED");
+        assertThat(versionRev(story)).isZero();
+        var page = access.getAccessList(owner.sid(), owner.principal(), story, 1, null);
+        assertThat(page.activeRelationCount()).isEqualTo(1);
+        assertThat(page.items()).extracting("accountKey").containsExactly(key);
+        assertThat(page.items()).extracting("permission").containsExactly("EDIT");
+        assertThat(page.hasNext()).isFalse();
+        assertThat(access.getAccessList(manager.sid(), manager.principal(), story, 20, null).items()).hasSize(1);
+        denied("INVALID_REQUEST", () -> access.getAccessList(owner.sid(), owner.principal(), story, 20, "bad"));
+        denied("EDIT_CONFLICT", () -> access.grantAccess(owner.sid(), owner.principal(), story, "0", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0007", UUID.randomUUID()));
+        assertThat(access.grantAccess(owner.sid(), owner.principal(), story, "1", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0007", UUID.randomUUID()).changed()).isFalse();
+        assertThat(json(stories.getStoryDetail(editor.sid(), editor.principal(), story, 1, UUID.randomUUID()))
+                .path("storyCode").asText()).isEqualTo(story);
+        denied("ACCOUNT_NOT_READY", () -> access.grantAccess(manager.sid(), manager.principal(), story, "1", key,
+                "REVIEW", "ASSIGNMENT_CHANGE", "CHECK_0008", UUID.randomUUID()));
+        db.update("UPDATE admin_account SET can_review=true WHERE id=?", editor.principal().accountId());
+        assertThat(access.grantAccess(manager.sid(), manager.principal(), story, "1", key,
+                "REVIEW", "ASSIGNMENT_CHANGE", "CHECK_0008", UUID.randomUUID()).storyRev()).isEqualTo("2");
+        var first = access.getAccessList(owner.sid(), owner.principal(), story, 1, null);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(access.getAccessList(owner.sid(), owner.principal(), story, 1, first.nextAfterKey()).items())
+                .extracting("permission").containsExactly("REVIEW");
+        db.update("UPDATE admin_account SET active_yn=false WHERE id=?", editor.principal().accountId());
+        var revoke = access.revokeAccess(owner.sid(), owner.principal(), story, "2", key,
+                "EDIT", "ACCESS_REVIEW", "CHECK_0009", UUID.randomUUID());
+        assertThat(revoke).extracting("storyRev", "changed", "auditStatus")
+                .containsExactly("3", true, "RECORDED");
+        assertThat(access.revokeAccess(owner.sid(), owner.principal(), story, "3", key,
+                "EDIT", "ACCESS_REVIEW", "CHECK_0009", UUID.randomUUID()).changed()).isFalse();
+        assertThat(access.getAccessList(owner.sid(), owner.principal(), story, 20, null).activeRelationCount())
+                .isEqualTo(1);
+        assertThat(db.queryForObject("SELECT auth_rev FROM admin_credential WHERE account_id=?", Long.class,
+                editor.principal().accountId())).isEqualTo(rev);
+        assertThat(versionRev(story)).isZero();
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? "
+                + "AND action IN ('ACCESS_GRANTED','ACCESS_REVOKED')", Long.class, storyId(story))).isEqualTo(3);
+        db.update("UPDATE story SET active_yn=false WHERE id=?", storyId(story));
+        denied("STATE_CONFLICT", () -> access.grantAccess(owner.sid(), owner.principal(), story, "3", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0010", UUID.randomUUID()));
+        assertThat(access.revokeAccess(manager.sid(), manager.principal(), story, "3", key,
+                "REVIEW", "INCIDENT", "CHECK_0010", UUID.randomUUID()).storyRev()).isEqualTo("4");
+        assertThat(access.getAccessList(owner.sid(), owner.principal(), story, 20, null).activeRelationCount()).isZero();
+    }
+
+    @Test
+    void accessRevocationAuditingFailureBlocksGrantButCommitsEmergencyReduction() {
+        Fixture owner = account(true, false, (byte) -79);
+        Fixture target = account(false, false, (byte) -78);
+        String story = create(owner, "회수 필수 감사");
+        UUID key = target.principal().accountKey();
+        long id = storyId(story);
+        db.execute("CREATE FUNCTION fail_access_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.action IN ('ACCESS_GRANTED','ACCESS_REVOKED') THEN "
+                + "RAISE EXCEPTION 'synthetic access audit outage'; END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_access_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_access_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> access.grantAccess(owner.sid(), owner.principal(), story, "0", key,
+                    "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0011", UUID.randomUUID()));
+            assertThat(db.queryForObject("SELECT count(*) FROM story_access WHERE story_id=?", Integer.class, id)).isZero();
+            assertThat(db.queryForObject("SELECT edit_rev FROM story WHERE id=?", Long.class, id)).isZero();
+        } finally {
+            db.execute("DROP TRIGGER fail_access_audit_insert ON story_audit");
+        }
+        access.grantAccess(owner.sid(), owner.principal(), story, "0", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0011", UUID.randomUUID());
+        db.execute("CREATE TRIGGER fail_access_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_access_audit()");
+        try {
+            var emergency = access.revokeAccess(owner.sid(), owner.principal(), story, "1", key,
+                    "EDIT", "INCIDENT", "CHECK_0012", UUID.randomUUID());
+            assertThat(emergency).extracting("storyRev", "changed", "auditStatus")
+                    .containsExactly("2", true, "UNCONFIRMED");
+        } finally {
+            db.execute("DROP TRIGGER fail_access_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_access_audit()");
+        }
+        assertThat(db.queryForObject("SELECT active_yn FROM story_access WHERE story_id=? AND admin_id=?",
+                Boolean.class, id, target.principal().accountId())).isFalse();
+        assertThat(db.queryForObject("SELECT edit_rev FROM story WHERE id=?", Long.class, id)).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? AND action='ACCESS_REVOKED'",
+                Long.class, id)).isZero();
+        denied("NOT_FOUND", () -> stories.getStoryDetail(target.sid(), target.principal(), story, 1, UUID.randomUUID()));
+    }
+
+    @Test
+    void failedEmergencyRevocationNeverClaimsRelationshipWasBlocked() {
+        Fixture owner = account(true, false, (byte) -75);
+        Fixture target = account(false, false, (byte) -74);
+        String story = create(owner, "비상 차단 실패 보호");
+        UUID key = target.principal().accountKey();
+        long id = storyId(story);
+        access.grantAccess(owner.sid(), owner.principal(), story, "0", key,
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0014", UUID.randomUUID());
+        db.execute("CREATE SEQUENCE fail_access_block_seq");
+        db.execute("CREATE FUNCTION fail_access_revoke_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.action='ACCESS_REVOKED' THEN PERFORM nextval('fail_access_block_seq'); "
+                + "RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$");
+        db.execute("CREATE FUNCTION fail_second_story_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF (SELECT is_called FROM fail_access_block_seq) THEN RAISE EXCEPTION 'synthetic block failure'; "
+                + "END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_access_revoke_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_access_revoke_audit()");
+        db.execute("CREATE TRIGGER fail_access_block BEFORE UPDATE ON story FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_second_story_update()");
+        try {
+            denied("REVOCATION_UNCONFIRMED", () -> access.revokeAccess(owner.sid(), owner.principal(), story, "1",
+                    key, "EDIT", "INCIDENT", "CHECK_0015", UUID.randomUUID()));
+        } finally {
+            db.execute("DROP TRIGGER fail_access_block ON story");
+            db.execute("DROP TRIGGER fail_access_revoke_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_second_story_update()");
+            db.execute("DROP FUNCTION fail_access_revoke_audit()");
+            db.execute("DROP SEQUENCE fail_access_block_seq");
+        }
+        assertThat(db.queryForObject("SELECT active_yn FROM story_access WHERE story_id=? AND admin_id=?",
+                Boolean.class, id, target.principal().accountId())).isTrue();
+        assertThat(db.queryForObject("SELECT edit_rev FROM story WHERE id=?", Long.class, id)).isEqualTo(1);
+    }
+
+    @Test
+    void accessHttpNeverReturnsStoryContentAndRequiresCurrentCsrfAndReauth() throws Exception {
+        Fixture owner = account(true, false, (byte) -77);
+        Fixture editor = account(false, false, (byte) -76);
+        String story = create(owner, "접근 정보에서 감출 원고");
+        String route = "/admin/api/stories/" + story + "/access";
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(owner);
+        mvc.perform(get(route).secure(true).cookie(session)).andExpect(status().isOk()).andDo(r -> {
+            assertThat(r.getResponse().getContentAsString()).contains("\"activeRelationCount\":0")
+                    .doesNotContain("접근 정보에서 감출 원고");
+            assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+        });
+        String payload = "{\"expectedStoryRev\":\"0\",\"accountKey\":\"" + editor.principal().accountKey()
+                + "\",\"permission\":\"EDIT\",\"reasonCode\":\"ASSIGNMENT_CHANGE\","
+                + "\"verificationRef\":\"CHECK_0013\"}";
+        mvc.perform(post(route + "/grant").secure(true).cookie(session).contentType("application/json")
+                .content(payload)).andExpect(status().isForbidden());
+        mvc.perform(write(post(route + "/grant"), session, csrf, token,
+                payload.substring(0, payload.length() - 1) + ",\"extra\":true}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(write(post(route + "/grant"), session, csrf, token, payload))
+                .andExpect(status().isOk()).andDo(r -> assertThat(r.getResponse().getContentAsString())
+                        .contains("\"storyRev\":\"1\"", "\"auditStatus\":\"RECORDED\"")
+                        .doesNotContain("접근 정보에서 감출 원고", "CHECK_0013"));
+        db.update("UPDATE admin_session SET started_at=started_at-interval '6 minutes',"
+                        + "expires_at=expires_at-interval '6 minutes',reauth_at=reauth_at-interval '6 minutes' "
+                        + "WHERE session_key=?", owner.principal().sessionKey());
+        mvc.perform(get(route).secure(true).cookie(session))
+                .andExpect(status().isForbidden()).andDo(r -> assertThat(r.getResponse().getContentAsString())
+                        .contains("REAUTH_REQUIRED").doesNotContain("접근 정보에서 감출 원고"));
+        db.update("UPDATE admin_session SET reauth_at=clock_timestamp() WHERE session_key=?",
+                owner.principal().sessionKey());
+        String revoke = payload.replace("\"expectedStoryRev\":\"0\"", "\"expectedStoryRev\":\"1\"");
+        mvc.perform(write(post(route + "/revoke"), session, csrf, token, revoke))
+                .andExpect(status().isOk());
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE route=? AND actor_key=?",
+                Integer.class, "/admin/api/stories/{storyCode}/access/grant", owner.principal().accountKey())).isPositive();
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE route=? AND actor_key=?",
+                Integer.class, "/admin/api/stories/{storyCode}/access/revoke", owner.principal().accountKey())).isPositive();
     }
 
     /** 전체 자식 원고·부모 시각·수정번호·쓰기 감사를 비교하고 읽기 감사는 제외한다. */

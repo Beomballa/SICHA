@@ -19,6 +19,7 @@ import com.reasoning.common.story.service.StoryFactService;
 import com.reasoning.common.story.service.StoryRubricService;
 import com.reasoning.common.story.service.StoryRubricClueService;
 import com.reasoning.common.story.service.StoryGradeSampleService;
+import com.reasoning.common.story.service.StoryAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -58,11 +59,12 @@ public final class StoryController {
     private final StoryRubricService rubrics;
     private final StoryRubricClueService rubricClues;
     private final StoryGradeSampleService gradeSamples;
+    private final StoryAccessService access;
 
     public StoryController(StoryService stories, AdminSessionAdapter sessions, ObjectMapper mapper,
             StoryPersonService persons, StoryRoleService roles, StoryClueService clues, StoryHintService hints,
             StoryEventService events, StoryFactService facts, StoryRubricService rubrics,
-            StoryRubricClueService rubricClues, StoryGradeSampleService gradeSamples) {
+            StoryRubricClueService rubricClues, StoryGradeSampleService gradeSamples, StoryAccessService access) {
         this.stories = stories;
         this.sessions = sessions;
         this.mapper = mapper;
@@ -75,6 +77,7 @@ public final class StoryController {
         this.rubrics = rubrics;
         this.rubricClues = rubricClues;
         this.gradeSamples = gradeSamples;
+        this.access = access;
     }
 
     /**
@@ -145,6 +148,56 @@ public final class StoryController {
             throw AuthException.badRequest("INVALID_REQUEST");
         return ok(stories.updateStorySection(current.id(), current.principal(), storyCode, versionNo,
                 section, text(body, "expectedRev"), body.get("changes"), requestId(request)));
+    }
+
+    /**
+     * 소유자가 최근 재인증과 두 수정번호로 최초 초안 사건만 논리 삭제·복원한다.
+     * @param storyCode 대상 사건 코드
+     * @param operation deactivate 또는 reactivate만 허용한다
+     * @param request 네 필수 필드가 있는 최대 8 KiB JSON과 현재 일반 세션
+     * @return 원고 없는 상태·사건 수정번호와 감사 확정 상태
+     */
+    @PostMapping("/{storyCode}/{operation:deactivate|reactivate}")
+    public ResponseEntity<?> updateStoryActive(@PathVariable String storyCode, @PathVariable String operation,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192,
+                Set.of("expectedStoryRev", "expectedRev", "reasonCode", "verificationRef"));
+        return ok(stories.updateStoryActive(actor.id(), actor.principal(), storyCode,
+                text(payload, "expectedStoryRev"), text(payload, "expectedRev"), "reactivate".equals(operation),
+                text(payload, "reasonCode"), text(payload, "verificationRef"), requestId(request)));
+    }
+
+    /** 사건 본문·제목 없이 소유자/운영자에게 남은 활성 관계 총수와 키 페이지를 제공한다. */
+    @GetMapping("/{storyCode}/access")
+    public ResponseEntity<?> getStoryAccessList(@PathVariable String storyCode,
+            @RequestParam(required = false) Integer size, @RequestParam(required = false) String afterKey,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(access.getAccessList(actor.id(), actor.principal(), storyCode, size, afterKey));
+    }
+
+    /** 계정 현재 자격과 사건 권한을 다시 확인해 관계 한 개만 부여·회수한다. */
+    @PostMapping("/{storyCode}/access/{operation:grant|revoke}")
+    public ResponseEntity<?> changeStoryAccess(@PathVariable String storyCode, @PathVariable String operation,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192,
+                Set.of("expectedStoryRev", "accountKey", "permission", "reasonCode", "verificationRef"));
+        String rawKey = text(payload, "accountKey");
+        if (!rawKey.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        UUID accountKey = UUID.fromString(rawKey);
+        String expected = text(payload, "expectedStoryRev");
+        String permission = text(payload, "permission");
+        String reason = text(payload, "reasonCode");
+        String reference = text(payload, "verificationRef");
+        UUID requestId = requestId(request);
+        return ok("grant".equals(operation)
+                ? access.grantAccess(actor.id(), actor.principal(), storyCode, expected, accountKey,
+                        permission, reason, reference, requestId)
+                : access.revokeAccess(actor.id(), actor.principal(), storyCode, expected, accountKey,
+                        permission, reason, reference, requestId));
     }
 
     /**

@@ -94,7 +94,7 @@ class StoryBrowserIT extends DatabaseContextTest {
         Instant previous = Instant.ofEpochSecond((Instant.now().getEpochSecond() / 30 - 1) * 30);
         enrollment.verifyMfa(grant.cookie().value(), totp.code(setup.secret(), previous), "browser-fixture", UUID.randomUUID());
         enrollment.complete(grant.cookie().value(), UUID.randomUUID());
-        db.update("UPDATE admin_account SET can_create=true");
+        db.update("UPDATE admin_account SET can_create=true,can_review=true");
 
         Process browser = new ProcessBuilder("node", "src/test/browser/story-workflow.mjs").inheritIO()
                 .redirectInput(ProcessBuilder.Redirect.PIPE).start();
@@ -106,7 +106,11 @@ class StoryBrowserIT extends DatabaseContextTest {
         if (!completed) browser.destroyForcibly();
         assertThat(completed).as("브라우저 시험 제한 시간").isTrue();
         assertThat(browser.exitValue()).as("실제 HTTPS 브라우저 회귀").isZero();
-        assertThat(db.queryForObject("SELECT count(*) FROM story", Integer.class)).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story", Integer.class)).isEqualTo(3);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action IN "
+                + "('STORY_DEACTIVATED','STORY_REACTIVATED')", Integer.class)).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action IN "
+                + "('ACCESS_GRANTED','ACCESS_REVOKED')", Integer.class)).isEqualTo(2);
         assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action='SECTION_UPDATED'", Integer.class))
                 .isGreaterThanOrEqualTo(5);
         assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE detail::text LIKE '%local-answer%'", Integer.class)).isZero();

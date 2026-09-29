@@ -231,6 +231,160 @@ public class StoryService {
     }
 
     /**
+     * 최초 작업 초안만 소유자의 최근 재인증과 두 수정번호 아래 논리 삭제·복원한다.
+     * @param sid 현재 일반 세션 ID
+     * @param actor 서버가 검증한 현재 사건 소유자
+     * @param storyCode 변경 불가능한 사건 코드
+     * @param expectedStoryRev 현재 사건 관계 수정번호 문자열
+     * @param expectedRev 현재 버전 1의 콘텐츠 수정번호 문자열
+     * @param active true면 복원, false면 논리 삭제
+     * @param reasonCode 삭제는 DRAFT_WITHDRAWN, 복원은 WORK_RESUMED
+     * @param verificationRef 비개인 확인 참조인 ASCII 8~64자
+     * @param requestId 필수 감사 요청 ID
+     * @return 원고 없는 사건 상태·수정번호·감사 확정 상태
+     * @throws AuthException 권한·재인증·수명주기·수정번호·감사 실패 시
+     */
+    public StoryStateResult updateStoryActive(String sid, AdminPrincipal actor, String storyCode,
+            String expectedStoryRev, String expectedRev, boolean active, String reasonCode,
+            String verificationRef, UUID requestId) {
+        path(storyCode, 1);
+        long storyRev = revision(expectedStoryRev);
+        long contentRev = revision(expectedRev);
+        if (requestId == null || !(active ? "WORK_RESUMED" : "DRAFT_WITHDRAWN").equals(reasonCode)
+                || verificationRef == null || !verificationRef.matches("[A-Za-z0-9_-]{8,64}"))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        precheck(sid, actor);
+        return transact(() -> {
+            Account account = authorizeLocked(sid, actor);
+            StoryRow story = story(storyCode);
+            permit(story, account, actor, false);
+            if (story.owner != actor.accountId()) throw AuthException.forbidden("FORBIDDEN");
+            recentReauth(actor);
+            VersionRow version = version(story.id, 1);
+            if (story.rev != storyRev || version.rev != contentRev) throw AuthException.conflict("EDIT_CONFLICT");
+            boolean eligible = story.published == null && version.active && version.snapshot == null
+                    && "DRAFT".equals(version.status)
+                    && !db.queryForObject("SELECT view_yn FROM story WHERE id=?", Boolean.class, story.id)
+                    && db.queryForObject("SELECT count(*) FROM story_version WHERE story_id=?", Integer.class, story.id) == 1
+                    && db.queryForObject("SELECT count(*) FROM review_snapshot WHERE version_id=?", Integer.class, version.id) == 0;
+            if (!eligible) throw AuthException.conflict("STATE_CONFLICT");
+            if (story.active == active)
+                return new StoryStateResult(storyCode, Long.toString(story.rev), active, false, "NOT_REQUIRED", requestId);
+            if (story.rev == Long.MAX_VALUE) throw AuthException.conflict("EDIT_CONFLICT");
+            db.update("UPDATE story SET active_yn=?,view_yn=false,edit_rev=edit_rev+1,updated_at=clock_timestamp() WHERE id=?",
+                    active, story.id);
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("requestId", requestId);
+            detail.put("revisionScope", "STORY");
+            detail.put("resource", "story");
+            detail.put("reasonCode", reasonCode);
+            detail.put("verificationRef", verificationRef);
+            detail.put("before", Map.of("activeYn", story.active));
+            detail.put("after", Map.of("activeYn", active));
+            insertAudit(story.id, version.id, actor, active ? "STORY_REACTIVATED" : "STORY_DEACTIVATED",
+                    story.rev, story.rev + 1, detail);
+            return new StoryStateResult(storyCode, Long.toString(story.rev + 1), active, true, "RECORDED", requestId);
+        }, null);
+    }
+
+    /**
+     * 사건 관계의 행위자·대상 계정을 ID 정순으로 잠근 뒤 현재 권한·재인증·사건 수정번호를 재검사한다.
+     * @param sid 현재 일반 세션 ID
+     * @param actor 서버 검증 행위자
+     * @param code 대상 사건 코드
+     * @param targetKey 관계 변경 대상의 공개 UUID 또는 목록에서 null
+     * @param expectedStoryRev 변경 시 십진 사건 수정번호, 목록은 null
+     * @param ownerOnly EDIT 변경에는 true, REVIEW/PUBLISH 변경에는 false, 목록에는 null
+     * @param work 잠금 중 실행할 짧은 DB 동작이며 원격 호출·사용자 대기는 허용하지 않는다
+     * @return 현재 권한으로 확정된 목록 또는 관계 영수증
+     */
+    <T> T withStoryAccess(String sid, AdminPrincipal actor, String code, UUID targetKey,
+            String expectedStoryRev, Boolean ownerOnly, java.util.function.Function<AccessScope, T> work) {
+        path(code, 1);
+        Long expected = expectedStoryRev == null ? null : revision(expectedStoryRev);
+        precheck(sid, actor);
+        return transact(() -> {
+            db.execute("SET LOCAL lock_timeout = '5s'");
+            Long targetId = targetKey == null ? null : db.query("SELECT id FROM admin_account WHERE account_key=?",
+                    rs -> rs.next() ? rs.getLong(1) : null, targetKey);
+            List<Long> ids = new ArrayList<>(List.of(actor.accountId()));
+            if (targetId != null && targetId != actor.accountId()) ids.add(targetId);
+            ids.sort(Long::compareTo);
+            for (long id : ids) db.queryForObject("SELECT id FROM admin_account WHERE id=? FOR UPDATE", Long.class, id);
+            // 미완료 등록 행은 계정 관리 변경과 같은 enrollment→credential 순서를 지킨다.
+            if (targetId != null) db.query("SELECT id FROM admin_enrollment WHERE account_id=? AND completed_at IS NULL FOR UPDATE",
+                    rs -> { while (rs.next()) { } return null; }, targetId);
+            for (long id : ids) db.query("SELECT account_id FROM admin_credential WHERE account_id=? FOR UPDATE",
+                    rs -> { while (rs.next()) { } return null; }, id);
+            authorizeLocked(sid, actor);
+            StoryRow story = story(code);
+            boolean owner = story.owner == actor.accountId();
+            boolean manager = Boolean.TRUE.equals(db.queryForObject("SELECT can_manage FROM admin_account WHERE id=?",
+                    Boolean.class, actor.accountId()));
+            if (!owner && !manager) throw missing();
+            if (ownerOnly != null && (ownerOnly && !owner || !ownerOnly && !manager))
+                throw AuthException.forbidden("FORBIDDEN");
+            recentReauth(actor);
+            if (expected != null && story.rev != expected) throw AuthException.conflict("EDIT_CONFLICT");
+            if (targetKey != null && targetId == null) throw missing();
+            UUID ownerKey = db.queryForObject("SELECT account_key FROM admin_account WHERE id=?", UUID.class, story.owner);
+            return work.apply(new AccessScope(story.id, story.rev, story.active, story.owner, ownerKey, targetId));
+        }, null);
+    }
+
+    /** 최근 5분 재인증은 세션의 현재 DB 시각으로 검사한다. */
+    private void recentReauth(AdminPrincipal actor) {
+        Boolean recent = db.queryForObject("SELECT reauth_at<=clock_timestamp() "
+                        + "AND clock_timestamp()<reauth_at+interval '5 minutes' FROM admin_session "
+                        + "WHERE session_key=? AND account_id=? AND auth_rev=? AND state='ACTIVE'",
+                Boolean.class, actor.sessionKey(), actor.accountId(), actor.authRev());
+        if (!Boolean.TRUE.equals(recent)) throw AuthException.forbidden("REAUTH_REQUIRED");
+    }
+
+    /**
+     * 관계 실변경만 storyRev를 증가시키며 감사 실패 원인을 회수 전용 재시도에 구분해 전달한다.
+     * @param scope 잠금 중인 사건·관계 수정번호
+     * @param actor 현재 행위자
+     * @param targetKey 대상 계정 공개 UUID
+     * @param permission EDIT, REVIEW 또는 PUBLISH
+     * @param before 변경 전 활성 여부
+     * @param after 변경 후 활성 여부
+     * @param reason 고정된 업무 사유 코드
+     * @param ref 비개인 확인 참조
+     * @param id 접근 이력과 연결한 요청 ID
+     * @param audited false는 첫 감사 실패 뒤의 회수 전용 독립 TX에서만 사용한다
+     * @return 확정될 새 사건 수정번호
+     */
+    long recordAccessChange(AccessScope scope, AdminPrincipal actor, UUID targetKey, String permission,
+            boolean before, boolean after, String reason, String ref, UUID id, boolean audited) {
+        if (scope.rev == Long.MAX_VALUE) throw AuthException.conflict("EDIT_CONFLICT");
+        db.update("UPDATE story SET edit_rev=edit_rev+1,updated_at=clock_timestamp() WHERE id=?", scope.storyId);
+        if (audited) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("requestId", id);
+            detail.put("revisionScope", "STORY");
+            detail.put("resource", "access");
+            detail.put("itemKey", targetKey + "~" + permission);
+            detail.put("reasonCode", reason);
+            detail.put("verificationRef", ref);
+            detail.put("before", Map.of("activeYn", before, "permission", permission));
+            detail.put("after", Map.of("activeYn", after, "permission", permission));
+            try {
+                insertAudit(scope.storyId, null, actor, after ? "ACCESS_GRANTED" : "ACCESS_REVOKED",
+                        scope.rev, scope.rev + 1, detail);
+            } catch (DataAccessException failure) {
+                throw new AccessAuditFailure(failure);
+            }
+        }
+        return scope.rev + 1;
+    }
+
+    /** 필수 업무 감사 실패만 보안 축소의 독립 차단 재검사로 연결한다. */
+    static final class AccessAuditFailure extends RuntimeException {
+        AccessAuditFailure(DataAccessException cause) { super(cause); }
+    }
+
+    /**
      * 자식 서비스가 동일한 인증→사건→버전 잠금과 오류 변환 안에서만 동작하도록 경계를 제공한다.
      * @param sid 현재 일반 세션 ID이며 null이면 인증을 거절한다
      * @param actor 서버가 확인한 현재 행위자
@@ -526,6 +680,7 @@ public class StoryService {
 
     /** 자식 서비스에 필요한 내부 식별자·수정번호만 전달하며 HTTP로 노출하지 않는다. */
     record VersionScope(long storyId, long versionId, long rev, String culprit, List<Warning> warnings) {}
+    record AccessScope(long storyId, long rev, boolean active, long ownerId, UUID ownerKey, Long targetId) {}
     private record VersionRow(long id, long rev, String status, String title, String intro, String setting, Short difficulty,
             Short estMin, Short estMax, Integer limitSec, String policy, String culprit, String method, String time,
             String motive, String timelineOrigin, String reveal, Long snapshot, boolean active, Instant updatedAt) {}
@@ -540,4 +695,6 @@ public class StoryService {
             String editRev, String status, boolean activeYn, String currentSnapshotId, Map<String, Object> sections,
             Policy policy, List<Warning> warnings, Instant updatedAt) {}
     public record ContentResult(String storyCode, int versionNo, String editRev, boolean changed, List<Warning> warnings, UUID requestId) {}
+    public record StoryStateResult(String storyCode, String storyRev, boolean activeYn, boolean changed,
+            String auditStatus, UUID requestId) {}
 }
