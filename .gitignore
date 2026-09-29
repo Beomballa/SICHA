@@ -1,6 +1,7 @@
 # 로컬 규칙·문서 링크와 디자인 원본은 공개하지 않는다.
 /docs
 /outputs
+/scripts/
 /AGENTS.md
 /ARCHITECTURE.md
 .gjc/
