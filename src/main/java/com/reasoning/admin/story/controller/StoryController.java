@@ -13,6 +13,7 @@ import com.reasoning.common.story.service.StoryPersonService;
 import com.reasoning.common.story.service.StoryRoleService;
 import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryHintService;
+import com.reasoning.common.story.service.StoryEventService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -46,9 +47,11 @@ public final class StoryController {
     private final StoryRoleService roles;
     private final StoryClueService clues;
     private final StoryHintService hints;
+    private final StoryEventService events;
 
     public StoryController(StoryService stories, AdminSessionAdapter sessions, ObjectMapper mapper,
-            StoryPersonService persons, StoryRoleService roles, StoryClueService clues, StoryHintService hints) {
+            StoryPersonService persons, StoryRoleService roles, StoryClueService clues, StoryHintService hints,
+            StoryEventService events) {
         this.stories = stories;
         this.sessions = sessions;
         this.mapper = mapper;
@@ -56,6 +59,7 @@ public final class StoryController {
         this.roles = roles;
         this.clues = clues;
         this.hints = hints;
+        this.events = events;
     }
 
     /**
@@ -507,6 +511,91 @@ public final class StoryController {
         CurrentSession actor = current(request);
         JsonNode payload = body(request, 8192, Set.of("expectedRev"));
         return ok(hints.updateHintActive(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
+    }
+
+    /**
+     * 시간선 원고를 제외한 ASCII 코드·상태·시각 페이지를 조회한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 양의 버전 번호
+     * @param size 1~100이며 생략하면 20이다
+     * @param afterKey 마지막 ASCII 시간선 코드 또는 null
+     * @param activeYn 생략 시 활성 시간선만 조회한다
+     * @param request 현재 인증된 세션 요청
+     * @return 부모 콘텐츠 수정번호와 원고 없는 키 페이지
+     */
+    @GetMapping("/{storyCode}/versions/{versionNo}/events")
+    public ResponseEntity<?> getEventList(@PathVariable String storyCode, @PathVariable int versionNo,
+            @RequestParam(required = false) Integer size, @RequestParam(required = false) String afterKey,
+            @RequestParam(required = false) Boolean activeYn, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(events.getEventList(actor.id(), actor.principal(), storyCode, versionNo, size, afterKey, activeYn));
+    }
+
+    /**
+     * 현재 접근 권한과 필수 조회 감사를 확정한 뒤 단건 시간선 원고를 반환한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 양의 버전 번호
+     * @param itemKey 예약된 ASCII 시간선 코드
+     * @param request 현재 세션과 서버 요청 ID가 포함된 요청
+     * @return 부모 수정번호와 시간선 원고
+     */
+    @GetMapping("/{storyCode}/versions/{versionNo}/events/{itemKey}")
+    public ResponseEntity<?> getEventDetail(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(events.getEventDetail(actor.id(), actor.principal(), storyCode, versionNo, itemKey, requestId(request)));
+    }
+
+    /**
+     * 코드와 선택적 시간·원고를 담은 새 시간선을 생성한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 활성 DRAFT 버전의 양의 번호
+     * @param request expectedRev·item만 담은 최대 512 KiB 엄격 UTF-8 JSON 요청
+     * @return 201과 원고 없는 생성 키·수정번호
+     */
+    @PostMapping("/{storyCode}/versions/{versionNo}/events")
+    public ResponseEntity<?> createEvent(@PathVariable String storyCode, @PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, Set.of("expectedRev", "item"));
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .body(events.createEvent(actor.id(), actor.principal(), storyCode, versionNo,
+                        text(payload, "expectedRev"), payload.get("item"), requestId(request)));
+    }
+
+    /**
+     * 시간선 코드를 유지하고 명시적 필드만 병합해 수정한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 활성 DRAFT 버전의 양의 번호
+     * @param itemKey 변경 불가인 ASCII 시간선 코드
+     * @param request expectedRev·changes만 담은 최대 512 KiB 엄격 UTF-8 JSON 요청
+     * @return 원고 없는 변경 여부·확정 수정번호·경고
+     */
+    @PatchMapping("/{storyCode}/versions/{versionNo}/events/{itemKey}")
+    public ResponseEntity<?> updateEvent(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 512 * 1024, PATCH_FIELDS);
+        return ok(events.updateEvent(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
+                text(payload, "expectedRev"), payload.get("changes"), requestId(request)));
+    }
+
+    /**
+     * 같은 시간선 행을 명시적으로 비활성화하거나 복원한다.
+     * @param storyCode 대상 사건 코드
+     * @param versionNo 활성 DRAFT 버전의 양의 번호
+     * @param itemKey 예약된 ASCII 시간선 코드
+     * @param operation 고정된 deactivate 또는 reactivate
+     * @param request expectedRev만 담은 최대 8 KiB 엄격 UTF-8 JSON 요청
+     * @return 원고 없는 상태 변경 여부·확정 수정번호
+     */
+    @PostMapping("/{storyCode}/versions/{versionNo}/events/{itemKey}/{operation:deactivate|reactivate}")
+    public ResponseEntity<?> updateEventActive(@PathVariable String storyCode, @PathVariable int versionNo,
+            @PathVariable String itemKey, @PathVariable String operation, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedRev"));
+        return ok(events.updateEventActive(actor.id(), actor.principal(), storyCode, versionNo, itemKey,
                 text(payload, "expectedRev"), "reactivate".equals(operation), requestId(request)));
     }
 

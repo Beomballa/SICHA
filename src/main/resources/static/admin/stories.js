@@ -89,6 +89,20 @@
         ["body", "힌트 원고", "textarea", true],
       ],
     },
+    events: {
+      label: "시간선",
+      keys: ["code"],
+      required: ["code"],
+      guide:
+        "코드는 생성 뒤 고정됩니다. 시작·종료는 이야기 기준점 이후 0~2147483647분이며 미정 시 비울 수 있습니다. 종료만 지정하거나 시작보다 이른 종료는 저장할 수 없습니다. 실제·표면 원고는 제작자 전용으로 각각 8,000자까지입니다.",
+      fields: [
+        ["code", "시간선 코드", "text", false],
+        ["startMin", "시작 (기준점 이후 분)", "number", true],
+        ["endMin", "종료 (기준점 이후 분)", "number", true],
+        ["actualText", "제작자용 실제 사건", "textarea", true],
+        ["apparentText", "제작자용 표면 사건·오해", "textarea", true],
+      ],
+    },
   };
   const fields = {
     basic: [
@@ -134,6 +148,8 @@
     sourceText: 400,
     clueCode: 32,
     roleCode: 32,
+    actualText: 8000,
+    apparentText: 8000,
   };
 
   /** 자원에 따라 공통 필드명의 원고 길이 계약을 구분한다. */
@@ -147,7 +163,13 @@
   function numberLimit(section, key) {
     if (section === "child" && childResource === "hints" && key === "level")
       return 3;
+    if (section === "child" && childResource === "events") return 2147483647;
     return key === "difficulty" ? 5 : key === "limitSec" ? 2147483647 : 32767;
+  }
+
+  /** 시간선의 기준점 0분과 다른 숫자 필드의 양수 계약을 구분한다. */
+  function numberMinimum(section) {
+    return section === "child" && childResource === "events" ? 0 : 1;
   }
   let csrf;
   let generation = 0;
@@ -498,7 +520,7 @@
       input.autocomplete = "off";
       if (kind === "number") {
         input.step = "1";
-        input.min = "1";
+        input.min = String(numberMinimum(section));
         input.max = String(numberLimit(section, key));
       }
       input.value = values?.[key] == null ? "" : String(values[key]);
@@ -1240,16 +1262,17 @@
       } else if (kind === "number") {
         const value = Number(input.value);
         const high = numberLimit(section, key);
+        const low = numberMinimum(section);
         if (
           !/^(0|[1-9][0-9]*)$/.test(input.value) ||
           !Number.isSafeInteger(value) ||
-          value < 1 ||
+          value < low ||
           value > high
         )
           throw {
             status: 422,
             field: key,
-            message: `${key} 값은 1~${high} 범위의 정수여야 합니다.`,
+            message: `${key} 값은 ${low}~${high} 범위의 정수여야 합니다.`,
           };
         result[key] = value;
       } else {
@@ -1301,6 +1324,20 @@
           status: 422,
           field: "estMax",
           message: "최대 시간은 예상 시간보다 작을 수 없습니다.",
+        };
+    }
+    if (section === "child" && childResource === "events") {
+      const start = Object.hasOwn(result, "startMin")
+        ? result.startMin
+        : detail.childItem?.startMin;
+      const end = Object.hasOwn(result, "endMin")
+        ? result.endMin
+        : detail.childItem?.endMin;
+      if (end != null && (start == null || end < start))
+        throw {
+          status: 422,
+          field: "endMin",
+          message: "종료는 시작과 함께 지정하고 시작 이상이어야 합니다.",
         };
     }
     return result;

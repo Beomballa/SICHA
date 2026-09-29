@@ -20,6 +20,7 @@ import com.reasoning.common.story.service.StoryPersonService;
 import com.reasoning.common.story.service.StoryRoleService;
 import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryHintService;
+import com.reasoning.common.story.service.StoryEventService;
 import com.reasoning.common.story.entity.QStory;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -72,6 +73,7 @@ class StoryIT extends DatabaseContextTest {
     @Autowired StoryRoleService roles;
     @Autowired StoryClueService clues;
     @Autowired StoryHintService hints;
+    @Autowired StoryEventService events;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired EntityManager entityManager;
@@ -1248,6 +1250,314 @@ class StoryIT extends DatabaseContextTest {
                     Long.class, owner.principal().accountKey(),
                     "/admin/api/stories/{storyCode}/versions/{versionNo}/" + suffix)).isPositive();
         }
+    }
+
+    /** 시간선의 nullable 시각·원고, 코드포인트 경계 및 병합 PATCH를 검사한다. */
+    @Test
+    void eventsNullableFieldsMinuteBoundsAndMergedPatch() {
+        Fixture owner = account(true, false, (byte) 114);
+        String story = create(owner, "시간선 필드");
+        var created = events.createEvent(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        assertThat(created.editRev()).isEqualTo("1");
+        assertThat(created.warnings()).isNotEmpty();
+        var empty = events.getEventDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID()).item();
+        assertThat(empty.startMin()).isNull();
+        assertThat(empty.endMin()).isNull();
+        assertThat(empty.actualText()).isNull();
+        assertThat(empty.apparentText()).isNull();
+        String manuscript = "😀".repeat(8000);
+        assertThat(events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "1",
+                mapper.createObjectNode().put("startMin", 0).put("endMin", Integer.MAX_VALUE)
+                        .put("actualText", manuscript).put("apparentText", "첫째\r\n둘째"), UUID.randomUUID())
+                .editRev()).isEqualTo("2");
+        var detail = events.getEventDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID()).item();
+        assertThat(detail.startMin()).isZero();
+        assertThat(detail.endMin()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(detail.actualText()).isEqualTo(manuscript);
+        assertThat(detail.apparentText()).isEqualTo("첫째\n둘째");
+        denied("INVALID_INPUT", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "2",
+                mapper.createObjectNode().put("startMin", 1).put("endMin", 0), UUID.randomUUID()));
+        denied("INVALID_INPUT", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "2",
+                mapper.createObjectNode().putNull("startMin"), UUID.randomUUID()));
+        assertThat(events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "2",
+                mapper.createObjectNode().putNull("startMin").putNull("endMin").put("actualText", "")
+                        .putNull("apparentText"), UUID.randomUUID()).editRev()).isEqualTo("3");
+        var cleared = events.getEventDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID()).item();
+        assertThat(cleared.startMin()).isNull();
+        assertThat(cleared.endMin()).isNull();
+        assertThat(cleared.actualText()).isEmpty();
+        assertThat(cleared.apparentText()).isNull();
+        denied("INVALID_INPUT", () -> events.createEvent(owner.sid(), owner.principal(), story, 1, "3",
+                mapper.createObjectNode().put("code", "END").put("endMin", 0), UUID.randomUUID()));
+        for (var invalid : java.util.List.of(mapper.createObjectNode().put("startMin", -1),
+                mapper.createObjectNode().put("startMin", 1.5),
+                mapper.createObjectNode().put("startMin", 2147483648L),
+                mapper.createObjectNode().put("actualText", "😀".repeat(8001)))) {
+            denied("INVALID_INPUT", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "3",
+                    invalid, UUID.randomUUID()));
+        }
+        denied("INVALID_INPUT", () -> events.createEvent(owner.sid(), owner.principal(), story, 1, "3",
+                mapper.createObjectNode().put("code", "REVERSED").put("startMin", 2).put("endMin", 1), UUID.randomUUID()));
+        denied("INVALID_REQUEST", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "3",
+                mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+        denied("INVALID_REQUEST", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "3",
+                mapper.createObjectNode(), UUID.randomUUID()));
+        assertThat(versionRev(story)).isEqualTo(3);
+        assertThat(db.queryForObject("SELECT detail::text FROM story_audit WHERE story_id=? AND action='ITEM_UPDATED' "
+                + "ORDER BY id DESC LIMIT 1", String.class, storyId(story))).doesNotContain("첫째", "😀");
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? "
+                + "AND (detail::text LIKE '%첫째%' OR detail::text LIKE '%둘째%')",
+                Long.class, storyId(story))).isZero();
+    }
+
+    /** 목록은 원고 없는 ASCII 키셋이며 비활성 키도 예약된다. */
+    @Test
+    void eventsAsciiPaginationAndInactiveReservedCode() {
+        Fixture owner = account(true, false, (byte) 115);
+        String story = create(owner, "시간선 목록");
+        for (int i = 0; i < 21; i++) {
+            String key = String.format("E%02d", i);
+            events.createEvent(owner.sid(), owner.principal(), story, 1, Integer.toString(i),
+                    mapper.createObjectNode().put("code", key).put("actualText", "비공개 원고"), UUID.randomUUID());
+        }
+        var first = events.getEventList(owner.sid(), owner.principal(), story, 1, null, null, null);
+        assertThat(first.items()).hasSize(20);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(first.nextAfterKey()).isEqualTo("E19");
+        assertThat(json(first).toString()).doesNotContain("비공개 원고", "actualText", "startMin");
+        assertThat(events.getEventList(owner.sid(), owner.principal(), story, 1, 1, first.nextAfterKey(), null)
+                .items().get(0).code()).isEqualTo("E20");
+        assertThat(events.getEventList(owner.sid(), owner.principal(), story, 1, 100, null, null).items()).hasSize(21);
+        for (int size : new int[] {0, 101}) {
+            denied("INVALID_REQUEST", () -> events.getEventList(owner.sid(), owner.principal(), story, 1,
+                    size, null, null));
+        }
+        denied("INVALID_REQUEST", () -> events.getEventList(owner.sid(), owner.principal(), story, 1,
+                1, "lower", null));
+        var deactivated = events.updateEventActive(owner.sid(), owner.principal(), story, 1, "E00", "21", false,
+                UUID.randomUUID());
+        assertThat(deactivated.editRev()).isEqualTo("22");
+        assertThat(events.getEventList(owner.sid(), owner.principal(), story, 1, null, null, false)
+                .items().get(0).code()).isEqualTo("E00");
+        assertThat(events.getEventList(owner.sid(), owner.principal(), story, 1, null, null, true).items()).hasSize(20);
+        denied("ITEM_EXISTS", () -> events.createEvent(owner.sid(), owner.principal(), story, 1, "22",
+                mapper.createObjectNode().put("code", "E00"), UUID.randomUUID()));
+        denied("STATE_CONFLICT", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "E00", "22",
+                mapper.createObjectNode().put("actualText", "변경"), UUID.randomUUID()));
+    }
+
+    /** 실제 상태 변경만 시각·수정번호·감사를 갱신하고 stale 무변경도 거절한다. */
+    @Test
+    void eventsToggleNoopAndStaleRevision() {
+        Fixture owner = account(true, false, (byte) 116);
+        String story = create(owner, "시간선 상태");
+        events.createEvent(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        Instant initial = eventUpdatedAt(story, "A");
+        long audit = auditCount(story, "ITEM_UPDATED");
+        var same = events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "1",
+                mapper.createObjectNode().putNull("actualText"), UUID.randomUUID());
+        assertThat(same.changed()).isFalse();
+        assertThat(same.editRev()).isEqualTo("1");
+        assertThat(eventUpdatedAt(story, "A")).isEqualTo(initial);
+        assertThat(auditCount(story, "ITEM_UPDATED")).isEqualTo(audit);
+        denied("EDIT_CONFLICT", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1, "A", "0",
+                mapper.createObjectNode().putNull("actualText"), UUID.randomUUID()));
+        assertThat(events.updateEventActive(owner.sid(), owner.principal(), story, 1, "A", "1", false,
+                UUID.randomUUID()).editRev()).isEqualTo("2");
+        Instant inactive = eventUpdatedAt(story, "A");
+        long offAudit = auditCount(story, "ITEM_DEACTIVATED");
+        assertThat(events.updateEventActive(owner.sid(), owner.principal(), story, 1, "A", "2", false,
+                UUID.randomUUID()).changed()).isFalse();
+        assertThat(eventUpdatedAt(story, "A")).isEqualTo(inactive);
+        assertThat(auditCount(story, "ITEM_DEACTIVATED")).isEqualTo(offAudit);
+        denied("EDIT_CONFLICT", () -> events.updateEventActive(owner.sid(), owner.principal(), story, 1,
+                "A", "1", false, UUID.randomUUID()));
+        assertThat(events.updateEventActive(owner.sid(), owner.principal(), story, 1, "A", "2", true,
+                UUID.randomUUID()).editRev()).isEqualTo("3");
+        Instant restored = eventUpdatedAt(story, "A");
+        assertThat(events.updateEventActive(owner.sid(), owner.principal(), story, 1, "A", "3", true,
+                UUID.randomUUID()).changed()).isFalse();
+        assertThat(eventUpdatedAt(story, "A")).isEqualTo(restored);
+        assertThat(auditCount(story, "ITEM_REACTIVATED")).isEqualTo(1);
+        assertThat(versionRev(story)).isEqualTo(3);
+    }
+
+    /** 전역 자격과 사건 관계를 모두 재검사하며 비활성 부모는 소유자에게만 보인다. */
+    @Test
+    void eventsPermissionsRevocationAndParentState() {
+        Fixture owner = account(true, false, (byte) 117);
+        Fixture editor = account(false, false, (byte) 118);
+        Fixture reviewer = account(false, false, (byte) 119);
+        Fixture publisher = account(false, false, (byte) 120);
+        Fixture outsider = account(false, true, (byte) 121);
+        String story = create(owner, "시간선 권한");
+        events.createEvent(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A").put("actualText", "원고"), UUID.randomUUID());
+        db.update("UPDATE admin_account SET can_review=true WHERE id=?", reviewer.principal().accountId());
+        db.update("UPDATE admin_account SET can_publish=true WHERE id=?", publisher.principal().accountId());
+        for (var relation : java.util.List.of(java.util.Map.entry(editor, "EDIT"),
+                java.util.Map.entry(reviewer, "REVIEW"), java.util.Map.entry(publisher, "PUBLISH"))) {
+            db.update("INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES (?,?,?,?)",
+                    storyId(story), relation.getKey().principal().accountId(), relation.getValue(),
+                    owner.principal().accountId());
+            assertThat(events.getEventDetail(relation.getKey().sid(), relation.getKey().principal(), story, 1,
+                    "A", UUID.randomUUID()).item().actualText()).isEqualTo("원고");
+        }
+        denied("NOT_FOUND", () -> events.getEventDetail(outsider.sid(), outsider.principal(), story, 1,
+                "A", UUID.randomUUID()));
+        denied("NOT_FOUND", () -> events.getEventList(outsider.sid(), outsider.principal(), story, 1,
+                null, null, null));
+        for (Fixture reader : java.util.List.of(reviewer, publisher)) {
+            denied("FORBIDDEN", () -> events.createEvent(reader.sid(), reader.principal(), story, 1, "1",
+                    mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+            denied("FORBIDDEN", () -> events.updateEventActive(reader.sid(), reader.principal(), story, 1,
+                    "A", "1", false, UUID.randomUUID()));
+        }
+        assertThat(events.updateEvent(editor.sid(), editor.principal(), story, 1, "A", "1",
+                mapper.createObjectNode().put("actualText", "편집"), UUID.randomUUID()).editRev()).isEqualTo("2");
+        db.update("UPDATE admin_account SET can_review=false WHERE id=?", reviewer.principal().accountId());
+        denied("NOT_FOUND", () -> events.getEventDetail(reviewer.sid(), reviewer.principal(), story, 1,
+                "A", UUID.randomUUID()));
+        db.update("UPDATE story_access SET active_yn=false WHERE story_id=? AND admin_id=?",
+                storyId(story), editor.principal().accountId());
+        denied("NOT_FOUND", () -> events.getEventList(editor.sid(), editor.principal(), story, 1,
+                null, null, null));
+        db.update("UPDATE story_version SET active_yn=false WHERE story_id=?", storyId(story));
+        denied("NOT_FOUND", () -> events.getEventDetail(publisher.sid(), publisher.principal(), story, 1,
+                "A", UUID.randomUUID()));
+        assertThat(events.getEventDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID())
+                .item().actualText()).isEqualTo("편집");
+        denied("STATE_CONFLICT", () -> events.updateEventActive(owner.sid(), owner.principal(), story, 1,
+                "A", "2", false, UUID.randomUUID()));
+        long version = db.queryForObject("SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(story));
+        long snapshot = db.queryForObject("INSERT INTO review_snapshot(version_id,edit_rev,payload,request_key,created_by) "
+                + "VALUES (?,2,'{}'::jsonb,?,?) RETURNING id", Long.class,
+                version, UUID.randomUUID(), owner.principal().accountId());
+        db.update("UPDATE story_version SET active_yn=true,status='REVIEW',current_snapshot_id=? WHERE id=?", snapshot, version);
+        denied("STATE_CONFLICT", () -> events.createEvent(owner.sid(), owner.principal(), story, 1, "2",
+                mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+        denied("STATE_CONFLICT", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1,
+                "A", "2", mapper.createObjectNode().put("actualText", "거절"), UUID.randomUUID()));
+        denied("STATE_CONFLICT", () -> events.updateEventActive(owner.sid(), owner.principal(), story, 1,
+                "A", "2", false, UUID.randomUUID()));
+        db.update("UPDATE story_version SET status='DRAFT',current_snapshot_id=null WHERE story_id=?", storyId(story));
+        db.update("UPDATE admin_credential SET auth_rev=auth_rev+1 WHERE account_id=?", owner.principal().accountId());
+        denied("AUTH_REQUIRED", () -> events.getEventDetail(owner.sid(), owner.principal(), story, 1,
+                "A", UUID.randomUUID()));
+    }
+
+    /** 필수 감사 장애 시 조회와 생성·수정·상태 변경을 모두 실패시키고 자료를 롤백한다. */
+    @Test
+    void eventsMandatoryAuditFailureRollsBackEveryWrite() {
+        Fixture owner = account(true, false, (byte) 122);
+        String story = create(owner, "시간선 감사");
+        events.createEvent(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A").put("actualText", "원본"), UUID.randomUUID());
+        Instant original = eventUpdatedAt(story, "A");
+        db.execute("CREATE FUNCTION fail_event_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.detail->>'resource'='events' THEN RAISE EXCEPTION 'synthetic event audit outage'; "
+                + "END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_event_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_event_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> events.getEventDetail(owner.sid(), owner.principal(), story, 1,
+                    "A", UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> events.createEvent(owner.sid(), owner.principal(), story, 1, "1",
+                    mapper.createObjectNode().put("code", "B"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> events.updateEvent(owner.sid(), owner.principal(), story, 1,
+                    "A", "1", mapper.createObjectNode().put("actualText", "실패 원고"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> events.updateEventActive(owner.sid(), owner.principal(), story, 1,
+                    "A", "1", false, UUID.randomUUID()));
+            assertThat(versionRev(story)).isEqualTo(1);
+            assertThat(eventUpdatedAt(story, "A")).isEqualTo(original);
+            assertThat(db.queryForObject("SELECT count(*) FROM story_event e JOIN story_version v ON v.id=e.version_id "
+                    + "WHERE v.story_id=? AND e.code='B'", Long.class, storyId(story))).isZero();
+        } finally {
+            db.execute("DROP TRIGGER fail_event_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_event_audit()");
+        }
+        assertThat(events.getEventDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID())
+                .item().actualText()).isEqualTo("원본");
+        assertThat(events.updateEventActive(owner.sid(), owner.principal(), story, 1, "A", "1", false,
+                UUID.randomUUID()).editRev()).isEqualTo("2");
+        assertThat(auditCount(story, "ITEM_DEACTIVATED")).isEqualTo(1);
+    }
+
+    /** HTTP 고정 경로·엄격 JSON·두 바이트 상한과 정규화된 접근 기록을 검사한다. */
+    @Test
+    void eventsHttpFixedRoutesStrictBodyAndAccessHistory() throws Exception {
+        Fixture owner = account(true, false, (byte) 123);
+        String story = create(owner, "HTTP 시간선");
+        String base = "/admin/api/stories/" + story + "/versions/1/events";
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(owner);
+        String first = "{\"expectedRev\":\"0\",\"item\":{\"code\":\"A\",\"actualText\":\"비밀 원고\"}}";
+        mvc.perform(post(base).secure(true).cookie(session).contentType("application/json").content(first))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(base).secure(true)).andExpect(status().isUnauthorized());
+        mvc.perform(write(post(base), session, csrf, token, first)).andExpect(status().isCreated())
+                .andDo(r -> assertThat(r.getResponse().getContentAsString()).doesNotContain("비밀 원고"));
+        mvc.perform(get(base + "?size=1").secure(true).cookie(session)).andExpect(status().isOk())
+                .andDo(r -> assertThat(r.getResponse().getContentAsString()).doesNotContain("비밀 원고"));
+        mvc.perform(get(base + "/A").secure(true).cookie(session)).andExpect(status().isOk())
+                .andDo(r -> assertThat(mapper.readTree(r.getResponse().getContentAsString())
+                        .path("item").path("actualText").asText()).isEqualTo("비밀 원고"));
+        mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"), session, csrf, token,
+                "{\"expectedRev\":\"1\",\"changes\":{\"startMin\":0,\"endMin\":1}}"))
+                .andExpect(status().isOk());
+        mvc.perform(write(post(base + "/A/deactivate"), session, csrf, token, "{\"expectedRev\":\"2\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(write(post(base + "/A/reactivate"), session, csrf, token, "{\"expectedRev\":\"3\"}"))
+                .andExpect(status().isOk());
+        String second = "{\"expectedRev\":\"4\",\"item\":{\"code\":\"B\"}}";
+        byte[] utf16 = ("\uFEFF" + second).getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
+        mvc.perform(write(post(base), session, csrf, token, "{}")
+                .contentType("application/json;charset=utf-8").content(utf16)).andExpect(status().isBadRequest());
+        mvc.perform(write(post(base), session, csrf, token, "{}")
+                .content(new byte[] {'{', '"', (byte) 0xc3, (byte) 0x28, '"', '}'}))
+                .andExpect(status().isBadRequest());
+        for (String invalid : java.util.List.of(
+                "{\"expectedRev\":\"4\",\"expectedRev\":\"4\",\"item\":{\"code\":\"B\"}}",
+                "{\"expectedRev\":\"4\",\"item\":{\"code\":\"B\",\"code\":\"C\"}}",
+                "{\"expectedRev\":\"4\",\"item\":{\"code\":\"B\",\"extra\":1}}",
+                "{\"expectedRev\":\"4\",\"unknown\":1,\"item\":{\"code\":\"B\"}}")) {
+            mvc.perform(write(post(base), session, csrf, token, invalid)).andExpect(status().isBadRequest());
+        }
+        mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"), session, csrf, token,
+                "{\"expectedRev\":\"4\",\"changes\":{\"unknown\":1}}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(write(post(base + "/A/deactivate"), session, csrf, token,
+                "{\"expectedRev\":\"4\",\"unknown\":1}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(write(post(base), session, csrf, token, second + " ".repeat(512 * 1024 - second.length())))
+                .andExpect(status().isCreated());
+        mvc.perform(write(post(base), session, csrf, token, second + " ".repeat(512 * 1024 - second.length() + 1)))
+                .andExpect(status().isPayloadTooLarge());
+        String state = "{\"expectedRev\":\"5\"}";
+        mvc.perform(write(post(base + "/B/deactivate"), session, csrf, token,
+                state + " ".repeat(8192 - state.length()))).andExpect(status().isOk());
+        mvc.perform(write(post(base + "/B/reactivate"), session, csrf, token,
+                "{\"expectedRev\":\"6\"}" + " ".repeat(8192))).andExpect(status().isPayloadTooLarge());
+        assertThat(versionRev(story)).isEqualTo(6);
+        for (String suffix : java.util.List.of("events", "events/{itemKey}",
+                "events/{itemKey}/deactivate", "events/{itemKey}/reactivate")) {
+            assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND route=?",
+                    Long.class, owner.principal().accountKey(),
+                    "/admin/api/stories/{storyCode}/versions/{versionNo}/" + suffix)).isPositive();
+        }
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND "
+                + "(route LIKE ? OR route LIKE '%비밀%' OR route LIKE '%afterKey%')",
+                Long.class, owner.principal().accountKey(), "%" + story + "%")).isZero();
+    }
+
+    /** 원본 행 시각을 조회해 무변경 저장의 부작용을 구별한다. */
+    private Instant eventUpdatedAt(String story, String key) {
+        return db.queryForObject("SELECT e.updated_at FROM story_event e JOIN story_version v ON v.id=e.version_id "
+                + "WHERE v.story_id=? AND e.code=?", (rs, row) -> rs.getTimestamp(1).toInstant(), storyId(story), key);
     }
 
     /** 합성 일반 세션을 제품 어댑터의 보안 쿠키로 변환한다. */

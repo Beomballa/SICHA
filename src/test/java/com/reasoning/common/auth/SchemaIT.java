@@ -21,7 +21,7 @@ import org.testcontainers.utility.DockerImageName;
 
 class SchemaIT {
     @Test
-    @DisplayName("AUTH-V01/ADMIN-V10/STORY-AUDIT: Flyway V1-V6 match approved schema on disposable PostgreSQL")
+    @DisplayName("AUTH-V01/ADMIN-V10/STORY-AUDIT: Flyway V1-V7 match approved schema on disposable PostgreSQL")
     void appliesH0Schema() throws Exception {
         DockerImageName image = DockerImageName.parse("postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1")
             .asCompatibleSubstituteFor("postgres");
@@ -31,7 +31,7 @@ class SchemaIT {
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
                 .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(6);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(7);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -45,7 +45,7 @@ class SchemaIT {
                     "admin_recovery_code", "admin_auth_audit", "admin_auth_limit", "admin_auth_grant",
                     "admin_session", "spring_session", "spring_session_attributes", "access_history",
                     "story", "story_access", "story_version", "story_person", "review_snapshot", "story_audit",
-                    "story_role", "story_pair", "story_clue", "clue_role", "story_hint");
+                    "story_role", "story_pair", "story_clue", "clue_role", "story_hint", "story_event");
                 Map<String, Set<String>> expectedColumns = new HashMap<>(Map.of(
                     "story", Set.of("id", "code", "owner_id", "published_id", "view_yn", "active_yn",
                         "created_at", "updated_at", "edit_rev", "play_rev"),
@@ -69,6 +69,8 @@ class SchemaIT {
                     "clue_role", Set.of("version_id", "clue_code", "role_code", "active_yn", "created_at", "updated_at")));
                 expectedColumns.put("story_hint", Set.of("version_id", "code", "level", "body", "active_yn",
                     "created_at", "updated_at"));
+                expectedColumns.put("story_event", Set.of("version_id", "code", "start_min", "end_min",
+                    "actual_text", "apparent_text", "active_yn", "created_at", "updated_at"));
                 for (var entry : expectedColumns.entrySet()) {
                     Set<String> columns = new HashSet<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", entry.getKey(), "%")) {
@@ -89,6 +91,7 @@ class SchemaIT {
                     "story_clue", Set.of("pk_story_clue"),
                     "clue_role", Set.of("pk_clue_role", "ix_clue_role_role")));
                 approvedIndexes.put("story_hint", Set.of("pk_story_hint", "uq_story_hint_level"));
+                approvedIndexes.put("story_event", Set.of("pk_story_event"));
                 for (var entry : approvedIndexes.entrySet()) {
                     Set<String> indexes = new HashSet<>();
                     try (ResultSet rs = metadata.getIndexInfo(null, "public", entry.getKey(), false, false)) {
@@ -112,6 +115,7 @@ class SchemaIT {
                     "story_clue", Set.of("fk_story_clue_version", "fk_story_clue_person"),
                     "clue_role", Set.of("fk_clue_role_clue", "fk_clue_role_role")));
                 approvedForeignKeys.put("story_hint", Set.of("fk_story_hint_version"));
+                approvedForeignKeys.put("story_event", Set.of("fk_story_event_version"));
                 int fkCount = 0;
                 for (var entry : approvedForeignKeys.entrySet()) {
                     Set<String> foreignKeys = new HashSet<>();
@@ -122,7 +126,7 @@ class SchemaIT {
                         .containsExactlyInAnyOrderElementsOf(entry.getValue());
                     fkCount += foreignKeys.size();
                 }
-                assertThat(fkCount).isEqualTo(26);
+                assertThat(fkCount).isEqualTo(27);
                 // 복합 참조의 열 순서와 삭제·갱신 차단 정책까지 검사한다.
                 Map<String, List<String>> rolePairFks = new HashMap<>();
                 for (String table : List.of("story_role", "story_pair")) {
@@ -170,11 +174,22 @@ class SchemaIT {
                     assertThat(rs.getInt("UPDATE_RULE")).isEqualTo(DatabaseMetaData.importedKeyNoAction);
                     assertThat(rs.next()).isFalse();
                 }
+                try (ResultSet rs = metadata.getImportedKeys(null, "public", "story_event")) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getString("FK_NAME")).isEqualTo("fk_story_event_version");
+                    assertThat(rs.getString("FKCOLUMN_NAME")).isEqualTo("version_id");
+                    assertThat(rs.getString("PKTABLE_NAME")).isEqualTo("story_version");
+                    assertThat(rs.getString("PKCOLUMN_NAME")).isEqualTo("id");
+                    assertThat(rs.getInt("DELETE_RULE")).isEqualTo(DatabaseMetaData.importedKeyNoAction);
+                    assertThat(rs.getInt("UPDATE_RULE")).isEqualTo(DatabaseMetaData.importedKeyNoAction);
+                    assertThat(rs.next()).isFalse();
+                }
                 for (var entry : Map.of("story_role", List.of("version_id", "code"),
                         "story_pair", List.of("version_id", "role_a", "role_b"),
                         "story_clue", List.of("version_id", "code"),
                         "clue_role", List.of("version_id", "clue_code", "role_code"),
-                        "story_hint", List.of("version_id", "code")).entrySet()) {
+                        "story_hint", List.of("version_id", "code"),
+                        "story_event", List.of("version_id", "code")).entrySet()) {
                     Map<Short, String> primaryKey = new java.util.TreeMap<>();
                     try (ResultSet rs = metadata.getPrimaryKeys(null, "public", entry.getKey())) {
                         while (rs.next()) {
@@ -218,6 +233,33 @@ class SchemaIT {
                 assertThat(hintColumns.get("active_yn")).isEqualTo("bool:1:0:true");
                 for (String time : List.of("created_at", "updated_at"))
                     assertThat(hintColumns.get(time)).startsWith("timestamptz:").endsWith(":0:now()");
+                Map<String, String> eventColumns = new HashMap<>();
+                try (ResultSet rs = metadata.getColumns(null, "public", "story_event", "%")) {
+                    while (rs.next()) eventColumns.put(rs.getString("COLUMN_NAME"), rs.getString("TYPE_NAME")
+                        + ":" + rs.getInt("COLUMN_SIZE") + ":" + rs.getInt("NULLABLE") + ":" + rs.getString("COLUMN_DEF"));
+                }
+                assertThat(eventColumns.get("version_id")).isEqualTo("int8:19:0:null");
+                assertThat(eventColumns.get("code")).isEqualTo("varchar:32:0:null");
+                for (String minute : List.of("start_min", "end_min"))
+                    assertThat(eventColumns.get(minute)).isEqualTo("int4:10:1:null");
+                for (String text : List.of("actual_text", "apparent_text"))
+                    assertThat(eventColumns.get(text)).startsWith("text:").endsWith(":1:null");
+                assertThat(eventColumns.get("active_yn")).isEqualTo("bool:1:0:true");
+                for (String time : List.of("created_at", "updated_at"))
+                    assertThat(eventColumns.get(time)).startsWith("timestamptz:").endsWith(":0:now()");
+                Map<String, String> eventChecks = new HashMap<>();
+                try (var statement = connection.createStatement(); ResultSet rs = statement.executeQuery(
+                        "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint "
+                        + "WHERE conrelid='public.story_event'::regclass AND contype='c'")) {
+                    while (rs.next()) eventChecks.put(rs.getString(1), rs.getString(2));
+                }
+                assertThat(eventChecks.keySet()).containsExactlyInAnyOrder("ck_story_event_code",
+                    "ck_story_event_time", "ck_story_event_bound", "ck_story_event_text");
+                assertThat(eventChecks.get("ck_story_event_code")).contains("^[A-Z0-9_]{1,32}$");
+                assertThat(eventChecks.get("ck_story_event_time")).contains("start_min >= 0", "end_min >= start_min");
+                assertThat(eventChecks.get("ck_story_event_bound")).contains("end_min IS NULL", "start_min IS NOT NULL");
+                assertThat(eventChecks.get("ck_story_event_text")).contains("char_length(actual_text)",
+                    "char_length(apparent_text)", "8000");
                 Map<String, String> clueChecks = new HashMap<>();
                 try (var statement = connection.createStatement(); ResultSet rs = statement.executeQuery(
                         "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint "
@@ -520,6 +562,33 @@ class SchemaIT {
                         + (otherVersion + 100000) + ",'MISSING',1)")).hasMessageContaining("fk_story_hint_version");
                     assertThat(statement.executeUpdate("INSERT INTO story_hint(version_id,code,level,body) VALUES ("
                         + otherVersion + ",'A',1,NULL)")).isEqualTo(1);
+                    // 시간선은 nullable 값을 유지하되 분 구간·원고 길이·예약 코드를 DB에서도 제한한다.
+                    assertThat(statement.executeUpdate("INSERT INTO story_event(version_id,code) VALUES ("
+                        + ownVersion + ",'EMPTY')")).isEqualTo(1);
+                    assertThat(statement.executeUpdate("INSERT INTO story_event(version_id,code,start_min,end_min,actual_text,apparent_text) VALUES ("
+                        + ownVersion + ",'BOUND',0,2147483647,repeat('😀',8000),'')")).isEqualTo(1);
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code,end_min) VALUES ("
+                        + ownVersion + ",'END_ONLY',1)")).hasMessageContaining("ck_story_event_bound");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code,start_min) VALUES ("
+                        + ownVersion + ",'NEGATIVE',-1)")).hasMessageContaining("ck_story_event_time");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code,start_min,end_min) VALUES ("
+                        + ownVersion + ",'REVERSE',2,1)")).hasMessageContaining("ck_story_event_time");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code,actual_text) VALUES ("
+                        + ownVersion + ",'LONG',repeat('가',8001))")).hasMessageContaining("ck_story_event_text");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code,apparent_text) VALUES ("
+                        + ownVersion + ",'LONG',repeat('가',8001))")).hasMessageContaining("ck_story_event_text");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code) VALUES ("
+                        + ownVersion + ",'lower')")).hasMessageContaining("ck_story_event_code");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code) VALUES ("
+                        + ownVersion + ", '" + "X".repeat(33) + "')")).hasMessageContaining("value too long");
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code) VALUES ("
+                        + (otherVersion + 100000) + ",'MISSING')")).hasMessageContaining("fk_story_event_version");
+                    assertThat(statement.executeUpdate("UPDATE story_event SET active_yn=false WHERE version_id="
+                        + ownVersion + " AND code='EMPTY'")).isEqualTo(1);
+                    assertThatThrownBy(() -> statement.executeUpdate("INSERT INTO story_event(version_id,code) VALUES ("
+                        + ownVersion + ",'EMPTY')")).hasMessageContaining("pk_story_event");
+                    assertThat(statement.executeUpdate("INSERT INTO story_event(version_id,code,start_min) VALUES ("
+                        + otherVersion + ",'EMPTY',0)")).isEqualTo(1);
                 }
             }
         }
