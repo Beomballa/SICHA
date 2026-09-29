@@ -1,0 +1,59 @@
+/* 프레임워크 독립 토큰. 앱 구현 시 한 번 import한다.
+   폰트 파일은 포함되지 않으며 SUIT/JetBrains Mono는 별도 등록이 필요하다. */
+:root {
+  --color-background: #121417;
+  --color-surface: #1e2228;
+  --color-surface-raised: #252a32;
+  --color-text: #e5e8eb;
+  --color-text-muted: #9ca3af;
+  --color-brand: #c91a1a;
+  --color-brand-hover: #b41717;
+  --color-brand-active: #a31414;
+  --color-on-brand: #e5e8eb;
+  --color-accent: #ffc700;
+  --color-on-accent: #121417;
+  --color-border: #2b323d;
+  --color-control-border: #9ca3af;
+  --color-focus: #ffc700;
+  --font-ui: 'SUIT Variable', 'Apple SD Gothic Neo', sans-serif;
+  --font-code: 'JetBrains Mono', ui-monospace, monospace;
+  --font-size-caption: 0.875rem;
+  --font-size-body: 1rem;
+  --font-size-section: 1.25rem;
+  --font-size-title-mobile: 1.5rem;
+  --font-size-title-desktop: 2rem;
+  --line-height-body: 1.5;
+  --line-height-heading: 1.25;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 32%);
+  --page-gutter: 16px;
+  --content-max-width: 1200px;
+  --reading-max-width: 720px;
+  --touch-target-min: 48px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --motion-duration: 160ms;
+}
+
+@media (min-width: 768px) {
+  :root { --page-gutter: 24px; }
+}
+
+@media (min-width: 1200px) {
+  :root { --page-gutter: 32px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-duration: 0ms; }
+}
