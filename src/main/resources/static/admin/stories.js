@@ -175,6 +175,27 @@
         ["linkText", "제작자용 연결 설명", "textarea", true],
       ],
     },
+    "grade-samples": {
+      label: "판정 검증 예시",
+      keys: ["code"],
+      required: ["code"],
+      guide:
+        "코드는 생성 뒤 고정됩니다. 실제 제출할 전체 입력 JSON과 기대 결과 JSON을 별도로 작성하세요. 입력은 128 KiB, 기대값은 64 KiB, 설명은 8,000자까지입니다. 이 화면의 저장은 사람 확인이나 판정 실행이 아니며 원고 변경 시 이전 확인은 무효화됩니다. 입력 오류 예시는 잘못된 보고서도 그대로 기록할 수 있습니다.",
+      options: {
+        expectedSuccess: [
+          ["false", "실패"],
+          ["true", "성공"],
+        ],
+      },
+      fields: [
+        ["code", "예시 코드", "text", false],
+        ["inputData", "제출 입력 JSON", "json", true],
+        ["expectData", "기대 결과 JSON", "json", true],
+        ["expectedScore", "기대 점수 (0~100)", "number", true],
+        ["expectedSuccess", "기대 성공 여부", "boolean", true],
+        ["reason", "사람 확인을 위한 근거", "textarea", true],
+      ],
+    },
   };
   const fields = {
     basic: [
@@ -229,6 +250,7 @@
     partialText: 12000,
     rejectText: 8000,
     linkText: 4000,
+    reason: 8000,
   };
 
   /** 자원에 따라 공통 필드명의 원고 길이 계약을 구분한다. */
@@ -240,7 +262,11 @@
 
   /** 숫자 항목의 동일한 상한을 입력 속성과 저장 검사에 제공한다. */
   function numberLimit(section, key) {
-    if (section === "child" && childResource === "rubrics") return 100;
+    if (
+      section === "child" &&
+      ["rubrics", "grade-samples"].includes(childResource)
+    )
+      return 100;
     if (section === "child" && childResource === "hints" && key === "level")
       return 3;
     if (section === "child" && childResource === "events") return 2147483647;
@@ -249,7 +275,8 @@
 
   /** 시간선의 기준점 0분과 다른 숫자 필드의 양수 계약을 구분한다. */
   function numberMinimum(section) {
-    return section === "child" && ["events", "rubrics"].includes(childResource)
+    return section === "child" &&
+      ["events", "rubrics", "grade-samples"].includes(childResource)
       ? 0
       : 1;
   }
@@ -322,7 +349,7 @@
   }
 
   /** 같은 출처 API만 호출한다. missing 허용 GET은 호출자가 부모를 다시 인가한 뒤 부재를 사용해야 한다. */
-  async function request(method, path, body, missing = false, rawRuleData) {
+  async function request(method, path, body, missing = false, rawJsonFields) {
     const headers = { Accept: "application/json" };
     if (method !== "GET") {
       if (!csrf) {
@@ -350,9 +377,9 @@
         ...(method !== "GET"
           ? {
               body:
-                rawRuleData === undefined
+                rawJsonFields === undefined
                   ? JSON.stringify(body)
-                  : rubricBody(body, rawRuleData),
+                  : jsonFieldBody(body, rawJsonFields),
             }
           : {}),
       });
@@ -390,17 +417,25 @@
     return data;
   }
 
-  /** 검증된 JSON 원문을 규칙 값으로 삽입해 중복 키를 서버의 엄격 파서까지 전달한다. */
-  function rubricBody(body, raw) {
-    const marker = crypto.randomUUID();
+  /** JSON 입력 원문을 삽입해 중복 키를 서버의 엄격 파서까지 전달한다. */
+  function jsonFieldBody(body, rawFields) {
     const part = body.item ? "item" : "changes";
-    const json = JSON.stringify({
+    const markers = Object.fromEntries(
+      Object.keys(rawFields).map((field) => [field, crypto.randomUUID()]),
+    );
+    let json = JSON.stringify({
       ...body,
-      [part]: { ...body[part], ruleData: marker },
+      [part]: { ...body[part], ...markers },
     });
-    const token = `"ruleData":"${marker}"`;
-    if (!json.includes(token)) throw new Error("규칙 전송 형식 오류");
-    return json.replace(token, () => `"ruleData":${raw}`);
+    for (const [field, marker] of Object.entries(markers)) {
+      const token = `${JSON.stringify(field)}:${JSON.stringify(marker)}`;
+      if (!json.includes(token)) throw new Error("JSON 전송 형식 오류");
+      json = json.replace(
+        token,
+        () => `${JSON.stringify(field)}:${rawFields[field]}`,
+      );
+    }
+    return json;
   }
 
   /** 사건 경로나 원고 대신 고정된 화면 코드만 기록한다. */
@@ -912,10 +947,10 @@
   function writableSection(section, data = detail) {
     return Boolean(
       data?.storyActiveYn &&
-        data.activeYn &&
-        data.status === "DRAFT" &&
-        (section !== "child" ||
-          (childEditing && (!data.childItem || data.childItem.activeYn))),
+      data.activeYn &&
+      data.status === "DRAFT" &&
+      (section !== "child" ||
+        (childEditing && (!data.childItem || data.childItem.activeYn))),
     );
   }
 
@@ -1413,15 +1448,16 @@
           };
         result[key] = kind === "boolean" ? input.value === "true" : input.value;
       } else if (kind === "json") {
+        const jsonLimit = key === "expectData" ? 65536 : 131072;
         if (
           new TextEncoder().encode(
             input.value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, ""),
-          ).length > 131072
+          ).length > jsonLimit
         )
           throw {
             status: 422,
             field: key,
-            message: "규칙 JSON은 UTF-8 128 KiB를 넘을 수 없습니다.",
+            message: `${key} JSON은 UTF-8 ${jsonLimit / 1024} KiB를 넘을 수 없습니다.`,
           };
         let parsed;
         try {
@@ -1430,7 +1466,7 @@
           throw {
             status: 422,
             field: key,
-            message: "규칙은 올바른 JSON 객체여야 합니다.",
+            message: "올바른 JSON 객체를 입력하세요.",
           };
         }
         if (
@@ -1441,7 +1477,7 @@
           throw {
             status: 422,
             field: key,
-            message: "규칙은 JSON 객체여야 합니다.",
+            message: "JSON 객체를 입력하세요.",
           };
         result[key] = parsed;
       } else if (kind === "number") {
@@ -1646,10 +1682,16 @@
     try {
       const child = section === "child";
       const creating = child && !detail.childItem;
-      const rawRuleData =
-        child && childResource === "rubrics" && patch.ruleData != null
-          ? form.querySelector('[data-value="ruleData"]').value
-          : undefined;
+      const rawJsonFields = child
+        ? Object.fromEntries(
+            childTypes[childResource].fields
+              .filter(([key, , kind]) => kind === "json" && patch[key] != null)
+              .map(([key]) => [
+                key,
+                form.querySelector(`[data-value="${key}"]`).value,
+              ]),
+          )
+        : undefined;
       const result = await request(
         child && (creating || operation) ? "POST" : "PATCH",
         editorPath() +
@@ -1661,7 +1703,9 @@
           ...(operation ? {} : creating ? { item: patch } : { changes: patch }),
         },
         false,
-        rawRuleData,
+        rawJsonFields && Object.keys(rawJsonFields).length
+          ? rawJsonFields
+          : undefined,
       );
       if (current !== generation) return;
       document.getElementById("comparison").hidden = false;

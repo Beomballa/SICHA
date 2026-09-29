@@ -21,7 +21,7 @@ import org.testcontainers.utility.DockerImageName;
 
 class SchemaIT {
     @Test
-    @DisplayName("AUTH-V01/ADMIN-V10/STORY-AUDIT: Flyway V1-V9 match approved schema on disposable PostgreSQL")
+    @DisplayName("AUTH-V01/ADMIN-V10/STORY-AUDIT: Flyway V1-V10 match approved schema on disposable PostgreSQL")
     void appliesH0Schema() throws Exception {
         DockerImageName image = DockerImageName.parse("postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1")
             .asCompatibleSubstituteFor("postgres");
@@ -31,7 +31,7 @@ class SchemaIT {
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
                 .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -46,7 +46,7 @@ class SchemaIT {
                     "admin_session", "spring_session", "spring_session_attributes", "access_history",
                     "story", "story_access", "story_version", "story_person", "review_snapshot", "story_audit",
                     "story_role", "story_pair", "story_clue", "clue_role", "story_hint", "story_event", "story_fact",
-                    "story_rubric", "rubric_clue");
+                    "story_rubric", "rubric_clue", "grade_sample");
                 Map<String, Set<String>> expectedColumns = new HashMap<>(Map.of(
                     "story", Set.of("id", "code", "owner_id", "published_id", "view_yn", "active_yn",
                         "created_at", "updated_at", "edit_rev", "play_rev"),
@@ -79,6 +79,9 @@ class SchemaIT {
                     "active_yn", "created_at", "updated_at"));
                 expectedColumns.put("rubric_clue", Set.of("version_id", "rubric_code", "clue_code", "link_text",
                     "active_yn", "created_at", "updated_at"));
+                expectedColumns.put("grade_sample", Set.of("version_id", "code", "input_data", "expect_data",
+                    "expected_score", "expected_success", "reason", "checked_by", "active_yn",
+                    "created_at", "updated_at"));
                 for (var entry : expectedColumns.entrySet()) {
                     Set<String> columns = new HashSet<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", entry.getKey(), "%")) {
@@ -103,6 +106,7 @@ class SchemaIT {
                 approvedIndexes.put("story_fact", Set.of("pk_story_fact"));
                 approvedIndexes.put("story_rubric", Set.of("pk_story_rubric"));
                 approvedIndexes.put("rubric_clue", Set.of("pk_rubric_clue"));
+                approvedIndexes.put("grade_sample", Set.of("pk_grade_sample"));
                 for (var entry : approvedIndexes.entrySet()) {
                     Set<String> indexes = new HashSet<>();
                     try (ResultSet rs = metadata.getIndexInfo(null, "public", entry.getKey(), false, false)) {
@@ -130,6 +134,7 @@ class SchemaIT {
                 approvedForeignKeys.put("story_fact", Set.of("fk_story_fact_version"));
                 approvedForeignKeys.put("story_rubric", Set.of("fk_story_rubric_version"));
                 approvedForeignKeys.put("rubric_clue", Set.of("fk_rubric_clue_rubric", "fk_rubric_clue_clue"));
+                approvedForeignKeys.put("grade_sample", Set.of("fk_grade_sample_version", "fk_grade_sample_checker"));
                 int fkCount = 0;
                 for (var entry : approvedForeignKeys.entrySet()) {
                     Set<String> foreignKeys = new HashSet<>();
@@ -140,7 +145,7 @@ class SchemaIT {
                         .containsExactlyInAnyOrderElementsOf(entry.getValue());
                     fkCount += foreignKeys.size();
                 }
-                assertThat(fkCount).isEqualTo(31);
+                assertThat(fkCount).isEqualTo(33);
                 // 복합 참조의 열 순서와 삭제·갱신 차단 정책까지 검사한다.
                 Map<String, List<String>> rolePairFks = new HashMap<>();
                 for (String table : List.of("story_role", "story_pair")) {
@@ -234,7 +239,8 @@ class SchemaIT {
                         "story_event", List.of("version_id", "code"),
                         "story_fact", List.of("version_id", "code"),
                         "story_rubric", List.of("version_id", "code"),
-                        "rubric_clue", List.of("version_id", "rubric_code", "clue_code")).entrySet()) {
+                        "rubric_clue", List.of("version_id", "rubric_code", "clue_code"),
+                        "grade_sample", List.of("version_id", "code")).entrySet()) {
                     Map<Short, String> primaryKey = new java.util.TreeMap<>();
                     try (ResultSet rs = metadata.getPrimaryKeys(null, "public", entry.getKey())) {
                         while (rs.next()) {

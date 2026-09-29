@@ -41,6 +41,7 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
     private static final Pattern STORY_FACT = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/facts(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private static final Pattern STORY_RUBRIC = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/rubrics(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private static final Pattern STORY_RUBRIC_CLUE = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/rubric-clues(?:/([A-Z0-9_]{1,32}~[A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
+    private static final Pattern STORY_GRADE_SAMPLE = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/grade-samples(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private final JdbcTemplate db;
 
     public AccessHistoryFilter(JdbcTemplate db) {
@@ -194,6 +195,12 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/rubric-clues"
                     + (rubricClue.group(1) == null ? "" : "/{itemKey}")
                     + (rubricClue.group(2) == null ? "" : "/" + rubricClue.group(2));
+        }
+        Matcher gradeSample = STORY_GRADE_SAMPLE.matcher(path);
+        if (gradeSample.matches()) {
+            return "/admin/api/stories/{storyCode}/versions/{versionNo}/grade-samples"
+                    + (gradeSample.group(1) == null ? "" : "/{itemKey}")
+                    + (gradeSample.group(2) == null ? "" : "/" + gradeSample.group(2));
         }
         Matcher story = STORY.matcher(path);
         if (story.matches()) {

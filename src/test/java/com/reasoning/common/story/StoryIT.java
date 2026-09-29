@@ -24,6 +24,7 @@ import com.reasoning.common.story.service.StoryEventService;
 import com.reasoning.common.story.service.StoryFactService;
 import com.reasoning.common.story.service.StoryRubricService;
 import com.reasoning.common.story.service.StoryRubricClueService;
+import com.reasoning.common.story.service.StoryGradeSampleService;
 import com.reasoning.common.story.entity.QStory;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -80,6 +81,7 @@ class StoryIT extends DatabaseContextTest {
     @Autowired StoryFactService facts;
     @Autowired StoryRubricService rubrics;
     @Autowired StoryRubricClueService rubricClues;
+    @Autowired StoryGradeSampleService gradeSamples;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired EntityManager entityManager;
@@ -2266,6 +2268,219 @@ class StoryIT extends DatabaseContextTest {
                 .putArray("routes").addArray().add("CLAIM");
         rule.putArray("contradictions");
         return rule;
+    }
+
+    @Test
+    void gradeSamplesStoreDraftFixturesAndInvalidateHumanChecksOnRealContentChanges() {
+        Fixture owner = account(true, false, (byte) -94);
+        String story = create(owner, "검증 예시");
+        var created = gradeSamples.createGradeSample(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "BAD"), UUID.randomUUID());
+        assertThat(created.itemKey()).isEqualTo("BAD");
+        assertThat(gradeSamples.getGradeSampleList(owner.sid(), owner.principal(), story, 1,
+                null, null, true).items()).hasSize(1);
+        assertThat(gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1,
+                "BAD", UUID.randomUUID()).item().inputData()).isNull();
+        assertThat(gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "BAD", "1", mapper.createObjectNode().putNull("inputData"), UUID.randomUUID()).changed()).isFalse();
+        assertThat(versionRev(story)).isEqualTo(1);
+
+        var input = mapper.createObjectNode().put("formatNo", 1);
+        input.putObject("report").put("culpritCode", 47).putNull("method");
+        var expectation = mapper.createObjectNode().put("formatNo", 1).put("kind", "INPUT_ERROR");
+        expectation.putObject("error").put("code", "INVALID_REPORT").put("state", "REJECTED")
+                .putNull("score").put("attemptDelta", 0);
+        var changes = mapper.createObjectNode().put("reason", "오류 검증 자료");
+        changes.set("inputData", input);
+        changes.set("expectData", expectation);
+        assertThat(gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "BAD", "1", changes, UUID.randomUUID()).editRev()).isEqualTo("2");
+        assertThat(gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1,
+                "BAD", UUID.randomUUID()).item().inputData()).isEqualTo(input);
+        assertThat(gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "BAD", "2", changes, UUID.randomUUID()).changed()).isFalse();
+        denied("ITEM_EXISTS", () -> gradeSamples.createGradeSample(owner.sid(), owner.principal(), story, 1,
+                "2", mapper.createObjectNode().put("code", "BAD"), UUID.randomUUID()));
+        denied("INVALID_INPUT", () -> gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "BAD", "2", mapper.createObjectNode().put("expectedScore", 50), UUID.randomUUID()));
+
+        long version = db.queryForObject("SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(story));
+        db.update("UPDATE grade_sample SET checked_by=? WHERE version_id=?", owner.principal().accountId(), version);
+        assertThat(gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "BAD", "2", changes, UUID.randomUUID()).changed()).isFalse();
+        assertThat(gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1,
+                "BAD", UUID.randomUUID()).item().checkedBy()).isEqualTo(owner.principal().accountKey());
+        patch(owner, story, "basic", "2", "{\"title\":\"검증 자료 변경\"}");
+        assertThat(gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1,
+                "BAD", UUID.randomUUID()).item().checkedBy()).isNull();
+
+        db.update("UPDATE grade_sample SET checked_by=? WHERE version_id=?", owner.principal().accountId(), version);
+        fact(owner, story, "F", 3);
+        assertThat(gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1,
+                "BAD", UUID.randomUUID()).item().checkedBy()).isNull();
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE version_id=? AND "
+                + "detail::text LIKE '%오류 검증 자료%'", Long.class, version)).isZero();
+        gradeSamples.updateGradeSampleActive(owner.sid(), owner.principal(), story, 1, "BAD", "4", false, UUID.randomUUID());
+        denied("ITEM_EXISTS", () -> gradeSamples.createGradeSample(owner.sid(), owner.principal(), story, 1,
+                "5", mapper.createObjectNode().put("code", "BAD"), UUID.randomUUID()));
+        gradeSamples.updateGradeSampleActive(owner.sid(), owner.principal(), story, 1, "BAD", "5", true, UUID.randomUUID());
+    }
+
+    @Test
+    void gradeSampleAuditFailuresRollbackRowsRevisionsAndHumanCheckInvalidation() {
+        Fixture owner = account(true, false, (byte) -93);
+        String story = create(owner, "검증 감사");
+        gradeSamples.createGradeSample(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        long version = db.queryForObject("SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(story));
+        db.update("UPDATE grade_sample SET checked_by=? WHERE version_id=?", owner.principal().accountId(), version);
+        db.execute("CREATE FUNCTION fail_grade_sample_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.detail->>'resource'='grade-samples' OR NEW.action='SECTION_UPDATED' THEN "
+                + "RAISE EXCEPTION 'synthetic sample audit outage'; END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_grade_sample_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_grade_sample_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(),
+                    story, 1, "A", UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> gradeSamples.updateGradeSample(owner.sid(), owner.principal(),
+                    story, 1, "A", "1", mapper.createObjectNode().put("reason", "롤백"), UUID.randomUUID()));
+            denied("STORY_UNAVAILABLE", () -> patch(owner, story, "basic", "1", "{\"title\":\"롤백\"}"));
+        } finally {
+            db.execute("DROP TRIGGER fail_grade_sample_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_grade_sample_audit()");
+        }
+        assertThat(versionRev(story)).isEqualTo(1);
+        var detail = gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID());
+        assertThat(detail.item().reason()).isNull();
+        assertThat(detail.item().checkedBy()).isEqualTo(owner.principal().accountKey());
+    }
+
+    @Test
+    void gradeSamplesHttpProtectsFullFixturesAndNormalizesHistory() throws Exception {
+        Fixture owner = account(true, false, (byte) -92);
+        Fixture stranger = account(false, true, (byte) -91);
+        String story = create(owner, "HTTP 검증 예시");
+        String base = "/admin/api/stories/" + story + "/versions/1/grade-samples";
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(owner);
+        String first = "{\"expectedRev\":\"0\",\"item\":{\"code\":\"A\",\"reason\":\"비밀 기대값\"}}";
+        mvc.perform(post(base).secure(true).cookie(session).contentType("application/json").content(first))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(base).secure(true)).andExpect(status().isUnauthorized());
+        mvc.perform(write(post(base), session, csrf, token, first)).andExpect(status().isCreated())
+                .andDo(r -> assertThat(r.getResponse().getContentAsString()).doesNotContain("비밀 기대값"));
+        long reads = auditCount(story, "CONTENT_READ");
+        mvc.perform(get(base + "?size=1").secure(true).cookie(session)).andExpect(status().isOk())
+                .andDo(r -> {
+                    assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+                    assertThat(r.getResponse().getContentAsString()).doesNotContain("비밀 기대값", "reason", "checkedBy");
+                });
+        assertThat(auditCount(story, "CONTENT_READ")).isEqualTo(reads);
+        mvc.perform(get(base + "/A").secure(true).cookie(cookie(stranger))).andExpect(status().isNotFound());
+        mvc.perform(get(base + "/A").secure(true).cookie(session)).andExpect(status().isOk())
+                .andDo(r -> assertThat(r.getResponse().getContentAsString()).contains("비밀 기대값"));
+        assertThat(auditCount(story, "CONTENT_READ")).isEqualTo(reads + 1);
+        for (String invalid : java.util.List.of(
+                "{\"expectedRev\":\"1\",\"item\":{\"code\":\"B\",\"inputData\":{\"formatNo\":1,\"formatNo\":2}}}",
+                "{\"expectedRev\":\"1\",\"item\":{\"code\":\"B\",\"checkedBy\":true}}")) {
+            mvc.perform(write(post(base), session, csrf, token, invalid)).andExpect(status().isBadRequest());
+        }
+        mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"),
+                session, csrf, token, "{\"expectedRev\":\"1\",\"changes\":{\"expectedScore\":101}}"))
+                .andExpect(status().isUnprocessableEntity());
+        for (String field : java.util.List.of("inputData", "expectData")) {
+            int limit = field.equals("inputData") ? 128 * 1024 : 64 * 1024;
+            String padded = "{\"expectedRev\":\"1\",\"changes\":{\"" + field
+                    + "\":{\"formatNo\":1" + " ".repeat(limit) + "}}}";
+            mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base + "/A"),
+                    session, csrf, token, padded)).andExpect(status().isUnprocessableEntity());
+        }
+        assertThat(versionRev(story)).isEqualTo(1);
+        mvc.perform(write(post(base + "/A/deactivate"), session, csrf, token,
+                "{\"expectedRev\":\"1\"}")).andExpect(status().isOk());
+        mvc.perform(write(post(base + "/A/reactivate"), session, csrf, token,
+                "{\"expectedRev\":\"2\"}")).andExpect(status().isOk());
+        for (String suffix : java.util.List.of("grade-samples", "grade-samples/{itemKey}",
+                "grade-samples/{itemKey}/deactivate", "grade-samples/{itemKey}/reactivate")) {
+            assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND route=?",
+                    Long.class, owner.principal().accountKey(),
+                    "/admin/api/stories/{storyCode}/versions/{versionNo}/" + suffix)).isPositive();
+        }
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE actor_key=? AND "
+                + "(route LIKE ? OR route LIKE '%비밀%')", Long.class,
+                owner.principal().accountKey(), "%" + story + "%")).isZero();
+    }
+
+    @Test
+    void gradeSamplesRejectWrongKindUnknownReferencesAndJsonbByteOverflow() throws Exception {
+        Fixture owner = account(true, false, (byte) -90);
+        String story = create(owner, "검증 자료 경계");
+        gradeSamples.createGradeSample(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        var error = mapper.createObjectNode().put("formatNo", 1).put("kind", "ENGINE_ERROR");
+        error.putObject("error").put("code", "INVALID_REPORT").put("state", "REJECTED")
+                .putNull("score").put("attemptDelta", 0);
+        denied("INVALID_INPUT", () -> gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "A", "1", mapper.createObjectNode().set("expectData", error), UUID.randomUUID()));
+        var graded = mapper.createObjectNode().put("formatNo", 1).put("kind", "GRADED");
+        graded.putArray("items").addObject().put("rubricCode", "NO_SUCH_RULE").put("score", 0)
+                .putNull("requiredMet").put("reason", "근거");
+        denied("INVALID_INPUT", () -> gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "A", "1", mapper.createObjectNode().set("expectData", graded), UUID.randomUUID()));
+        var input = mapper.createObjectNode().put("formatNo", 1);
+        input.putObject("report").put("culpritCode", "MISSING").put("method", "")
+                .put("time", "").put("motive", "").put("evidence", "");
+        denied("INVALID_INPUT", () -> gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "A", "1", mapper.createObjectNode().set("inputData", input), UUID.randomUUID()));
+        var inputError = mapper.createObjectNode().put("formatNo", 1).put("kind", "INPUT_ERROR");
+        inputError.putObject("error").put("code", "INVALID_REPORT").put("state", "REJECTED")
+                .putNull("score").put("attemptDelta", 0);
+        var large = mapper.createObjectNode().put("formatNo", 1);
+        large.put("report", "x".repeat(130900));
+        var values = mapper.createObjectNode();
+        values.set("inputData", large);
+        values.set("expectData", inputError);
+        assertThat(gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "A", "1", values, UUID.randomUUID()).changed()).isTrue();
+        large.put("report", "x".repeat(131072));
+        denied("INVALID_INPUT", () -> gradeSamples.updateGradeSample(owner.sid(), owner.principal(), story, 1,
+                "A", "2", mapper.createObjectNode().set("inputData", large), UUID.randomUUID()));
+        assertThat(versionRev(story)).isEqualTo(2);
+        assertThat(gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1,
+                "A", UUID.randomUUID()).item().inputData().path("report").asText()).hasSize(130900);
+    }
+
+    @Test
+    void gradeSamplesHttpAcceptsExactRawSubfieldLimitAndRejectsNextByte() throws Exception {
+        Fixture owner = account(true, false, (byte) -89);
+        String story = create(owner, "원본 JSON 바이트 경계");
+        gradeSamples.createGradeSample(owner.sid(), owner.principal(), story, 1, "0",
+                mapper.createObjectNode().put("code", "A"), UUID.randomUUID());
+        String base = "/admin/api/stories/" + story + "/versions/1/grade-samples/A";
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(owner);
+        long rev = 1;
+        for (String field : java.util.List.of("inputData", "expectData")) {
+            int limit = field.equals("inputData") ? 128 * 1024 : 64 * 1024;
+            String raw = "{\"formatNo\":1" + " ".repeat(limit - "{\"formatNo\":1}".length()) + "}";
+            assertThat(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8)).hasSize(limit);
+            String request = "{\"expectedRev\":\"" + rev + "\",\"changes\":{\"" + field + "\":" + raw + "}}";
+            mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base),
+                    session, csrf, token, request)).andExpect(status().isOk());
+            rev++;
+            String exceeded = "{\"expectedRev\":\"" + rev + "\",\"changes\":{\"" + field
+                    + "\":" + raw.substring(0, raw.length() - 1) + " " + "}" + "}}";
+            mvc.perform(write(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(base),
+                    session, csrf, token, exceeded)).andExpect(status().isUnprocessableEntity());
+            assertThat(versionRev(story)).isEqualTo(rev);
+        }
+        var sample = gradeSamples.getGradeSampleDetail(owner.sid(), owner.principal(), story, 1, "A", UUID.randomUUID());
+        assertThat(sample.item().inputData().path("formatNo").asInt()).isEqualTo(1);
+        assertThat(sample.item().expectData().path("formatNo").asInt()).isEqualTo(1);
     }
 
     /** 전체 자식 원고·부모 시각·수정번호·쓰기 감사를 비교하고 읽기 감사는 제외한다. */

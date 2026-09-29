@@ -10,6 +10,7 @@ import { exerciseHints } from "./story-hints.mjs";
 import { exerciseEvents } from "./story-events.mjs";
 import { exerciseFacts } from "./story-facts.mjs";
 import { exerciseRubrics } from "./story-rubrics.mjs";
+import { exerciseGradeSamples } from "./story-grade-samples.mjs";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -947,6 +948,17 @@ try {
     loseResponse,
   });
   await exerciseRubrics({
+    page,
+    apiPath,
+    baseUrl: fixture.url,
+    api: childApi,
+    edit,
+    save,
+    notice,
+    layout,
+    loseResponse,
+  });
+  await exerciseGradeSamples({
     page,
     apiPath,
     baseUrl: fixture.url,
