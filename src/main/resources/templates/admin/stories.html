@@ -159,6 +159,92 @@
           <button type="button" id="state-change">사건 상태 변경</button>
         </div>
       </section>
+      <section id="ownership-panel" hidden aria-labelledby="ownership-heading">
+        <h2 id="ownership-heading" tabindex="-1">사건 소유권 인계</h2>
+        <p id="ownership-summary"></p>
+        <p id="ownership-result" role="status" aria-live="polite"></p>
+        <button type="button" id="ownership-refresh" class="secondary">
+          현재 소유권 다시 조회</button
+        ><button type="button" id="ownership-close" class="secondary">
+          닫기
+        </button>
+        <div id="ownership-pending" hidden>
+          <h3>지정 수신자와 요청 효력</h3>
+          <p id="ownership-pending-detail"></p>
+          <button type="button" id="ownership-accept" hidden>인계 수락</button>
+          <button type="button" id="ownership-cancel" class="secondary" hidden>
+            소유자 요청 취소
+          </button>
+          <button type="button" id="ownership-decline" class="secondary" hidden>
+            수신자 요청 거절
+          </button>
+        </div>
+        <form id="ownership-request-form" hidden>
+          <h3>활성 공동 편집자에게 인계 요청</h3>
+          <label for="ownership-recipient">수신자 accountKey</label
+          ><input
+            id="ownership-recipient"
+            name="toAccountKey"
+            required
+            autocomplete="off"
+            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+          />
+          <label class="impact-confirm" for="ownership-keep-editor">
+            <input
+              type="checkbox"
+              id="ownership-keep-editor"
+              name="keepEditor"
+            />
+            수락 뒤 이전 소유자의 EDIT 관계 유지
+          </label>
+          <label for="ownership-reference">별도 확인 참조 (비개인 8~64자)</label
+          ><input
+            id="ownership-reference"
+            name="verificationRef"
+            required
+            autocomplete="off"
+            pattern="[A-Za-z0-9_-]{8,64}"
+          />
+          <button type="submit">24시간 인계 요청</button>
+        </form>
+        <form id="ownership-override-form" hidden>
+          <h3>운영 예외 인계</h3>
+          <p>실제 비활성 또는 복구 제한 소유자에게서만 소유권을 복구합니다.</p>
+          <label for="ownership-override-recipient">새 소유자 accountKey</label
+          ><input
+            id="ownership-override-recipient"
+            name="toAccountKey"
+            required
+            autocomplete="off"
+            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+          />
+          <label for="ownership-override-reason">확인된 소유자 상태</label
+          ><select id="ownership-override-reason" name="reasonCode">
+            <option value="OWNER_DISABLED">소유자 비활성</option>
+            <option value="OWNER_RECOVERY">소유자 복구 제한</option>
+          </select>
+          <label for="ownership-override-reference"
+            >별도 확인 참조 (비개인 8~64자)</label
+          ><input
+            id="ownership-override-reference"
+            name="verificationRef"
+            required
+            autocomplete="off"
+            pattern="[A-Za-z0-9_-]{8,64}"
+          />
+          <button type="submit">예외 인계 확인</button>
+        </form>
+        <div id="ownership-reconcile" hidden>
+          <p>
+            변경 확정 여부가 불확실합니다. 원래 의도 키로만 결과를 조회합니다.
+          </p>
+          <button type="button" id="ownership-replay" class="secondary">
+            동일 의도 영수증 확인</button
+          ><button type="button" id="ownership-new-intent" class="secondary">
+            현재 상태 확인 후 새 의도 준비
+          </button>
+        </div>
+      </section>
     </main>
     <dialog id="story-reauth" aria-labelledby="story-reauth-heading">
       <form id="story-reauth-form">

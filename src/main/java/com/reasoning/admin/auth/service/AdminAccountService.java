@@ -1,9 +1,12 @@
-package com.reasoning.common.auth.service;
+package com.reasoning.admin.auth.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminImpactService;
+import com.reasoning.common.auth.service.AuthException;
+import com.reasoning.common.auth.service.CryptoService;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.sql.Timestamp;

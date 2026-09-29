@@ -12,6 +12,7 @@ import { exerciseFacts } from "./story-facts.mjs";
 import { exerciseRubrics } from "./story-rubrics.mjs";
 import { exerciseGradeSamples } from "./story-grade-samples.mjs";
 import { exerciseStoryAccess } from "./story-access.mjs";
+import { exerciseStoryOwnership } from "./story-ownership.mjs";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -971,9 +972,20 @@ try {
     loseResponse,
   });
 
-  await exerciseStoryAccess({
+  const ownershipCode = await exerciseStoryAccess({
     page,
     baseUrl: fixture.url,
+    api: childApi,
+    notice,
+    layout,
+  });
+  await exerciseStoryOwnership({
+    browser,
+    page,
+    baseUrl: fixture.url,
+    code: ownershipCode,
+    fixture,
+    otp,
     api: childApi,
     notice,
     layout,

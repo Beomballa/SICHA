@@ -95,4 +95,5 @@ export async function exerciseStoryAccess({
   console.log(
     "PASS HTTPS access grant/revoke, withdrawal, impact review and restore",
   );
+  return code;
 }

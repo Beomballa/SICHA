@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.querydsl.core.Tuple;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-import com.reasoning.admin.auth.session.AdminSessionAdapter;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
+import com.reasoning.common.auth.service.AdminSessionVerifier;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.auth.service.CryptoService;
 import com.reasoning.common.story.entity.QStory;
@@ -39,12 +39,12 @@ public class StoryService {
     private static final Set<String> REVEAL = Set.of("revealText");
     private final JdbcTemplate db;
     private final TransactionTemplate tx;
-    private final AdminSessionAdapter sessions;
+    private final AdminSessionVerifier sessions;
     private final CryptoService crypto;
     private final ObjectMapper json;
     private final JPAQueryFactory queries;
 
-    public StoryService(JdbcTemplate db, PlatformTransactionManager manager, AdminSessionAdapter sessions,
+    public StoryService(JdbcTemplate db, PlatformTransactionManager manager, AdminSessionVerifier sessions,
             CryptoService crypto, ObjectMapper json, EntityManager em) {
         this.db = db;
         this.tx = new TransactionTemplate(manager);
@@ -64,7 +64,7 @@ public class StoryService {
      * @return 새 사건·버전 식별자와 초기 수정번호
      * @throws AuthException 입력 오류, 권한 회수, 중복 생성 의도 또는 감사 장애 발생 시
      */
-    public StoryCreated createStory(String sid, AdminPrincipal actor, UUID createKey, String title, UUID requestId) {
+    public StoryCreated createStory(String sid, AdminActor actor, UUID createKey, String title, UUID requestId) {
         if (createKey == null || createKey.version() != 4 || requestId == null) throw AuthException.badRequest("INVALID_REQUEST");
         String value = text(title, 160, false);
         precheck(sid, actor);
@@ -91,7 +91,7 @@ public class StoryService {
      * @return 허용된 목록과 다음 커서 및 추가 페이지 유무
      * @throws AuthException 필터 오류, 권한 만료 또는 저장소 장애 발생 시
      */
-    public StoryPage getStoryList(String sid, AdminPrincipal actor, Integer size, String afterId, String code, Boolean activeYn) {
+    public StoryPage getStoryList(String sid, AdminActor actor, Integer size, String afterId, String code, Boolean activeYn) {
         int count = size == null ? 20 : size;
         if (count < 1 || count > 100 || code != null && !code.matches("[A-Z0-9_]{1,40}")) throw AuthException.badRequest("INVALID_REQUEST");
         Long cursor = afterId == null ? null : positive(afterId);
@@ -143,7 +143,7 @@ public class StoryService {
      * @return 저장된 영역, 서버 정책 투영과 차단하지 않는 경고
      * @throws AuthException 접근 불가·대상 없음·권한 만료 또는 필수 조회 감사 실패 시
      */
-    public VersionDetail getStoryDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo, UUID requestId) {
+    public VersionDetail getStoryDetail(String sid, AdminActor actor, String storyCode, int versionNo, UUID requestId) {
         if (requestId == null) throw AuthException.badRequest("INVALID_REQUEST");
         path(storyCode, versionNo);
         precheck(sid, actor);
@@ -164,7 +164,7 @@ public class StoryService {
      * @param versionNo 양의 버전 번호
      * @throws AuthException 인증 만료, 대상 비노출 또는 저장소 장애 시
      */
-    public void checkStoryAccess(String sid, AdminPrincipal actor, String storyCode, int versionNo) {
+    public void checkStoryAccess(String sid, AdminActor actor, String storyCode, int versionNo) {
         path(storyCode, versionNo);
         precheck(sid, actor);
         transact(() -> {
@@ -191,7 +191,7 @@ public class StoryService {
      * @return 확정된 콘텐츠 수정번호, 실제 변경 여부와 경고
      * @throws AuthException 데이터 오류, 거부·비활성 대상, 수정 충돌 또는 감사 실패 시
      */
-    public ContentResult updateStorySection(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateStorySection(String sid, AdminActor actor, String storyCode, int versionNo,
             String section, String expectedRev, JsonNode changes, UUID requestId) {
         path(storyCode, versionNo);
         Set<String> allowed = switch (section == null ? "" : section) {
@@ -244,7 +244,7 @@ public class StoryService {
      * @return 원고 없는 사건 상태·수정번호·감사 확정 상태
      * @throws AuthException 권한·재인증·수명주기·수정번호·감사 실패 시
      */
-    public StoryStateResult updateStoryActive(String sid, AdminPrincipal actor, String storyCode,
+    public StoryStateResult updateStoryActive(String sid, AdminActor actor, String storyCode,
             String expectedStoryRev, String expectedRev, boolean active, String reasonCode,
             String verificationRef, UUID requestId) {
         path(storyCode, 1);
@@ -298,7 +298,7 @@ public class StoryService {
      * @param work 잠금 중 실행할 짧은 DB 동작이며 원격 호출·사용자 대기는 허용하지 않는다
      * @return 현재 권한으로 확정된 목록 또는 관계 영수증
      */
-    <T> T withStoryAccess(String sid, AdminPrincipal actor, String code, UUID targetKey,
+    <T> T withStoryAccess(String sid, AdminActor actor, String code, UUID targetKey,
             String expectedStoryRev, Boolean ownerOnly, java.util.function.Function<AccessScope, T> work) {
         path(code, 1);
         Long expected = expectedStoryRev == null ? null : revision(expectedStoryRev);
@@ -309,13 +309,7 @@ public class StoryService {
                     rs -> rs.next() ? rs.getLong(1) : null, targetKey);
             List<Long> ids = new ArrayList<>(List.of(actor.accountId()));
             if (targetId != null && targetId != actor.accountId()) ids.add(targetId);
-            ids.sort(Long::compareTo);
-            for (long id : ids) db.queryForObject("SELECT id FROM admin_account WHERE id=? FOR UPDATE", Long.class, id);
-            // 미완료 등록 행은 계정 관리 변경과 같은 enrollment→credential 순서를 지킨다.
-            if (targetId != null) db.query("SELECT id FROM admin_enrollment WHERE account_id=? AND completed_at IS NULL FOR UPDATE",
-                    rs -> { while (rs.next()) { } return null; }, targetId);
-            for (long id : ids) db.query("SELECT account_id FROM admin_credential WHERE account_id=? FOR UPDATE",
-                    rs -> { while (rs.next()) { } return null; }, id);
+            lockAccounts(ids);
             authorizeLocked(sid, actor);
             StoryRow story = story(code);
             boolean owner = story.owner == actor.accountId();
@@ -332,8 +326,59 @@ public class StoryService {
         }, null);
     }
 
+    /**
+     * 소유자·수신자·행위자의 현재 계정을 사건보다 먼저 잠그고 인계 상태·영수증 작업을 보호한다.
+     * @param sid 현재 일반 세션 ID
+     * @param actor 서버 검증 행위자
+     * @param code 대상 사건 코드
+     * @param recipientKey 잠금 전에 확인한 수신자 공개 UUID 또는 null
+     * @param work 현재 owner/recipient ID와 사건 수정번호를 대조할 짧은 DB 작업
+     * @return 현재 인증·최근 재인증에서 확인한 최소 조회 또는 인계 결과
+     */
+    <T> T withOwnership(String sid, AdminActor actor, String code, UUID recipientKey,
+            java.util.function.Function<OwnerScope, T> work) {
+        path(code, 1);
+        precheck(sid, actor);
+        return transact(() -> {
+            db.execute("SET LOCAL lock_timeout = '5s'");
+            Long priorOwner = db.query("SELECT owner_id FROM story WHERE code=?",
+                    rs -> rs.next() ? rs.getLong(1) : null, code);
+            Long recipient = recipientKey == null ? null : db.query("SELECT id FROM admin_account WHERE account_key=?",
+                    rs -> rs.next() ? rs.getLong(1) : null, recipientKey);
+            PendingPart pending = db.query("SELECT from_id,to_id FROM story_transfer WHERE story_id="
+                            + "(SELECT id FROM story WHERE code=?) AND state='PENDING'",
+                    rs -> rs.next() ? new PendingPart(rs.getLong(1), rs.getLong(2)) : null, code);
+            List<Long> ids = new ArrayList<>(List.of(actor.accountId()));
+            if (priorOwner != null) ids.add(priorOwner);
+            if (recipient != null) ids.add(recipient);
+            if (pending != null) { ids.add(pending.fromId()); ids.add(pending.toId()); }
+            lockAccounts(ids);
+            authorizeLocked(sid, actor);
+            StoryRow story = story(code);
+            if (priorOwner == null || priorOwner != story.owner) throw AuthException.conflict("TRANSFER_INVALIDATED");
+            PendingPart currentPending = db.query("SELECT from_id,to_id FROM story_transfer WHERE story_id=? AND state='PENDING'",
+                    rs -> rs.next() ? new PendingPart(rs.getLong(1), rs.getLong(2)) : null, story.id);
+            if (!java.util.Objects.equals(pending, currentPending))
+                throw AuthException.conflict("TRANSFER_INVALIDATED");
+            recentReauth(actor);
+            UUID ownerKey = db.queryForObject("SELECT account_key FROM admin_account WHERE id=?", UUID.class, story.owner);
+            return work.apply(new OwnerScope(story.id, story.owner, ownerKey, story.rev, story.active,
+                    recipient, pending == null ? null : pending.toId()));
+        }, null);
+    }
+
+    /** 관리자 계정→등록→자격증명의 고정 잠금 순서를 사건 관리·인계가 공유한다. */
+    private void lockAccounts(List<Long> candidates) {
+        List<Long> ids = candidates.stream().distinct().sorted().toList();
+        for (long id : ids) db.queryForObject("SELECT id FROM admin_account WHERE id=? FOR UPDATE", Long.class, id);
+        for (long id : ids) db.query("SELECT id FROM admin_enrollment WHERE account_id=? AND completed_at IS NULL FOR UPDATE",
+                rs -> { while (rs.next()) { } return null; }, id);
+        for (long id : ids) db.query("SELECT account_id FROM admin_credential WHERE account_id=? FOR UPDATE",
+                rs -> { while (rs.next()) { } return null; }, id);
+    }
+
     /** 최근 5분 재인증은 세션의 현재 DB 시각으로 검사한다. */
-    private void recentReauth(AdminPrincipal actor) {
+    private void recentReauth(AdminActor actor) {
         Boolean recent = db.queryForObject("SELECT reauth_at<=clock_timestamp() "
                         + "AND clock_timestamp()<reauth_at+interval '5 minutes' FROM admin_session "
                         + "WHERE session_key=? AND account_id=? AND auth_rev=? AND state='ACTIVE'",
@@ -355,7 +400,7 @@ public class StoryService {
      * @param audited false는 첫 감사 실패 뒤의 회수 전용 독립 TX에서만 사용한다
      * @return 확정될 새 사건 수정번호
      */
-    long recordAccessChange(AccessScope scope, AdminPrincipal actor, UUID targetKey, String permission,
+    long recordAccessChange(AccessScope scope, AdminActor actor, UUID targetKey, String permission,
             boolean before, boolean after, String reason, String ref, UUID id, boolean audited) {
         if (scope.rev == Long.MAX_VALUE) throw AuthException.conflict("EDIT_CONFLICT");
         db.update("UPDATE story SET edit_rev=edit_rev+1,updated_at=clock_timestamp() WHERE id=?", scope.storyId);
@@ -379,6 +424,16 @@ public class StoryService {
         return scope.rev + 1;
     }
 
+    /** 승인된 인계 행동만 기존 4 KiB 필수 감사에 연결한다. 시스템 정비는 행위자를 NULL로 둔다. */
+    void auditOwnership(OwnerScope scope, AdminActor actor, String action, long before, long after,
+            Map<String, Object> detail) {
+        boolean system = Set.of("OWNER_EXPIRED", "OWNER_INVALIDATED").contains(action);
+        if (system != (actor == null) || !Set.of("OWNER_REQUESTED", "OWNER_ACCEPTED", "OWNER_CANCELLED",
+                "OWNER_DECLINED", "OWNER_EXPIRED", "OWNER_INVALIDATED", "OWNER_OVERRIDDEN").contains(action))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        insertAudit(scope.storyId(), null, actor, action, before, after, detail);
+    }
+
     /** 필수 업무 감사 실패만 보안 축소의 독립 차단 재검사로 연결한다. */
     static final class AccessAuditFailure extends RuntimeException {
         AccessAuditFailure(DataAccessException cause) { super(cause); }
@@ -394,7 +449,7 @@ public class StoryService {
      * @param work 보호된 같은 트랜잭션에서 수행할 동기 DB 작업이며 네트워크·사용자 대기를 해서는 안 된다
      * @return 작업의 원문 없는 영수증 또는 인가된 조회 값
      */
-    <T> T withVersion(String sid, AdminPrincipal actor, String code, int number, String expectedRev,
+    <T> T withVersion(String sid, AdminActor actor, String code, int number, String expectedRev,
             java.util.function.Function<VersionScope, T> work) {
         path(code, number);
         Long expected = expectedRev == null ? null : revision(expectedRev);
@@ -407,7 +462,7 @@ public class StoryService {
     }
 
     /** 트랜잭션 내부에서 대상 노출을 먼저 검사한 뒤 선택적 편집 권한·상태·수정번호를 확인한다. */
-    private LockedVersion lockVersion(String sid, AdminPrincipal actor, String code, int number, Long expected) {
+    private LockedVersion lockVersion(String sid, AdminActor actor, String code, int number, Long expected) {
         Account account = authorizeLocked(sid, actor);
         StoryRow story = story(code);
         permit(story, account, actor, false);
@@ -432,7 +487,7 @@ public class StoryService {
      * @param requestId 필수 감사에 연결할 null이 아닌 서버 요청 ID
      * @return 감사까지 성공한 현재 콘텐츠 수정번호
      */
-    long recordChildChange(VersionScope scope, AdminPrincipal actor, String resource, String action, String key,
+    long recordChildChange(VersionScope scope, AdminActor actor, String resource, String action, String key,
             List<String> fields, UUID requestId) {
         if (!Set.of("persons", "roles", "pairs", "clues", "clue-roles", "hints", "events", "facts", "rubrics", "rubric-clues", "grade-samples").contains(resource)) throw AuthException.badRequest("INVALID_REQUEST");
         boolean change = !"CONTENT_READ".equals(action);
@@ -479,12 +534,12 @@ public class StoryService {
         return List.copyOf(result);
     }
 
-    private void precheck(String sid, AdminPrincipal actor) {
-        if (sid == null || actor == null || !actor.equals(sessions.findStoredPrincipal(sid).orElse(null)))
+    private void precheck(String sid, AdminActor actor) {
+        if (!sessions.matchesStored(sid, actor))
             throw AuthException.unauthorized("AUTH_REQUIRED");
     }
 
-    private Account authorizeLocked(String sid, AdminPrincipal actor) {
+    private Account authorizeLocked(String sid, AdminActor actor) {
         db.execute("SET LOCAL lock_timeout = '5s'");
         Account account = db.query("SELECT a.id,a.account_key,a.active_yn,a.can_create,a.can_review,a.can_publish,c.auth_rev,c.enrolled_at,c.mfa_state "
                         + "FROM admin_account a JOIN admin_credential c ON c.account_id=a.id WHERE a.id=? FOR UPDATE OF a,c",
@@ -527,7 +582,7 @@ public class StoryService {
         return rs.wasNull() ? null : value;
     }
 
-    private void permit(StoryRow s, Account a, AdminPrincipal actor, boolean edit) {
+    private void permit(StoryRow s, Account a, AdminActor actor, boolean edit) {
         if (s.owner == actor.accountId()) return;
         if (!s.active) throw missing();
         int count = db.queryForObject("SELECT count(*) FROM story_access WHERE story_id=? AND admin_id=? AND active_yn "
@@ -626,7 +681,7 @@ public class StoryService {
         }
     }
 
-    private void audit(long storyId, Long versionId, AdminPrincipal actor, String action, Long before, Long after,
+    private void audit(long storyId, Long versionId, AdminActor actor, String action, Long before, Long after,
             UUID requestId, String scope, List<String> fields) {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("requestId", requestId); detail.put("revisionScope", scope);
@@ -635,13 +690,13 @@ public class StoryService {
     }
 
     /** 원문을 받지 않는 고정 감사 항목을 4 KiB 이내 JSON으로 저장하며 실패 시 업무를 되돌린다. */
-    private void insertAudit(long storyId, Long versionId, AdminPrincipal actor, String action, Long before, Long after,
+    private void insertAudit(long storyId, Long versionId, AdminActor actor, String action, Long before, Long after,
             Map<String, Object> detail) {
         try {
             String serialized = json.writeValueAsString(detail);
             if (serialized.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 4096) throw AuthException.unprocessable("INVALID_INPUT");
             db.update("INSERT INTO story_audit(story_id,version_id,actor_id,action,before_rev,after_rev,detail) VALUES (?,?,?,?,?,?,?::jsonb)",
-                    storyId, versionId, actor.accountId(), action, before, after, serialized);
+                    storyId, versionId, actor == null ? null : actor.accountId(), action, before, after, serialized);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) { throw AuthException.unavailable("STORY_UNAVAILABLE"); }
     }
 
@@ -681,6 +736,9 @@ public class StoryService {
     /** 자식 서비스에 필요한 내부 식별자·수정번호만 전달하며 HTTP로 노출하지 않는다. */
     record VersionScope(long storyId, long versionId, long rev, String culprit, List<Warning> warnings) {}
     record AccessScope(long storyId, long rev, boolean active, long ownerId, UUID ownerKey, Long targetId) {}
+    record OwnerScope(long storyId, long ownerId, UUID ownerKey, long rev, boolean active,
+            Long recipientId, Long pendingRecipientId) {}
+    private record PendingPart(long fromId, long toId) {}
     private record VersionRow(long id, long rev, String status, String title, String intro, String setting, Short difficulty,
             Short estMin, Short estMax, Integer limitSec, String policy, String culprit, String method, String time,
             String motive, String timelineOrigin, String reveal, Long snapshot, boolean active, Instant updatedAt) {}

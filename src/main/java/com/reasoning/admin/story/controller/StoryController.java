@@ -20,6 +20,7 @@ import com.reasoning.common.story.service.StoryRubricService;
 import com.reasoning.common.story.service.StoryRubricClueService;
 import com.reasoning.common.story.service.StoryGradeSampleService;
 import com.reasoning.common.story.service.StoryAccessService;
+import com.reasoning.common.story.service.StoryOwnershipService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -60,11 +61,13 @@ public final class StoryController {
     private final StoryRubricClueService rubricClues;
     private final StoryGradeSampleService gradeSamples;
     private final StoryAccessService access;
+    private final StoryOwnershipService ownership;
 
     public StoryController(StoryService stories, AdminSessionAdapter sessions, ObjectMapper mapper,
             StoryPersonService persons, StoryRoleService roles, StoryClueService clues, StoryHintService hints,
             StoryEventService events, StoryFactService facts, StoryRubricService rubrics,
-            StoryRubricClueService rubricClues, StoryGradeSampleService gradeSamples, StoryAccessService access) {
+            StoryRubricClueService rubricClues, StoryGradeSampleService gradeSamples, StoryAccessService access,
+            StoryOwnershipService ownership) {
         this.stories = stories;
         this.sessions = sessions;
         this.mapper = mapper;
@@ -78,6 +81,7 @@ public final class StoryController {
         this.rubricClues = rubricClues;
         this.gradeSamples = gradeSamples;
         this.access = access;
+        this.ownership = ownership;
     }
 
     /**
@@ -198,6 +202,74 @@ public final class StoryController {
                         permission, reason, reference, requestId)
                 : access.revokeAccess(actor.id(), actor.principal(), storyCode, expected, accountKey,
                         permission, reason, reference, requestId));
+    }
+
+    /** 사건 원고 없이 소유자·지정 수신자·MANAGE의 현재 인계 효력을 조회한다. */
+    @GetMapping("/{storyCode}/ownership")
+    public ResponseEntity<?> getStoryOwnership(@PathVariable String storyCode, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        return ok(ownership.getOwnership(actor.id(), actor.principal(), storyCode, requestId(request)));
+    }
+
+    /** 활성 사건의 소유자만 활성 공동 EDIT에게 24시간 수락 요청을 생성한다. */
+    @PostMapping("/{storyCode}/ownership/requests")
+    public ResponseEntity<?> requestStoryTransfer(@PathVariable String storyCode, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedStoryRev", "toAccountKey", "keepEditor",
+                "reasonCode", "verificationRef", "requestKey"));
+        if (!payload.get("keepEditor").isBoolean()) throw AuthException.badRequest("INVALID_REQUEST");
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .body(ownership.requestTransfer(actor.id(), actor.principal(), storyCode,
+                        text(payload, "expectedStoryRev"), uuid(payload, "toAccountKey", false),
+                        payload.get("keepEditor").booleanValue(), text(payload, "reasonCode"),
+                        text(payload, "verificationRef"), uuid(payload, "requestKey", true), requestId(request)));
+    }
+
+    /** 서버 발급 요청의 지정 수신자만 최신 세대·EDIT·기한 검증 후 소유권을 수락한다. */
+    @PostMapping("/{storyCode}/ownership/requests/{transferKey}/accept")
+    public ResponseEntity<?> acceptStoryTransfer(@PathVariable String storyCode, @PathVariable String transferKey,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedStoryRev", "requestKey"));
+        return ok(ownership.acceptTransfer(actor.id(), actor.principal(), storyCode,
+                uuid(transferKey, true), text(payload, "expectedStoryRev"),
+                uuid(payload, "requestKey", true), requestId(request)));
+    }
+
+    /** 현재 소유자는 취소, 지정 수신자는 거절로 유효 요청을 종료한다. */
+    @PostMapping("/{storyCode}/ownership/requests/{transferKey}/close")
+    public ResponseEntity<?> closeStoryTransfer(@PathVariable String storyCode, @PathVariable String transferKey,
+            HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedStoryRev", "decision", "requestKey"));
+        return ok(ownership.closeTransfer(actor.id(), actor.principal(), storyCode, uuid(transferKey, true),
+                text(payload, "expectedStoryRev"), text(payload, "decision"),
+                uuid(payload, "requestKey", true), requestId(request)));
+    }
+
+    /** 정상 소유자가 비활성/복구 제한인 경우에만 MANAGE가 사건 소유권을 복구한다. */
+    @PostMapping("/{storyCode}/ownership/override")
+    public ResponseEntity<?> overrideStoryTransfer(@PathVariable String storyCode, HttpServletRequest request) {
+        CurrentSession actor = current(request);
+        JsonNode payload = body(request, 8192, Set.of("expectedStoryRev", "toAccountKey", "keepEditor",
+                "reasonCode", "verificationRef", "requestKey"));
+        if (!payload.get("keepEditor").isBoolean()) throw AuthException.badRequest("INVALID_REQUEST");
+        return ok(ownership.overrideTransfer(actor.id(), actor.principal(), storyCode,
+                text(payload, "expectedStoryRev"), uuid(payload, "toAccountKey", false),
+                payload.get("keepEditor").booleanValue(), text(payload, "reasonCode"),
+                text(payload, "verificationRef"), uuid(payload, "requestKey", true), requestId(request)));
+    }
+
+    /** 정규 길이 UUID와 v4 의도 키를 임의 관대한 파싱 없이 검사한다. */
+    private static UUID uuid(JsonNode body, String field, boolean v4) {
+        return uuid(text(body, field), v4);
+    }
+
+    private static UUID uuid(String raw, boolean v4) {
+        if (!raw.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-" + (v4 ? "4" : "[0-9a-f]")
+                + "[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        return UUID.fromString(raw);
     }
 
     /**

@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.common.auth.service.AuthModels.SessionPrincipal;
 import com.reasoning.common.auth.service.EnrollmentService;
-import com.reasoning.common.auth.service.LoginSessionService;
+import com.reasoning.admin.auth.service.LoginSessionService;
 import com.reasoning.common.auth.service.TotpService;
 import jakarta.servlet.http.Cookie;
 import java.security.MessageDigest;

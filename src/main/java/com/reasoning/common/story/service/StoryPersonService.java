@@ -1,7 +1,7 @@
 package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -44,7 +44,7 @@ public final class StoryPersonService {
      * @param activeYn null이면 true이며 false는 보존 인물만 조회한다
      * @return 같은 부모 수정번호와 키·활성·수정시각 목록
      */
-    public PersonPage getPersonList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public PersonPage getPersonList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -73,7 +73,7 @@ public final class StoryPersonService {
      * @return 보호된 수정번호와 인물 단건
      * @throws AuthException 대상·자격이 없거나 필수 조회 감사에 실패한 경우
      */
-    public PersonDetail getPersonDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public PersonDetail getPersonDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -96,7 +96,7 @@ public final class StoryPersonService {
      * @return 원문을 반사하지 않는 ContentResult와 생성한 itemKey
      * @throws AuthException 잘못된 입력, 예약된 키, 오래된 번호 또는 필수 감사 장애 시
      */
-    public PersonCreated createPerson(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public PersonCreated createPerson(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         if (item == null || !item.isObject()) throw AuthException.badRequest("INVALID_REQUEST");
@@ -130,7 +130,7 @@ public final class StoryPersonService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 변화가 없으면 번호·시각·감사를 유지하는 원문 없는 결과
      */
-    public ContentResult updatePerson(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updatePerson(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -170,7 +170,7 @@ public final class StoryPersonService {
      * @return 실제 상태 변경만 수정번호를 증가시킨다
      * @throws AuthException 활성 범인·단서 참조, 대상 없음, 수정 충돌 또는 감사 실패 시
      */
-    public ContentResult updatePersonActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updatePersonActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);

@@ -1,7 +1,7 @@
 package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -42,7 +42,7 @@ public final class StoryHintService {
      * @param activeYn null이면 활성, false이면 비활성
      * @return 수정번호와 키·상태·시각 목록
      */
-    public HintPage getHintList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public HintPage getHintList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -68,7 +68,7 @@ public final class StoryHintService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 수정번호와 힌트 원고
      */
-    public HintDetail getHintDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public HintDetail getHintDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -90,7 +90,7 @@ public final class StoryHintService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 새 itemKey와 수정번호를 포함한 원고 없는 결과
      */
-    public ItemCreated createHint(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createHint(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -120,7 +120,7 @@ public final class StoryHintService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateHint(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateHint(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -157,7 +157,7 @@ public final class StoryHintService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 상태 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateHintActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateHintActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);

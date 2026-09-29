@@ -26,6 +26,7 @@ import com.reasoning.common.story.service.StoryRubricService;
 import com.reasoning.common.story.service.StoryRubricClueService;
 import com.reasoning.common.story.service.StoryGradeSampleService;
 import com.reasoning.common.story.service.StoryAccessService;
+import com.reasoning.common.story.service.StoryOwnershipService;
 import com.reasoning.common.story.entity.QStory;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
@@ -84,6 +85,7 @@ class StoryIT extends DatabaseContextTest {
     @Autowired StoryRubricClueService rubricClues;
     @Autowired StoryGradeSampleService gradeSamples;
     @Autowired StoryAccessService access;
+    @Autowired StoryOwnershipService ownership;
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired EntityManager entityManager;
@@ -2791,6 +2793,237 @@ class StoryIT extends DatabaseContextTest {
                 Integer.class, "/admin/api/stories/{storyCode}/access/grant", owner.principal().accountKey())).isPositive();
         assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE route=? AND actor_key=?",
                 Integer.class, "/admin/api/stories/{storyCode}/access/revoke", owner.principal().accountKey())).isPositive();
+    }
+
+    @Test
+    void ownerHandoverPersistsOneReceiptAndSwapsIntrinsicEditWithoutContentRevision() {
+        Fixture former = account(true, false, (byte) -73);
+        Fixture receiver = account(false, false, (byte) -72);
+        Fixture unrelated = account(false, false, (byte) -71);
+        String code = create(former, "소유권 수락 원고");
+        access.grantAccess(former.sid(), former.principal(), code, "0", receiver.principal().accountKey(),
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0016", UUID.randomUUID());
+        UUID createKey = UUID.randomUUID();
+        var requested = ownership.requestTransfer(former.sid(), former.principal(), code, "1",
+                receiver.principal().accountKey(), true, "HANDOVER", "CHECK_0017", createKey, UUID.randomUUID());
+        assertThat(requested.action()).isEqualTo("OWNER_REQ");
+        assertThat(requested.original().storyRev()).isEqualTo("2");
+        assertThat(requested.original().state()).isEqualTo("PENDING");
+        assertThat(requested.replayed()).isFalse();
+        assertThat(ownership.requestTransfer(former.sid(), former.principal(), code, "1",
+                receiver.principal().accountKey(), true, "HANDOVER", "CHECK_0017", createKey,
+                UUID.randomUUID()).replayed()).isTrue();
+        denied("REQUEST_KEY_CONFLICT", () -> ownership.requestTransfer(former.sid(), former.principal(), code, "1",
+                receiver.principal().accountKey(), false, "HANDOVER", "CHECK_0017", createKey, UUID.randomUUID()));
+        denied("TRANSFER_PENDING", () -> ownership.requestTransfer(former.sid(), former.principal(), code, "2",
+                receiver.principal().accountKey(), true, "HANDOVER", "CHECK_0018", UUID.randomUUID(), UUID.randomUUID()));
+        denied("NOT_FOUND", () -> ownership.getOwnership(unrelated.sid(), unrelated.principal(), code, UUID.randomUUID()));
+        assertThat(ownership.getOwnership(receiver.sid(), receiver.principal(), code, UUID.randomUUID())
+                .pending().effectiveState()).isEqualTo("PENDING");
+        UUID acceptKey = UUID.randomUUID();
+        var accepted = ownership.acceptTransfer(receiver.sid(), receiver.principal(), code,
+                requested.original().transferKey(), "2", acceptKey, UUID.randomUUID());
+        assertThat(accepted.original().state()).isEqualTo("ACCEPTED");
+        assertThat(accepted.original().storyRev()).isEqualTo("3");
+        assertThat(ownership.acceptTransfer(receiver.sid(), receiver.principal(), code,
+                requested.original().transferKey(), "2", acceptKey, UUID.randomUUID()).replayed()).isTrue();
+        assertThat(ownership.requestTransfer(former.sid(), former.principal(), code, "1",
+                receiver.principal().accountKey(), true, "HANDOVER", "CHECK_0017", createKey,
+                UUID.randomUUID()).replayed()).isTrue();
+        denied("NOT_FOUND", () -> ownership.getOwnership(former.sid(), former.principal(), code, UUID.randomUUID()));
+        assertThat(ownership.getOwnership(receiver.sid(), receiver.principal(), code, UUID.randomUUID())
+                .ownerAccountKey()).isEqualTo(receiver.principal().accountKey());
+        assertThat(db.queryForObject("SELECT count(*) FROM story_access WHERE story_id=? AND admin_id=? "
+                + "AND permission='EDIT' AND active_yn", Integer.class, storyId(code),
+                receiver.principal().accountId())).isZero();
+        assertThat(db.queryForObject("SELECT count(*) FROM story_access WHERE story_id=? AND admin_id=? "
+                + "AND permission='EDIT' AND active_yn", Integer.class, storyId(code),
+                former.principal().accountId())).isEqualTo(1);
+        assertThat(versionRev(code)).isZero();
+        assertThat(db.queryForObject("SELECT count(*) FROM story_action WHERE story_id=?", Integer.class,
+                storyId(code))).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? AND action LIKE 'OWNER_%'",
+                Integer.class, storyId(code))).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? AND "
+                + "detail::text LIKE '%소유권 수락 원고%'", Integer.class, storyId(code))).isZero();
+    }
+
+    @Test
+    void ownerTransferExpiryAndRevisionInvalidateWithoutReadSideEffects() {
+        Fixture former = account(true, false, (byte) -70);
+        Fixture recipient = account(false, false, (byte) -69);
+        String code = create(former, "만료 정비");
+        access.grantAccess(former.sid(), former.principal(), code, "0", recipient.principal().accountKey(),
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0019", UUID.randomUUID());
+        var first = ownership.requestTransfer(former.sid(), former.principal(), code, "1",
+                recipient.principal().accountKey(), false, "HANDOVER", "CHECK_0020", UUID.randomUUID(), UUID.randomUUID());
+        db.update("UPDATE story_transfer SET created_at=created_at-interval '25 hours',"
+                + "expires_at=expires_at-interval '25 hours' WHERE transfer_key=?", first.original().transferKey());
+        assertThat(ownership.getOwnership(former.sid(), former.principal(), code, UUID.randomUUID())
+                .pending().effectiveState()).isEqualTo("EXPIRED");
+        assertThat(db.queryForObject("SELECT state FROM story_transfer WHERE transfer_key=?", String.class,
+                first.original().transferKey())).isEqualTo("PENDING");
+        denied("TRANSFER_EXPIRED", () -> ownership.acceptTransfer(recipient.sid(), recipient.principal(), code,
+                first.original().transferKey(), "2", UUID.randomUUID(), UUID.randomUUID()));
+        var next = ownership.requestTransfer(former.sid(), former.principal(), code, "2",
+                recipient.principal().accountKey(), false, "HANDOVER", "CHECK_0021", UUID.randomUUID(), UUID.randomUUID());
+        assertThat(db.queryForObject("SELECT state FROM story_transfer WHERE transfer_key=?", String.class,
+                first.original().transferKey())).isEqualTo("EXPIRED");
+        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE story_id=? "
+                + "AND action='OWNER_EXPIRED' AND actor_id IS NULL AND detail->>'actorKind'='SYSTEM'",
+                Integer.class, storyId(code))).isEqualTo(1);
+        assertThat(next.original().storyRev()).isEqualTo("3");
+        access.revokeAccess(former.sid(), former.principal(), code, "3", recipient.principal().accountKey(),
+                "EDIT", "ACCESS_REVIEW", "CHECK_0022", UUID.randomUUID());
+        assertThat(ownership.getOwnership(former.sid(), former.principal(), code, UUID.randomUUID())
+                .pending().effectiveState()).isEqualTo("INVALIDATED");
+        denied("TRANSFER_INVALIDATED", () -> ownership.closeTransfer(former.sid(), former.principal(), code,
+                next.original().transferKey(), "4", "CANCEL", UUID.randomUUID(), UUID.randomUUID()));
+        denied("ACCOUNT_NOT_READY", () -> ownership.requestTransfer(former.sid(), former.principal(), code, "4",
+                recipient.principal().accountKey(), false, "HANDOVER", "CHECK_0023", UUID.randomUUID(), UUID.randomUUID()));
+        assertThat(db.queryForObject("SELECT state FROM story_transfer WHERE transfer_key=?", String.class,
+                next.original().transferKey())).isEqualTo("PENDING");
+        access.grantAccess(former.sid(), former.principal(), code, "4", recipient.principal().accountKey(),
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0023", UUID.randomUUID());
+        assertThat(ownership.requestTransfer(former.sid(), former.principal(), code, "5",
+                recipient.principal().accountKey(), false, "HANDOVER", "CHECK_0023", UUID.randomUUID(), UUID.randomUUID())
+                .original().state()).isEqualTo("PENDING");
+        assertThat(db.queryForObject("SELECT state FROM story_transfer WHERE transfer_key=?", String.class,
+                next.original().transferKey())).isEqualTo("INVALIDATED");
+    }
+
+    @Test
+    void ownerCloseAndManagerOverridePreserveAuthAndContentGenerations() {
+        Fixture former = account(true, false, (byte) -68);
+        Fixture recipient = account(false, false, (byte) -67);
+        Fixture manager = account(false, true, (byte) -66);
+        String code = create(former, "긴급 소유권 복구");
+        access.grantAccess(former.sid(), former.principal(), code, "0", recipient.principal().accountKey(),
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0024", UUID.randomUUID());
+        var req = ownership.requestTransfer(former.sid(), former.principal(), code, "1",
+                recipient.principal().accountKey(), false, "HANDOVER", "CHECK_0025", UUID.randomUUID(), UUID.randomUUID());
+        UUID declineKey = UUID.randomUUID();
+        var declined = ownership.closeTransfer(recipient.sid(), recipient.principal(), code,
+                req.original().transferKey(), "2", "DECLINE", declineKey, UUID.randomUUID());
+        assertThat(declined.original().state()).isEqualTo("DECLINED");
+        assertThat(ownership.closeTransfer(recipient.sid(), recipient.principal(), code,
+                req.original().transferKey(), "2", "DECLINE", declineKey, UUID.randomUUID()).replayed()).isTrue();
+        denied("TRANSFER_CLOSED", () -> ownership.closeTransfer(former.sid(), former.principal(), code,
+                req.original().transferKey(), "3", "CANCEL", UUID.randomUUID(), UUID.randomUUID()));
+        denied("STATE_CONFLICT", () -> ownership.overrideTransfer(manager.sid(), manager.principal(), code, "3",
+                recipient.principal().accountKey(), false, "OWNER_DISABLED", "CHECK_0026", UUID.randomUUID(), UUID.randomUUID()));
+        var pending = ownership.requestTransfer(former.sid(), former.principal(), code, "3",
+                recipient.principal().accountKey(), false, "HANDOVER", "CHECK_0027", UUID.randomUUID(), UUID.randomUUID());
+        db.update("UPDATE admin_account SET active_yn=false WHERE id=?", former.principal().accountId());
+        denied("ACCOUNT_NOT_READY", () -> ownership.overrideTransfer(manager.sid(), manager.principal(), code, "4",
+                recipient.principal().accountKey(), true, "OWNER_DISABLED", "CHECK_0028", UUID.randomUUID(), UUID.randomUUID()));
+        var forced = ownership.overrideTransfer(manager.sid(), manager.principal(), code, "4",
+                recipient.principal().accountKey(), false, "OWNER_DISABLED", "CHECK_0028", UUID.randomUUID(), UUID.randomUUID());
+        assertThat(forced.original().state()).isEqualTo("OVERRIDDEN");
+        assertThat(forced.original().storyRev()).isEqualTo("5");
+        assertThat(db.queryForObject("SELECT state FROM story_transfer WHERE transfer_key=?", String.class,
+                pending.original().transferKey())).isEqualTo("INVALIDATED");
+        assertThat(ownership.getOwnership(manager.sid(), manager.principal(), code, UUID.randomUUID())
+                .ownerAccountKey()).isEqualTo(recipient.principal().accountKey());
+        assertThat(versionRev(code)).isZero();
+        assertThat(db.queryForObject("SELECT auth_rev FROM admin_credential WHERE account_id=?", Long.class,
+                recipient.principal().accountId())).isEqualTo(1);
+    }
+
+    @Test
+    void ownerAuditFailureRollsBackRequestReceiptAndAcceptanceAtomically() {
+        Fixture owner = account(true, false, (byte) -65);
+        Fixture recipient = account(false, false, (byte) -64);
+        String code = create(owner, "감사 실패의 소유권");
+        long story = storyId(code);
+        access.grantAccess(owner.sid(), owner.principal(), code, "0", recipient.principal().accountKey(),
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0029", UUID.randomUUID());
+        UUID requestKey = UUID.randomUUID();
+        db.execute("CREATE FUNCTION fail_owner_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "IF NEW.action IN ('OWNER_REQUESTED','OWNER_ACCEPTED') THEN "
+                + "RAISE EXCEPTION 'synthetic owner audit outage'; END IF; RETURN NEW; END $$");
+        db.execute("CREATE TRIGGER fail_owner_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_owner_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> ownership.requestTransfer(owner.sid(), owner.principal(), code, "1",
+                    recipient.principal().accountKey(), true, "HANDOVER", "CHECK_0030", requestKey, UUID.randomUUID()));
+            assertThat(db.queryForObject("SELECT edit_rev FROM story WHERE id=?", Long.class, story)).isEqualTo(1);
+            assertThat(db.queryForObject("SELECT count(*) FROM story_transfer WHERE story_id=?", Integer.class, story)).isZero();
+            assertThat(db.queryForObject("SELECT count(*) FROM story_action WHERE story_id=?", Integer.class, story)).isZero();
+        } finally {
+            db.execute("DROP TRIGGER fail_owner_audit_insert ON story_audit");
+        }
+        var requested = ownership.requestTransfer(owner.sid(), owner.principal(), code, "1",
+                recipient.principal().accountKey(), true, "HANDOVER", "CHECK_0030", requestKey, UUID.randomUUID());
+        UUID acceptKey = UUID.randomUUID();
+        db.execute("CREATE TRIGGER fail_owner_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
+                + "EXECUTE FUNCTION fail_owner_audit()");
+        try {
+            denied("STORY_UNAVAILABLE", () -> ownership.acceptTransfer(recipient.sid(), recipient.principal(), code,
+                    requested.original().transferKey(), "2", acceptKey, UUID.randomUUID()));
+        } finally {
+            db.execute("DROP TRIGGER fail_owner_audit_insert ON story_audit");
+            db.execute("DROP FUNCTION fail_owner_audit()");
+        }
+        assertThat(db.queryForObject("SELECT owner_id FROM story WHERE id=?", Long.class, story))
+                .isEqualTo(owner.principal().accountId());
+        assertThat(db.queryForObject("SELECT state FROM story_transfer WHERE story_id=?", String.class, story))
+                .isEqualTo("PENDING");
+        assertThat(db.queryForObject("SELECT edit_rev FROM story WHERE id=?", Long.class, story)).isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_action WHERE story_id=?", Integer.class, story)).isEqualTo(1);
+        assertThat(ownership.acceptTransfer(recipient.sid(), recipient.principal(), code,
+                requested.original().transferKey(), "2", acceptKey, UUID.randomUUID()).original().state())
+                .isEqualTo("ACCEPTED");
+    }
+
+    @Test
+    void ownerHttpValidatesExactIntentAndMasksTransferIdentifiersInAccessHistory() throws Exception {
+        Fixture former = account(true, false, (byte) -63);
+        Fixture receiver = account(false, false, (byte) -62);
+        String story = create(former, "인계 HTTP 비공개 원고");
+        access.grantAccess(former.sid(), former.principal(), story, "0", receiver.principal().accountKey(),
+                "EDIT", "ASSIGNMENT_CHANGE", "CHECK_0031", UUID.randomUUID());
+        String route = "/admin/api/stories/" + story + "/ownership";
+        var csrfResponse = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie csrf = csrfResponse.getCookie("__Host-admin-csrf");
+        String token = mapper.readTree(csrfResponse.getContentAsString()).path("token").asText();
+        Cookie session = cookie(former);
+        mvc.perform(get(route).secure(true).cookie(session)).andExpect(status().isOk()).andDo(r -> {
+            assertThat(r.getResponse().getContentAsString()).contains("\"storyRev\":\"1\"")
+                    .doesNotContain("인계 HTTP 비공개 원고");
+            assertThat(r.getResponse().getHeader("Cache-Control")).contains("no-store");
+        });
+        UUID requestKey = UUID.randomUUID();
+        String payload = "{\"expectedStoryRev\":\"1\",\"toAccountKey\":\"" + receiver.principal().accountKey()
+                + "\",\"keepEditor\":false,\"reasonCode\":\"HANDOVER\","
+                + "\"verificationRef\":\"CHECK_0032\",\"requestKey\":\"" + requestKey + "\"}";
+        mvc.perform(post(route + "/requests").secure(true).cookie(session).contentType("application/json")
+                .content(payload)).andExpect(status().isForbidden());
+        mvc.perform(write(post(route + "/requests"), session, csrf, token,
+                payload.substring(0, payload.length() - 1) + ",\"extra\":true}"))
+                .andExpect(status().isBadRequest());
+        String first = mvc.perform(write(post(route + "/requests"), session, csrf, token, payload))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String transferKey = mapper.readTree(first).path("original").path("transferKey").asText();
+        assertThat(first).contains("\"replayed\":false").doesNotContain("인계 HTTP 비공개 원고");
+        mvc.perform(write(post(route + "/requests"), session, csrf, token, payload))
+                .andExpect(status().isCreated()).andDo(r -> assertThat(r.getResponse().getContentAsString())
+                        .contains("\"replayed\":true"));
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE route=? AND actor_key=?",
+                Integer.class, "/admin/api/stories/{storyCode}/ownership/requests",
+                former.principal().accountKey())).isPositive();
+        var receiverCsrf = mvc.perform(get("/admin/api/auth/csrf").secure(true)).andReturn().getResponse();
+        Cookie rc = receiverCsrf.getCookie("__Host-admin-csrf");
+        String rt = mapper.readTree(receiverCsrf.getContentAsString()).path("token").asText();
+        String accept = "{\"expectedStoryRev\":\"2\",\"requestKey\":\"" + UUID.randomUUID() + "\"}";
+        mvc.perform(write(post(route + "/requests/" + transferKey + "/accept"), cookie(receiver), rc, rt, accept))
+                .andExpect(status().isOk()).andDo(r -> assertThat(r.getResponse().getContentAsString())
+                        .contains("\"state\":\"ACCEPTED\"").doesNotContain("인계 HTTP 비공개 원고"));
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE route=? AND actor_key=?",
+                Integer.class, "/admin/api/stories/{storyCode}/ownership/requests/{transferKey}/accept",
+                receiver.principal().accountKey())).isPositive();
+        assertThat(db.queryForObject("SELECT count(*) FROM access_history WHERE route LIKE ?",
+                Integer.class, "%" + transferKey + "%")).isZero();
     }
 
     /** 전체 자식 원고·부모 시각·수정번호·쓰기 감사를 비교하고 읽기 감사는 제외한다. */

@@ -3,7 +3,7 @@ package com.reasoning.admin.auth.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.CurrentSession;
-import com.reasoning.common.auth.service.AdminAccountService;
+import com.reasoning.admin.auth.service.AdminAccountService;
 import com.reasoning.common.auth.service.AuthException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

@@ -2,7 +2,7 @@ package com.reasoning.admin.story.controller;
 
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.common.auth.service.AuthException;
-import com.reasoning.common.auth.service.LoginSessionService;
+import com.reasoning.admin.auth.service.LoginSessionService;
 import com.reasoning.common.story.service.StoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

@@ -29,6 +29,7 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
     private static final Pattern ACCOUNT = Pattern.compile("/admin/accounts/[A-Za-z0-9_-]+");
     private static final Pattern ACCOUNT_API = Pattern.compile("/admin/api/accounts/[A-Za-z0-9_-]+(/permissions/(?:grant|revoke)|/deactivate|/reactivate|/reactivation-preview)?");
     private static final Pattern STORY = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+(/(?:deactivate|reactivate|access(?:/(?:grant|revoke))?)|/versions/[0-9]+(?:/sections/(?:basic|answer|reveal))?)?");
+    private static final Pattern STORY_OWNERSHIP = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/ownership(/requests(?:/([A-Za-z0-9_-]+)/(accept|close))?|/override)?");
     private static final Pattern STORY_PAGE_ACCESS = Pattern.compile("/admin/stories/[A-Za-z0-9_-]+/access");
     private static final Pattern STORY_PAGE_EDITOR = Pattern.compile("/admin/stories/[A-Za-z0-9_-]+/versions/[0-9]+");
     private static final Pattern STORY_PERSON = Pattern.compile("/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/persons(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
@@ -201,6 +202,12 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/grade-samples"
                     + (gradeSample.group(1) == null ? "" : "/{itemKey}")
                     + (gradeSample.group(2) == null ? "" : "/" + gradeSample.group(2));
+        }
+        Matcher ownership = STORY_OWNERSHIP.matcher(path);
+        if (ownership.matches()) {
+            return "/admin/api/stories/{storyCode}/ownership"
+                    + (ownership.group(1) == null ? "" : ownership.group(2) == null ? ownership.group(1)
+                    : "/requests/{transferKey}/" + ownership.group(3));
         }
         Matcher story = STORY.matcher(path);
         if (story.matches()) {

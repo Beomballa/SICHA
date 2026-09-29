@@ -3,7 +3,7 @@ package com.reasoning.common.story.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -48,7 +48,7 @@ public final class StoryGradeSampleService {
      * @param activeYn null이면 활성, false이면 비활성
      * @return 콘텐츠 수정번호와 키 목록
      */
-    public SamplePage getGradeSampleList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public SamplePage getGradeSampleList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -75,7 +75,7 @@ public final class StoryGradeSampleService {
      * @param requestId 필수 감사 요청 ID
      * @return 내부 계정 ID가 아닌 accountKey와 구조화 답안
      */
-    public SampleDetail getGradeSampleDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public SampleDetail getGradeSampleDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -97,7 +97,7 @@ public final class StoryGradeSampleService {
      * @param requestId 필수 감사 요청 ID
      * @return 원고 없는 생성 키와 확정 수정번호
      */
-    public ItemCreated createGradeSample(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createGradeSample(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -128,7 +128,7 @@ public final class StoryGradeSampleService {
      * @param requestId 필수 감사 요청 ID
      * @return 변경 여부와 원고 없는 현재 수정번호
      */
-    public ContentResult updateGradeSample(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateGradeSample(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -171,7 +171,7 @@ public final class StoryGradeSampleService {
      * @param requestId 필수 감사 요청 ID
      * @return 변경 여부와 확정 수정번호
      */
-    public ContentResult updateGradeSampleActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateGradeSampleActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);

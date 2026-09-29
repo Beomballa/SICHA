@@ -1,7 +1,7 @@
 package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -48,7 +48,7 @@ public final class StoryFactService {
      * @param activeYn null이면 활성, false이면 비활성
      * @return 부모 수정번호와 키·상태·시각 페이지
      */
-    public FactPage getFactList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public FactPage getFactList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -75,7 +75,7 @@ public final class StoryFactService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 부모 수정번호와 사실 원고
      */
-    public FactDetail getFactDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public FactDetail getFactDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -98,7 +98,7 @@ public final class StoryFactService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 원고 없는 생성 코드와 확정 수정번호
      */
-    public ItemCreated createFact(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createFact(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -129,7 +129,7 @@ public final class StoryFactService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateFact(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateFact(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -170,7 +170,7 @@ public final class StoryFactService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 상태 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateFactActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateFactActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);

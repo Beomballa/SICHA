@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
-import com.reasoning.common.auth.service.AdminAccountService;
+import com.reasoning.admin.auth.service.AdminAccountService;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.auth.service.CryptoService;
 import java.sql.Connection;

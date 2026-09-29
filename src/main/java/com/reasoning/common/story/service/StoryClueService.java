@@ -1,7 +1,7 @@
 package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -44,7 +44,7 @@ public final class StoryClueService {
      * @param activeYn null이면 활성, false이면 비활성
      * @return 수정번호와 키·상태·시각 목록
      */
-    public CluePage getClueList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public CluePage getClueList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = limit(size);
         if (afterKey != null) key(afterKey);
@@ -69,7 +69,7 @@ public final class StoryClueService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 비활성 행도 포함하는 단건과 수정번호
      */
-    public ClueDetail getClueDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ClueDetail getClueDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -92,7 +92,7 @@ public final class StoryClueService {
      * @return 새 itemKey 및 수정번호를 포함한 원고 없는 결과
      * @throws AuthException 예약된 키·비활성 인물·잘못된 입력·감사 실패 시
      */
-    public ItemCreated createClue(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createClue(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -123,7 +123,7 @@ public final class StoryClueService {
      * @return 실제 값이 바뀌었을 때만 증가하는 원고 없는 결과
      * @throws AuthException 활성 배정이 있는 COMMON 전환·비활성 인물·감사 실패 시
      */
-    public ContentResult updateClue(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateClue(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -168,7 +168,7 @@ public final class StoryClueService {
      * @return 실제 변경에만 증가하는 원고 없는 결과
      * @throws AuthException 활성 배정·채점 참조, 비활성 인물 또는 감사 실패 시
      */
-    public ContentResult updateClueActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateClueActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -197,7 +197,7 @@ public final class StoryClueService {
      * @param activeYn null이면 활성, false이면 비활성
      * @return 수정번호와 키·상태·시각 목록
      */
-    public AssignmentPage getClueRoleList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public AssignmentPage getClueRoleList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = limit(size);
         String[] cursor = afterKey == null ? null : assignmentKey(afterKey);
@@ -225,7 +225,7 @@ public final class StoryClueService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 비활성 행도 포함하는 관계 요소와 수정번호
      */
-    public AssignmentDetail getClueRoleDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public AssignmentDetail getClueRoleDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         String[] keys = assignmentKey(itemKey);
         requestId(requestId);
@@ -248,7 +248,7 @@ public final class StoryClueService {
      * @return 의미 순서의 생성 itemKey와 수정번호
      * @throws AuthException 비활성 대상·COMMON 단서·예약된 키·감사 실패 시
      */
-    public ItemCreated createClueRole(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createClueRole(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         if (item == null || !item.isObject() || item.size() != 2 || !item.has("clueCode") || !item.has("roleCode"))
@@ -278,7 +278,7 @@ public final class StoryClueService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateClueRoleActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateClueRoleActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         String[] keys = assignmentKey(itemKey);
         mutation(expectedRev, requestId);

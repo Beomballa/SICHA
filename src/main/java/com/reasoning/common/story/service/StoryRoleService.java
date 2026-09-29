@@ -1,7 +1,7 @@
 package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -45,7 +45,7 @@ public final class StoryRoleService {
      * @return 부모 수정번호와 코드·상태·시각만 포함한 페이지
      * @throws AuthException 입력·현재 인증·조회 자격이 유효하지 않을 때
      */
-    public RolePage getRoleList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public RolePage getRoleList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = limit(size);
         if (afterKey != null) key(afterKey);
@@ -71,7 +71,7 @@ public final class StoryRoleService {
      * @return 논리 삭제 상태도 포함하는 보호된 역할 원고
      * @throws AuthException 인증·조회 자격·대상 존재·필수 감사 확인 실패 시
      */
-    public RoleDetail getRoleDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public RoleDetail getRoleDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -94,7 +94,7 @@ public final class StoryRoleService {
      * @return 생성 키와 증가한 부모 수정번호이며 원고는 포함하지 않는다
      * @throws AuthException 입력·편집 자격·부모 상태·수정번호·키 예약·필수 감사 확인 실패 시
      */
-    public ItemCreated createRole(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createRole(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         if (item == null || !item.isObject()) throw AuthException.badRequest("INVALID_REQUEST");
@@ -126,7 +126,7 @@ public final class StoryRoleService {
      * @return 실제 변경 여부와 현재 부모 수정번호
      * @throws AuthException 입력·인가·상태·수정번호·대상 존재·필수 감사 확인 실패 시
      */
-    public ContentResult updateRole(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateRole(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -164,7 +164,7 @@ public final class StoryRoleService {
      * @return 실제 상태 변경 여부와 부모 수정번호
      * @throws AuthException 인가·상태·수정번호·활성 조합 또는 단서 배정 참조·필수 감사 확인 실패 시
      */
-    public ContentResult updateRoleActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateRoleActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -195,7 +195,7 @@ public final class StoryRoleService {
      * @return 원고 없는 조합 키·상태·시각과 같은 부모 수정번호
      * @throws AuthException 잘못된 키·페이지 크기 또는 현재 인증·조회 자격 실패 시
      */
-    public PairPage getPairList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public PairPage getPairList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = limit(size);
         String[] cursor = afterKey == null ? null : pairKey(afterKey);
@@ -224,7 +224,7 @@ public final class StoryRoleService {
      * @return 논리 삭제 상태를 포함한 관계 요소와 부모 수정번호
      * @throws AuthException 인증·조회 자격·키 형식·대상 존재·필수 감사 확인 실패 시
      */
-    public PairDetail getPairDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public PairDetail getPairDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         String[] keys = pairKey(itemKey);
         requestId(requestId);
@@ -247,7 +247,7 @@ public final class StoryRoleService {
      * @return 생성한 정규 복합 키와 증가한 부모 수정번호
      * @throws AuthException 입력·역할 참조·예약 키·인가·수정번호·필수 감사 확인 실패 시
      */
-    public ItemCreated createPair(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createPair(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         if (item == null || !item.isObject() || item.size() != 2 || !item.has("roleA") || !item.has("roleB"))
@@ -279,7 +279,7 @@ public final class StoryRoleService {
      * @return 실제 상태 변경 여부와 부모 수정번호
      * @throws AuthException 인가·상태·수정번호·복원 대상 역할·필수 감사 확인 실패 시
      */
-    public ContentResult updatePairActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updatePairActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         String[] keys = pairKey(itemKey);
         mutation(expectedRev, requestId);

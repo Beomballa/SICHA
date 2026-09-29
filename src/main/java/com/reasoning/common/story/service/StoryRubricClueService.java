@@ -2,7 +2,7 @@ package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -42,7 +42,7 @@ public final class StoryRubricClueService {
      * @param activeYn null/true는 활성, false는 비활성
      * @return 원고 없는 키·상태·시각과 수정번호
      */
-    public LinkPage getRubricClueList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public LinkPage getRubricClueList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -71,7 +71,7 @@ public final class StoryRubricClueService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 감사가 확정된 연결 원고와 수정번호
      */
-    public LinkDetail getRubricClueDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public LinkDetail getRubricClueDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         String[] keys = key(itemKey);
         requestId(requestId);
@@ -93,7 +93,7 @@ public final class StoryRubricClueService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 생성된 복합키·수정번호·경고, 원고 제외
      */
-    public ItemCreated createRubricClue(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createRubricClue(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -124,7 +124,7 @@ public final class StoryRubricClueService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 실제 변경에만 증가하는 수정번호·변경 여부·경고
      */
-    public ContentResult updateRubricClue(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateRubricClue(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         String[] keys = key(itemKey);
         mutation(expectedRev, requestId);
@@ -156,7 +156,7 @@ public final class StoryRubricClueService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 원고 없는 변경 여부·수정번호·경고
      */
-    public ContentResult updateRubricClueActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateRubricClueActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         String[] keys = key(itemKey);
         mutation(expectedRev, requestId);

@@ -1,6 +1,6 @@
 package com.reasoning.common.story.service;
 
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.AccessScope;
 import java.util.List;
@@ -36,7 +36,7 @@ public final class StoryAccessService {
      * @param afterKey 마지막 accountKey~permission 또는 null
      * @return 비활성 관계까지 포함한 목록과 전체 활성 관계 수
      */
-    public AccessPage getAccessList(String sid, AdminPrincipal actor, String storyCode, Integer size, String afterKey) {
+    public AccessPage getAccessList(String sid, AdminActor actor, String storyCode, Integer size, String afterKey) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
         String accountAfter = "";
@@ -82,7 +82,7 @@ public final class StoryAccessService {
      * @param requestId 필수 감사 요청 ID
      * @return 실제 변경에만 증가하는 사건 수정번호와 감사 상태
      */
-    public AccessResult grantAccess(String sid, AdminPrincipal actor, String storyCode, String expectedStoryRev,
+    public AccessResult grantAccess(String sid, AdminActor actor, String storyCode, String expectedStoryRev,
             UUID accountKey, String permission, String reasonCode, String verificationRef, UUID requestId) {
         validate(accountKey, permission, reasonCode, verificationRef, requestId, true);
         try {
@@ -106,7 +106,7 @@ public final class StoryAccessService {
      * @param requestId 필수 감사 요청 ID
      * @return 정상 감사, 불필요한 변경 또는 비상 감사 미확정의 영수증
      */
-    public AccessResult revokeAccess(String sid, AdminPrincipal actor, String storyCode, String expectedStoryRev,
+    public AccessResult revokeAccess(String sid, AdminActor actor, String storyCode, String expectedStoryRev,
             UUID accountKey, String permission, String reasonCode, String verificationRef, UUID requestId) {
         validate(accountKey, permission, reasonCode, verificationRef, requestId, false);
         try {
@@ -125,7 +125,7 @@ public final class StoryAccessService {
         }
     }
 
-    private AccessResult change(String sid, AdminPrincipal actor, String code, String expected, UUID key,
+    private AccessResult change(String sid, AdminActor actor, String code, String expected, UUID key,
             String permission, String reason, String ref, UUID requestId, boolean grant, boolean audited) {
         return stories.withStoryAccess(sid, actor, code, key, expected, "EDIT".equals(permission), scope -> {
             if ("EDIT".equals(permission) && scope.ownerId() == scope.targetId())

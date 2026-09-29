@@ -2,7 +2,7 @@ package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -79,7 +79,7 @@ public final class StoryRubricService {
      * @param activeYn null/true이면 활성, false이면 비활성
      * @return 수정번호와 키·상태·시각 페이지
      */
-    public RubricPage getRubricList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public RubricPage getRubricList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -105,7 +105,7 @@ public final class StoryRubricService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 현재 수정번호와 감사가 확정된 원고
      */
-    public RubricDetail getRubricDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public RubricDetail getRubricDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -127,7 +127,7 @@ public final class StoryRubricService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 원고 없는 생성 키·수정번호·현재 경고
      */
-    public ItemCreated createRubric(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createRubric(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -159,7 +159,7 @@ public final class StoryRubricService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 실제 변경에만 증가하는 수정번호·변경 여부·경고
      */
-    public ContentResult updateRubric(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateRubric(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -195,7 +195,7 @@ public final class StoryRubricService {
      * @param requestId 필수 감사 요청 ID, null 불가
      * @return 원고 없는 변경 여부·수정번호·경고
      */
-    public ContentResult updateRubricActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateRubricActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);

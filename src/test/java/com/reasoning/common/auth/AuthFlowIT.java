@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.auth.service.EnrollmentService;
-import com.reasoning.common.auth.service.LoginSessionService;
+import com.reasoning.admin.auth.service.LoginSessionService;
 import com.reasoning.common.auth.service.RecoveryService;
 import com.reasoning.common.auth.service.TotpService;
 import java.time.Instant;

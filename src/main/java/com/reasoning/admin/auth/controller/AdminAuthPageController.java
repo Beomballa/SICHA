@@ -1,7 +1,7 @@
 package com.reasoning.admin.auth.controller;
 
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
-import com.reasoning.common.auth.service.LoginSessionService;
+import com.reasoning.admin.auth.service.LoginSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;

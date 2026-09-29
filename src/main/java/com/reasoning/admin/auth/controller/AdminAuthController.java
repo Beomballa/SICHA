@@ -7,7 +7,7 @@ import com.reasoning.common.auth.service.AuthModels;
 import com.reasoning.common.auth.service.AuthModels.FlowCookie;
 import com.reasoning.common.auth.service.AuthModels.SessionPrincipal;
 import com.reasoning.common.auth.service.EnrollmentService;
-import com.reasoning.common.auth.service.LoginSessionService;
+import com.reasoning.admin.auth.service.LoginSessionService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

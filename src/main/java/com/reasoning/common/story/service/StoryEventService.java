@@ -1,7 +1,7 @@
 package com.reasoning.common.story.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryService.ContentResult;
 import com.reasoning.common.story.service.StoryService.VersionScope;
@@ -47,7 +47,7 @@ public final class StoryEventService {
      * @param activeYn null이면 활성, false이면 비활성
      * @return 수정번호와 코드·상태·시각 페이지
      */
-    public EventPage getEventList(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public EventPage getEventList(String sid, AdminActor actor, String storyCode, int versionNo,
             Integer size, String afterKey, Boolean activeYn) {
         int limit = size == null ? 20 : size;
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
@@ -74,7 +74,7 @@ public final class StoryEventService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 수정번호와 단건 원고
      */
-    public EventDetail getEventDetail(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public EventDetail getEventDetail(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, UUID requestId) {
         key(itemKey);
         requestId(requestId);
@@ -97,7 +97,7 @@ public final class StoryEventService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 생성 코드와 확정 수정번호를 포함하는 원고 없는 결과
      */
-    public ItemCreated createEvent(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ItemCreated createEvent(String sid, AdminActor actor, String storyCode, int versionNo,
             String expectedRev, JsonNode item, UUID requestId) {
         mutation(expectedRev, requestId);
         fields(item, true);
@@ -130,7 +130,7 @@ public final class StoryEventService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateEvent(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateEvent(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, JsonNode changes, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);
@@ -175,7 +175,7 @@ public final class StoryEventService {
      * @param requestId null이 아닌 서버 요청 ID
      * @return 실제 상태 변경에만 증가하는 원고 없는 결과
      */
-    public ContentResult updateEventActive(String sid, AdminPrincipal actor, String storyCode, int versionNo,
+    public ContentResult updateEventActive(String sid, AdminActor actor, String storyCode, int versionNo,
             String itemKey, String expectedRev, boolean active, UUID requestId) {
         key(itemKey);
         mutation(expectedRev, requestId);

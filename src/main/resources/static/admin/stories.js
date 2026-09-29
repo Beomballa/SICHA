@@ -301,6 +301,10 @@
   let manageSnapshot;
   let manageAfterKey;
   let manageEpoch = 0;
+  let ownershipStory;
+  let ownershipSnapshot;
+  let ownershipIntent;
+  let ownershipEpoch = 0;
 
   /** 원문을 넣지 않은 상태 문구와 오류 강조 여부를 표시한다. */
   function status(text, error = false) {
@@ -320,6 +324,8 @@
     createKey = createTitle = undefined;
     selectedStory = manageSnapshot = viewer = undefined;
     ++manageEpoch;
+    ownershipStory = ownershipSnapshot = ownershipIntent = undefined;
+    ++ownershipEpoch;
     document.getElementById("create-form")?.reset();
     document.getElementById("create-check")?.setAttribute("hidden", "");
     if (editor) {
@@ -335,6 +341,7 @@
       document.getElementById("filter-form").hidden = true;
       document.getElementById("next").hidden = true;
       document.getElementById("manage-panel").hidden = true;
+      document.getElementById("ownership-panel").hidden = true;
     }
     status(text + (code === 401 ? " 로그인 화면으로 이동하세요." : ""), true);
   }
@@ -2036,6 +2043,132 @@
     );
   }
 
+  /** 현재 소유자·지정 수신자·MANAGE에게만 원고 없는 인계 효력을 조회한다. */
+  async function loadOwnership() {
+    if (!ownershipStory) return;
+    const epoch = ownershipEpoch;
+    const result = await request(
+      "GET",
+      `/${encodeURIComponent(ownershipStory.storyCode)}/ownership`,
+      undefined,
+      true,
+    );
+    if (epoch !== ownershipEpoch) return;
+    if (!result) {
+      ownershipSnapshot = undefined;
+      document.getElementById("ownership-panel").hidden = !ownershipIntent;
+      status("현재 소유권 인계 조회 자격이 없거나 사건이 없습니다.", true);
+      return;
+    }
+    ownershipSnapshot = result;
+    document.getElementById("ownership-summary").textContent =
+      `${result.storyCode} · 사건 수정번호 ${result.storyRev} · ${result.activeYn ? "활성" : "비활성"} · 현재 소유자 ${result.ownerAccountKey}`;
+    const pending = result.pending;
+    const owner = viewer?.accountKey === result.ownerAccountKey;
+    const receiver = viewer?.accountKey === pending?.toAccountKey;
+    const effective = pending?.effectiveState === "PENDING";
+    document.getElementById("ownership-pending").hidden = !pending;
+    document.getElementById("ownership-pending-detail").textContent = pending
+      ? `수신자 ${pending.toAccountKey} · ${pending.effectiveState} · 기한 ${displayTime(pending.expiresAt)} · 요청 후 사건 수정번호 ${pending.storyRev}. 만료·무효 요청은 수락하지 않습니다.`
+      : "";
+    document.getElementById("ownership-accept").hidden =
+      !receiver || !effective;
+    document.getElementById("ownership-cancel").hidden = !owner || !effective;
+    document.getElementById("ownership-decline").hidden =
+      !receiver || !effective;
+    document.getElementById("ownership-request-form").hidden =
+      !owner || !result.activeYn || effective;
+    document.getElementById("ownership-override-form").hidden =
+      !viewer?.permissions?.includes("MANAGE");
+    document.getElementById("ownership-reconcile").hidden = !ownershipIntent;
+    document.getElementById("ownership-panel").hidden = false;
+    document.getElementById("ownership-heading").focus();
+  }
+
+  /** 목록 선택 시 이전 인계 응답을 폐기하고 최소 인계 메타만 표시한다. */
+  async function openOwnership(item) {
+    ownershipStory = item;
+    ownershipSnapshot = ownershipIntent = undefined;
+    ++ownershipEpoch;
+    document.getElementById("manage-panel").hidden = true;
+    selectedStory = manageSnapshot = undefined;
+    ++manageEpoch;
+    document.getElementById("ownership-result").textContent = "";
+    try {
+      await loadOwnership();
+    } catch (error) {
+      if (error.code === "REAUTH_REQUIRED")
+        document.getElementById("story-reauth").showModal();
+      status(errorMessage(error), true);
+    }
+  }
+
+  /** 현재 수정번호에 결속된 단일 의도와 UUID v4를 생성해 결과 확정 전 유지한다. */
+  function ownerIntent(path, body) {
+    if (!ownershipStory || !ownershipSnapshot || ownershipIntent) return;
+    ownershipIntent = {
+      path: `/${encodeURIComponent(ownershipStory.storyCode)}/ownership${path}`,
+      body: {
+        expectedStoryRev: ownershipSnapshot.storyRev,
+        ...body,
+        requestKey: crypto.randomUUID(),
+      },
+    };
+    submitOwnership();
+  }
+
+  /** 결과 유실 때 원래 요청만 사용자의 명시 행동으로 다시 보내며 자동 재시도하지 않는다. */
+  async function submitOwnership() {
+    if (!ownershipIntent) return;
+    const intent = ownershipIntent;
+    const panel = document.getElementById("ownership-panel");
+    panel.setAttribute("aria-busy", "true");
+    try {
+      const result = await request("POST", intent.path, intent.body);
+      status(
+        result.replayed
+          ? "원래 확정된 인계 영수증을 확인했습니다. 현재 소유권과 구분하세요."
+          : "인계 행동이 확정됐습니다. 현재 소유권은 별도로 조회하세요.",
+      );
+      document.getElementById("ownership-result").textContent =
+        `${result.original.state} · 인계 ${result.original.transferKey} · 확정 당시 사건 수정번호 ${result.original.storyRev} · ${result.replayed ? "기존 영수증 재생" : "새 확정"}. 현재 소유권은 다시 조회하세요.`;
+      ownershipIntent = undefined;
+      ownershipSnapshot = undefined;
+      document.getElementById("ownership-pending").hidden = true;
+      document.getElementById("ownership-request-form").hidden = true;
+      document.getElementById("ownership-override-form").hidden = true;
+      document.getElementById("ownership-reconcile").hidden = true;
+      // 수락 후 소유권 조회 자격을 잃어도 원래 영수증을 실패로 번역하지 않는다.
+    } catch (error) {
+      document.getElementById("ownership-reconcile").hidden = false;
+      document.getElementById("ownership-result").textContent =
+        `${errorMessage(error)} 원래 의도 키를 유지합니다. 자동으로 새 요청을 만들지 않습니다.`;
+      if (error.code === "REAUTH_REQUIRED")
+        document.getElementById("story-reauth").showModal();
+      status(errorMessage(error), true);
+    } finally {
+      panel.setAttribute("aria-busy", "false");
+    }
+  }
+
+  /** 현재 유효한 요청에 대해서만 수신 수락·취소·거절의 각 의도를 만든다. */
+  function closeOwnership(decision) {
+    const pending = ownershipSnapshot?.pending;
+    if (!pending || pending.effectiveState !== "PENDING") return;
+    const verb =
+      decision === "ACCEPT" ? "수락" : decision === "CANCEL" ? "취소" : "거절";
+    if (
+      !confirm(
+        `현재 사건 수정번호로 인계를 ${verb}합니까? 결과 유실 시 같은 의도를 확인하세요.`,
+      )
+    )
+      return;
+    ownerIntent(
+      `/requests/${encodeURIComponent(pending.transferKey)}/${decision === "ACCEPT" ? "accept" : "close"}`,
+      decision === "ACCEPT" ? {} : { decision },
+    );
+  }
+
   /** 정확한 코드와 활성 조건으로 ID 역순 커서 목록 한 페이지를 조회한다. */
   async function loadList(append = false) {
     const current = generation;
@@ -2091,6 +2224,12 @@
           !viewer?.permissions?.includes("MANAGE");
         manage.addEventListener("click", () => openManage(item));
         row.append(manage);
+        const ownership = document.createElement("button");
+        ownership.type = "button";
+        ownership.className = "secondary ownership-open";
+        ownership.textContent = "소유권 인계 확인";
+        ownership.addEventListener("click", () => openOwnership(item));
+        row.append(ownership);
         rows.append(row);
       }
       if (!rows.childElementCount) {
@@ -2403,6 +2542,86 @@
             errorMessage(error);
         } finally {
           button.disabled = false;
+        }
+      });
+    document
+      .getElementById("ownership-refresh")
+      .addEventListener("click", () =>
+        loadOwnership().catch((error) => status(errorMessage(error), true)),
+      );
+    document.getElementById("ownership-close").addEventListener("click", () => {
+      if (
+        ownershipIntent &&
+        !confirm("인계 결과가 불확실합니다. 원래 의도 키를 버리고 닫습니까?")
+      )
+        return;
+      ownershipStory = ownershipSnapshot = ownershipIntent = undefined;
+      ++ownershipEpoch;
+      document.getElementById("ownership-panel").hidden = true;
+    });
+    document
+      .getElementById("ownership-request-form")
+      .addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (
+          !confirm(
+            "활성 공동 EDIT 관리자에게 24시간 소유권 수락 요청을 만듭니까?",
+          )
+        )
+          return;
+        const form = event.currentTarget;
+        ownerIntent("/requests", {
+          toAccountKey: form.elements.toAccountKey.value.trim(),
+          keepEditor: form.elements.keepEditor.checked,
+          reasonCode: "HANDOVER",
+          verificationRef: form.elements.verificationRef.value.trim(),
+        });
+      });
+    document
+      .getElementById("ownership-override-form")
+      .addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (
+          !confirm(
+            "현재 소유자의 실제 비활성/복구 제한을 별도 확인했고 새 소유자에게 인계합니까?",
+          )
+        )
+          return;
+        const form = event.currentTarget;
+        ownerIntent("/override", {
+          toAccountKey: form.elements.toAccountKey.value.trim(),
+          keepEditor: false,
+          reasonCode: form.elements.reasonCode.value,
+          verificationRef: form.elements.verificationRef.value.trim(),
+        });
+      });
+    for (const [button, decision] of [
+      ["ownership-accept", "ACCEPT"],
+      ["ownership-cancel", "CANCEL"],
+      ["ownership-decline", "DECLINE"],
+    ])
+      document
+        .getElementById(button)
+        .addEventListener("click", () => closeOwnership(decision));
+    document
+      .getElementById("ownership-replay")
+      .addEventListener("click", submitOwnership);
+    document
+      .getElementById("ownership-new-intent")
+      .addEventListener("click", async () => {
+        if (
+          !confirm(
+            "이전 인계 확정 여부를 확인했습니까? 새 의도는 원래 요청을 되돌리지 않습니다.",
+          )
+        )
+          return;
+        try {
+          await loadOwnership();
+          if (!ownershipSnapshot) return;
+          ownershipIntent = undefined;
+          document.getElementById("ownership-reconcile").hidden = true;
+        } catch (error) {
+          status(errorMessage(error), true);
         }
       });
     document

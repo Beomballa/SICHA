@@ -1,5 +1,7 @@
 package com.reasoning.admin.auth.session;
 
+import com.reasoning.common.auth.service.AdminActor;
+import com.reasoning.common.auth.service.AdminSessionVerifier;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.Serial;
@@ -23,7 +25,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-public final class AdminSessionAdapter {
+public final class AdminSessionAdapter implements AdminSessionVerifier {
     private static final String CONTEXT_KEY = HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY;
     private final SessionRepository<? extends Session> repository;
     private final CookieSerializer cookies;
@@ -72,6 +74,15 @@ public final class AdminSessionAdapter {
             return Optional.empty();
         }
         return principalFrom(stored.getAttribute(CONTEXT_KEY));
+    }
+
+    @Override
+    public boolean matchesStored(String id, AdminActor actor) {
+        return id != null && actor != null && findStoredPrincipal(id).filter(stored ->
+                stored.accountId() == actor.accountId()
+                        && stored.accountKey().equals(actor.accountKey())
+                        && stored.sessionKey().equals(actor.sessionKey())
+                        && stored.authRev() == actor.authRev()).isPresent();
     }
 
     public Optional<CurrentSession> current(HttpServletRequest request) {
@@ -127,7 +138,7 @@ public final class AdminSessionAdapter {
 
     /** Only nonsecret identity/linkage is serialized into Spring Session. Authorization is rechecked per request. */
     public record AdminPrincipal(long accountId, UUID accountKey, UUID sessionKey, long authRev)
-            implements Serializable {
+            implements AdminActor, Serializable {
         @Serial private static final long serialVersionUID = 1L;
 
         public AdminPrincipal {
