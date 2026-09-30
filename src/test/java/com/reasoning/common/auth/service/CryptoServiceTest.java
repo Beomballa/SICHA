@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.reasoning.common.auth.TestKeys;
+
 import org.junit.jupiter.api.Test;
 
 class CryptoServiceTest {
@@ -24,22 +25,22 @@ class CryptoServiceTest {
         assertThat(first).isNotEqualTo(second);
         assertThat(crypto.decrypt(first, "admin-account/first/loginId/v1")).isEqualTo("example");
         assertThatThrownBy(() -> crypto.decrypt(first, "admin-account/second/loginId/v1"))
-            .isInstanceOf(AuthException.class);
+                .isInstanceOf(AuthException.class);
         assertThatThrownBy(() -> crypto.decrypt(first, "admin-account/first/totp/v1"))
-            .isInstanceOf(AuthException.class);
+                .isInstanceOf(AuthException.class);
     }
 
     @Test
     void purposeAndSearchKeysCannotSubstituteForEachOther() {
         assertThat(crypto.tokenHash("ENROLLMENT_CODE", "example"))
-            .isNotEqualTo(crypto.tokenHash("LOGIN_MFA", "example"));
+                .isNotEqualTo(crypto.tokenHash("LOGIN_MFA", "example"));
         assertThat(crypto.loginHash("example")).isNotEqualTo(crypto.limitHash("LOGIN", "example"));
     }
 
     @Test
     void rejectsMissingKeyWithoutDefault() {
         AuthProperties properties = new AuthProperties();
-        assertThatThrownBy(() -> new CryptoService(properties)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new CryptoService(properties))
+                .isInstanceOf(IllegalStateException.class);
     }
-
 }

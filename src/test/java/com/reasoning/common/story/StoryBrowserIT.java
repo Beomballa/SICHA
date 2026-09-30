@@ -9,14 +9,7 @@ import com.reasoning.common.auth.service.AuthModels;
 import com.reasoning.common.auth.service.CryptoService;
 import com.reasoning.common.auth.service.EnrollmentService;
 import com.reasoning.common.auth.service.TotpService;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,14 +22,25 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
 /** 합성 등록 계정으로 실제 HTTPS 로그인·MFA와 폐기 DB 연결 화면을 검증한다. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
 class StoryBrowserIT extends DatabaseContextTest {
     @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(DockerImageName.parse(
-            "postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1")
-            .asCompatibleSubstituteFor("postgres"));
+    static final PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(
+                    DockerImageName.parse(
+                                    "postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1")
+                            .asCompatibleSubstituteFor("postgres"));
 
     static final String storePassword = UUID.randomUUID().toString();
     static final Path keyStore = createKeyStore();
@@ -68,13 +72,34 @@ class StoryBrowserIT extends DatabaseContextTest {
     /** 폐기 TLS 인증서를 비공개 임시 디렉터리에 만들며 제품 인증서는 사용하지 않는다. */
     static Path createKeyStore() {
         try {
-            Path dir = Files.createTempDirectory("h1-browser-tls-",
-                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+            Path dir =
+                    Files.createTempDirectory(
+                            "h1-browser-tls-",
+                            PosixFilePermissions.asFileAttribute(
+                                    PosixFilePermissions.fromString("rwx------")));
             Path store = dir.resolve("test.p12");
-            ProcessBuilder command = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "keytool").toString(),
-                    "-genkeypair", "-alias", "test", "-keyalg", "RSA", "-keysize", "2048", "-validity", "1",
-                    "-dname", "CN=localhost", "-ext", "SAN=dns:localhost,ip:127.0.0.1", "-storetype", "PKCS12",
-                    "-keystore", store.toString(), "-storepass:env", "H1_STORE_PASSWORD");
+            ProcessBuilder command =
+                    new ProcessBuilder(
+                            Path.of(System.getProperty("java.home"), "bin", "keytool").toString(),
+                            "-genkeypair",
+                            "-alias",
+                            "test",
+                            "-keyalg",
+                            "RSA",
+                            "-keysize",
+                            "2048",
+                            "-validity",
+                            "1",
+                            "-dname",
+                            "CN=localhost",
+                            "-ext",
+                            "SAN=dns:localhost,ip:127.0.0.1",
+                            "-storetype",
+                            "PKCS12",
+                            "-keystore",
+                            store.toString(),
+                            "-storepass:env",
+                            "H1_STORE_PASSWORD");
             command.environment().put("H1_STORE_PASSWORD", storePassword);
             Process process = command.start();
             if (!process.waitFor(30, TimeUnit.SECONDS) || process.exitValue() != 0)
@@ -91,66 +116,168 @@ class StoryBrowserIT extends DatabaseContextTest {
     @Test
     void realHttpsStoryWorkflow() throws Exception {
         String password = UUID.randomUUID() + "-Browser-Only";
-        var bootstrap = enrollment.createBootstrap("browser01", "verified_browser", "operator_browser", UUID.randomUUID());
-        var grant = enrollment.exchange(bootstrap.code(), null, "browser-fixture", UUID.randomUUID());
+        var bootstrap =
+                enrollment.createBootstrap(
+                        "browser01", "verified_browser", "operator_browser", UUID.randomUUID());
+        var grant =
+                enrollment.exchange(bootstrap.code(), null, "browser-fixture", UUID.randomUUID());
         enrollment.setPassword(grant.cookie().value(), password, UUID.randomUUID());
         var setup = enrollment.prepareMfa(grant.cookie().value(), UUID.randomUUID());
         Instant previous = Instant.ofEpochSecond((Instant.now().getEpochSecond() / 30 - 1) * 30);
-        enrollment.verifyMfa(grant.cookie().value(), totp.code(setup.secret(), previous), "browser-fixture", UUID.randomUUID());
+        enrollment.verifyMfa(
+                grant.cookie().value(),
+                totp.code(setup.secret(), previous),
+                "browser-fixture",
+                UUID.randomUUID());
         enrollment.complete(grant.cookie().value(), UUID.randomUUID());
         db.update("UPDATE admin_account SET can_create=true,can_review=true");
         String receiverPassword = UUID.randomUUID() + "-Receiver-Only";
-        Long inviterId = db.queryForObject("SELECT account_id FROM admin_enrollment WHERE registration_key=?",
-                Long.class, bootstrap.registrationKey());
-        UUID inviterKey = db.queryForObject("SELECT account_key FROM admin_account WHERE id=?", UUID.class, inviterId);
+        Long inviterId =
+                db.queryForObject(
+                        "SELECT account_id FROM admin_enrollment WHERE registration_key=?",
+                        Long.class,
+                        bootstrap.registrationKey());
+        UUID inviterKey =
+                db.queryForObject(
+                        "SELECT account_key FROM admin_account WHERE id=?", UUID.class, inviterId);
         String fixtureSid = UUID.randomUUID().toString();
         UUID fixtureSession = UUID.randomUUID();
         Instant now = Instant.now();
-        db.update("INSERT INTO admin_session(session_key,account_id,sid_hash,auth_rev,state,started_at,last_action_at,"
-                        + "expires_at,reauth_at,activated_at) VALUES (?,?,?,1,'ACTIVE',?,?,?, ?,?)",
-                fixtureSession, inviterId, crypto.sessionHash(fixtureSid), Timestamp.from(now), Timestamp.from(now),
-                Timestamp.from(now.plusSeconds(8 * 3600)), Timestamp.from(now), Timestamp.from(now));
-        var inviter = new AuthModels.SessionPrincipal(inviterId, inviterKey, fixtureSession,
-                now.plusSeconds(8 * 3600), now.plusSeconds(1800), now.plusSeconds(300), true, true, true, false);
+        db.update(
+                "INSERT INTO"
+                    + " admin_session(session_key,account_id,sid_hash,auth_rev,state,started_at,last_action_at,expires_at,reauth_at,activated_at)"
+                    + " VALUES (?,?,?,1,'ACTIVE',?,?,?, ?,?)",
+                fixtureSession,
+                inviterId,
+                crypto.sessionHash(fixtureSid),
+                Timestamp.from(now),
+                Timestamp.from(now),
+                Timestamp.from(now.plusSeconds(8 * 3600)),
+                Timestamp.from(now),
+                Timestamp.from(now));
+        var inviter =
+                new AuthModels.SessionPrincipal(
+                        inviterId,
+                        inviterKey,
+                        fixtureSession,
+                        now.plusSeconds(8 * 3600),
+                        now.plusSeconds(1800),
+                        now.plusSeconds(300),
+                        true,
+                        true,
+                        true,
+                        false);
         UUID receiverRegistration = UUID.randomUUID();
-        var receiverInvitation = enrollment.issueInvitation(inviter, fixtureSid, receiverRegistration,
-                "browser02", "verified_receiver", UUID.randomUUID());
-        db.update("UPDATE admin_session SET state='REVOKED',revoked_at=clock_timestamp() WHERE session_key=?", fixtureSession);
-        var receiverGrant = enrollment.exchange(receiverInvitation.code(), null, "browser-fixture", UUID.randomUUID());
+        var receiverInvitation =
+                enrollment.issueInvitation(
+                        inviter,
+                        fixtureSid,
+                        receiverRegistration,
+                        "browser02",
+                        "verified_receiver",
+                        UUID.randomUUID());
+        db.update(
+                "UPDATE admin_session SET state='REVOKED',revoked_at=clock_timestamp() WHERE"
+                    + " session_key=?",
+                fixtureSession);
+        var receiverGrant =
+                enrollment.exchange(
+                        receiverInvitation.code(), null, "browser-fixture", UUID.randomUUID());
         enrollment.setPassword(receiverGrant.cookie().value(), receiverPassword, UUID.randomUUID());
-        var receiverSetup = enrollment.prepareMfa(receiverGrant.cookie().value(), UUID.randomUUID());
-        enrollment.verifyMfa(receiverGrant.cookie().value(), totp.code(receiverSetup.secret(), previous),
-                "browser-fixture", UUID.randomUUID());
+        var receiverSetup =
+                enrollment.prepareMfa(receiverGrant.cookie().value(), UUID.randomUUID());
+        enrollment.verifyMfa(
+                receiverGrant.cookie().value(),
+                totp.code(receiverSetup.secret(), previous),
+                "browser-fixture",
+                UUID.randomUUID());
         enrollment.complete(receiverGrant.cookie().value(), UUID.randomUUID());
-        UUID receiverKey = db.queryForObject("SELECT a.account_key FROM admin_account a "
-                + "JOIN admin_enrollment e ON e.account_id=a.id WHERE e.registration_key=?", UUID.class,
-                receiverRegistration);
+        UUID receiverKey =
+                db.queryForObject(
+                        "SELECT a.account_key FROM admin_account a JOIN admin_enrollment e ON"
+                            + " e.account_id=a.id WHERE e.registration_key=?",
+                        UUID.class,
+                        receiverRegistration);
 
-        Process browser = new ProcessBuilder("node", "src/test/browser/story-workflow.mjs").inheritIO()
-                .redirectInput(ProcessBuilder.Redirect.PIPE).start();
+        Process browser =
+                new ProcessBuilder("node", "src/test/browser/story-workflow.mjs")
+                        .inheritIO()
+                        .redirectInput(ProcessBuilder.Redirect.PIPE)
+                        .start();
         try (var input = browser.getOutputStream()) {
-            json.writeValue(input, Map.of("url", "https://localhost:" + port, "loginId", "browser01",
-                    "password", password, "secret", setup.secret(), "receiverLoginId", "browser02",
-                    "receiverPassword", receiverPassword, "receiverSecret", receiverSetup.secret(),
-                    "receiverKey", receiverKey));
+            json.writeValue(
+                    input,
+                    Map.of(
+                            "url",
+                            "https://localhost:" + port,
+                            "loginId",
+                            "browser01",
+                            "password",
+                            password,
+                            "secret",
+                            setup.secret(),
+                            "receiverLoginId",
+                            "browser02",
+                            "receiverPassword",
+                            receiverPassword,
+                            "receiverSecret",
+                            receiverSetup.secret(),
+                            "receiverKey",
+                            receiverKey));
         }
         boolean completed = browser.waitFor(180, TimeUnit.SECONDS);
         if (!completed) browser.destroyForcibly();
         assertThat(completed).as("브라우저 시험 제한 시간").isTrue();
         assertThat(browser.exitValue()).as("실제 HTTPS 브라우저 회귀").isZero();
         assertThat(db.queryForObject("SELECT count(*) FROM story", Integer.class)).isEqualTo(3);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action IN "
-                + "('STORY_DEACTIVATED','STORY_REACTIVATED')", Integer.class)).isEqualTo(2);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action IN "
-                + "('ACCESS_GRANTED','ACCESS_REVOKED')", Integer.class)).isEqualTo(3);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action IN "
-                + "('OWNER_REQUESTED','OWNER_ACCEPTED')", Integer.class)).isEqualTo(2);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_action", Integer.class)).isEqualTo(2);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action='SECTION_UPDATED'", Integer.class))
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE action IN "
+                                        + "('STORY_DEACTIVATED','STORY_REACTIVATED')",
+                                Integer.class))
+                .isEqualTo(2);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE action IN "
+                                        + "('ACCESS_GRANTED','ACCESS_REVOKED')",
+                                Integer.class))
+                .isEqualTo(3);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE action IN "
+                                        + "('OWNER_REQUESTED','OWNER_ACCEPTED')",
+                                Integer.class))
+                .isEqualTo(2);
+        assertThat(db.queryForObject("SELECT count(*) FROM story_action", Integer.class))
+                .isEqualTo(2);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE action='SECTION_UPDATED'",
+                                Integer.class))
                 .isGreaterThanOrEqualTo(5);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE detail::text LIKE '%local-answer%'", Integer.class)).isZero();
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE action='ITEM_CREATED' AND detail->>'itemKey'='UI_PERSON'", Integer.class)).isEqualTo(1);
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE detail::text LIKE '%인물 UI 전용 비밀%'", Integer.class)).isZero();
-        assertThat(db.queryForObject("SELECT count(*) FROM story_audit WHERE detail::text LIKE '%합성 인물 비밀%'", Integer.class)).isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE detail::text LIKE"
+                                    + " '%local-answer%'",
+                                Integer.class))
+                .isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE action='ITEM_CREATED' AND"
+                                    + " detail->>'itemKey'='UI_PERSON'",
+                                Integer.class))
+                .isEqualTo(1);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE detail::text LIKE '%인물 UI"
+                                    + " 전용 비밀%'",
+                                Integer.class))
+                .isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE detail::text LIKE '%합성 인물"
+                                    + " 비밀%'",
+                                Integer.class))
+                .isZero();
     }
 }

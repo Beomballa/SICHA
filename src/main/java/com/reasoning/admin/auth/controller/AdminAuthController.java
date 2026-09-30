@@ -1,5 +1,6 @@
 package com.reasoning.admin.auth.controller;
 
+import com.reasoning.admin.auth.service.LoginSessionService;
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.CurrentSession;
 import com.reasoning.common.auth.service.AuthException;
@@ -7,13 +8,12 @@ import com.reasoning.common.auth.service.AuthModels;
 import com.reasoning.common.auth.service.AuthModels.FlowCookie;
 import com.reasoning.common.auth.service.AuthModels.SessionPrincipal;
 import com.reasoning.common.auth.service.EnrollmentService;
-import com.reasoning.admin.auth.service.LoginSessionService;
+
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.UUID;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -26,7 +26,10 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -38,57 +41,99 @@ public class AdminAuthController {
     private final LoginSessionService login;
     private final AdminSessionAdapter sessions;
 
-    public AdminAuthController(EnrollmentService enrollment, LoginSessionService login, AdminSessionAdapter sessions) {
+    public AdminAuthController(
+            EnrollmentService enrollment, LoginSessionService login, AdminSessionAdapter sessions) {
         this.enrollment = enrollment;
         this.login = login;
         this.sessions = sessions;
     }
 
     public record InvitationRequest(UUID registrationKey, String loginId, String verificationRef) {}
+
     public record ReissueRequest(int expectedGeneration, String verificationRef) {}
+
     public record RevokeRequest(int expectedGeneration) {}
+
     public record CodeRequest(String code) {}
+
     public record PasswordRequest(String password) {}
+
     public record TotpRequest(String totp) {}
+
     public record LoginRequest(String loginId, String password) {}
+
     public record ReauthRequest(String password, String totp) {}
+
     public record AuthenticatedBody(String result, Instant absoluteExpiresAt) {}
+
     public record ReauthBody(Instant reauthExpiresAt, Instant absoluteExpiresAt) {}
 
     @PostMapping("/invitations")
-    public ResponseEntity<?> invite(@RequestBody InvitationRequest body, HttpServletRequest request) {
+    public ResponseEntity<?> invite(
+            @RequestBody InvitationRequest body, HttpServletRequest request) {
         CurrentSession current = required(request);
-        return response(HttpStatus.CREATED, enrollment.issueInvitation(actor(current), current.id(),
-                body.registrationKey(), body.loginId(), body.verificationRef(), UUID.randomUUID()));
+        return response(
+                HttpStatus.CREATED,
+                enrollment.issueInvitation(
+                        actor(current),
+                        current.id(),
+                        body.registrationKey(),
+                        body.loginId(),
+                        body.verificationRef(),
+                        UUID.randomUUID()));
     }
 
     @GetMapping("/invitations/{registrationKey}")
-    public ResponseEntity<?> invitation(@PathVariable UUID registrationKey, HttpServletRequest request) {
+    public ResponseEntity<?> invitation(
+            @PathVariable UUID registrationKey, HttpServletRequest request) {
         CurrentSession current = required(request);
-        return ok(enrollment.inspectInvitation(actor(current), current.id(), registrationKey, UUID.randomUUID()));
+        return ok(
+                enrollment.inspectInvitation(
+                        actor(current), current.id(), registrationKey, UUID.randomUUID()));
     }
 
     @PostMapping("/invitations/{registrationKey}/reissue")
-    public ResponseEntity<?> reissue(@PathVariable UUID registrationKey, @RequestBody ReissueRequest body,
+    public ResponseEntity<?> reissue(
+            @PathVariable UUID registrationKey,
+            @RequestBody ReissueRequest body,
             HttpServletRequest request) {
         CurrentSession current = required(request);
-        return ok(enrollment.reissueInvitation(actor(current), current.id(), registrationKey,
-                body.expectedGeneration(), body.verificationRef(), UUID.randomUUID()));
+        return ok(
+                enrollment.reissueInvitation(
+                        actor(current),
+                        current.id(),
+                        registrationKey,
+                        body.expectedGeneration(),
+                        body.verificationRef(),
+                        UUID.randomUUID()));
     }
 
     @DeleteMapping("/invitations/{registrationKey}")
-    public ResponseEntity<Void> revoke(@PathVariable UUID registrationKey, @RequestBody RevokeRequest body,
+    public ResponseEntity<Void> revoke(
+            @PathVariable UUID registrationKey,
+            @RequestBody RevokeRequest body,
             HttpServletRequest request) {
         CurrentSession current = required(request);
-        enrollment.revokeInvitation(actor(current), current.id(), registrationKey, body.expectedGeneration(), UUID.randomUUID());
+        enrollment.revokeInvitation(
+                actor(current),
+                current.id(),
+                registrationKey,
+                body.expectedGeneration(),
+                UUID.randomUUID());
         return noContent();
     }
 
     @PostMapping("/enrollment/exchange")
-    public ResponseEntity<?> exchange(@RequestBody CodeRequest body, HttpServletRequest request,
+    public ResponseEntity<?> exchange(
+            @RequestBody CodeRequest body,
+            HttpServletRequest request,
             HttpServletResponse servletResponse) {
-        AuthModels.EnrollExchange result = enrollment.exchange(body.code(), cookie(request, ENROLL_COOKIE),
-                request.getRemoteAddr(), UUID.randomUUID());
+        AuthModels.EnrollExchange result =
+                enrollment.exchange(
+                        body.code(),
+                        cookie(request, ENROLL_COOKIE),
+                        request.getRemoteAddr(),
+                        UUID.randomUUID());
         setFlowCookie(servletResponse, result.cookie(), ENROLL_COOKIE);
         return ok(new AuthModels.EnrollStage(result.stage(), result.expiresAt()));
     }
@@ -99,8 +144,11 @@ public class AdminAuthController {
     }
 
     @PutMapping("/enrollment/password")
-    public ResponseEntity<?> enrollPassword(@RequestBody PasswordRequest body, HttpServletRequest request) {
-        return ok(enrollment.setPassword(cookie(request, ENROLL_COOKIE), body.password(), UUID.randomUUID()));
+    public ResponseEntity<?> enrollPassword(
+            @RequestBody PasswordRequest body, HttpServletRequest request) {
+        return ok(
+                enrollment.setPassword(
+                        cookie(request, ENROLL_COOKIE), body.password(), UUID.randomUUID()));
     }
 
     @PostMapping("/enrollment/mfa/setup")
@@ -109,20 +157,28 @@ public class AdminAuthController {
     }
 
     @PostMapping("/enrollment/mfa/verify")
-    public ResponseEntity<?> enrollMfaVerify(@RequestBody TotpRequest body, HttpServletRequest request) {
-        return ok(enrollment.verifyMfa(cookie(request, ENROLL_COOKIE), body.totp(),
-                request.getRemoteAddr(), UUID.randomUUID()));
+    public ResponseEntity<?> enrollMfaVerify(
+            @RequestBody TotpRequest body, HttpServletRequest request) {
+        return ok(
+                enrollment.verifyMfa(
+                        cookie(request, ENROLL_COOKIE),
+                        body.totp(),
+                        request.getRemoteAddr(),
+                        UUID.randomUUID()));
     }
 
     @PostMapping("/enrollment/complete")
-    public ResponseEntity<?> enrollComplete(HttpServletRequest request, HttpServletResponse servletResponse) {
-        AuthModels.EnrollComplete result = enrollment.complete(cookie(request, ENROLL_COOKIE), UUID.randomUUID());
+    public ResponseEntity<?> enrollComplete(
+            HttpServletRequest request, HttpServletResponse servletResponse) {
+        AuthModels.EnrollComplete result =
+                enrollment.complete(cookie(request, ENROLL_COOKIE), UUID.randomUUID());
         clearCookie(servletResponse, ENROLL_COOKIE);
         return ok(result);
     }
 
     @DeleteMapping("/enrollment")
-    public ResponseEntity<Void> enrollCancel(HttpServletRequest request, HttpServletResponse servletResponse) {
+    public ResponseEntity<Void> enrollCancel(
+            HttpServletRequest request, HttpServletResponse servletResponse) {
         try {
             enrollment.cancel(cookie(request, ENROLL_COOKIE), UUID.randomUUID());
         } catch (AuthException failure) {
@@ -137,20 +193,34 @@ public class AdminAuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest body, HttpServletRequest request,
+    public ResponseEntity<?> login(
+            @RequestBody LoginRequest body,
+            HttpServletRequest request,
             HttpServletResponse servletResponse) {
         CurrentSession current = sessions.current(request).orElse(null);
-        AuthModels.LoginStart result = login.login(body.loginId(), body.password(), cookie(request, MFA_COOKIE),
-                current == null ? null : current.id(), request.getRemoteAddr(), UUID.randomUUID());
+        AuthModels.LoginStart result =
+                login.login(
+                        body.loginId(),
+                        body.password(),
+                        cookie(request, MFA_COOKIE),
+                        current == null ? null : current.id(),
+                        request.getRemoteAddr(),
+                        UUID.randomUUID());
         setFlowCookie(servletResponse, result.cookie(), MFA_COOKIE);
         return ok(new AuthModels.EnrollStage(result.stage(), result.expiresAt()));
     }
 
     @PostMapping("/login/mfa")
-    public ResponseEntity<?> loginMfa(@RequestBody TotpRequest body, HttpServletRequest request,
+    public ResponseEntity<?> loginMfa(
+            @RequestBody TotpRequest body,
+            HttpServletRequest request,
             HttpServletResponse servletResponse) {
-        AuthModels.Authenticated result = login.authenticate(cookie(request, MFA_COOKIE), body.totp(),
-                request.getRemoteAddr(), UUID.randomUUID());
+        AuthModels.Authenticated result =
+                login.authenticate(
+                        cookie(request, MFA_COOKIE),
+                        body.totp(),
+                        request.getRemoteAddr(),
+                        UUID.randomUUID());
         sessions.issueCookie(result.cookie().value(), request, servletResponse);
         clearCookie(servletResponse, MFA_COOKIE);
         return ok(new AuthenticatedBody(result.result(), result.absoluteExpiresAt()));
@@ -163,7 +233,8 @@ public class AdminAuthController {
     }
 
     @DeleteMapping("/login")
-    public ResponseEntity<Void> loginCancel(HttpServletRequest request, HttpServletResponse servletResponse) {
+    public ResponseEntity<Void> loginCancel(
+            HttpServletRequest request, HttpServletResponse servletResponse) {
         try {
             login.cancel(cookie(request, MFA_COOKIE), UUID.randomUUID());
         } catch (AuthException failure) {
@@ -184,20 +255,31 @@ public class AdminAuthController {
     }
 
     @PostMapping("/reauth")
-    public ResponseEntity<?> reauth(@RequestBody ReauthRequest body, HttpServletRequest request,
+    public ResponseEntity<?> reauth(
+            @RequestBody ReauthRequest body,
+            HttpServletRequest request,
             HttpServletResponse servletResponse) {
         CurrentSession current = required(request);
-        AuthModels.ReauthResult result = login.reauth(current.id(), current.principal(), body.password(),
-                body.totp(), request.getRemoteAddr(), UUID.randomUUID());
+        AuthModels.ReauthResult result =
+                login.reauth(
+                        current.id(),
+                        current.principal(),
+                        body.password(),
+                        body.totp(),
+                        request.getRemoteAddr(),
+                        UUID.randomUUID());
         sessions.issueCookie(result.cookie().value(), request, servletResponse);
         return ok(new ReauthBody(result.reauthExpiresAt(), result.absoluteExpiresAt()));
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse servletResponse) {
+    public ResponseEntity<Void> logout(
+            HttpServletRequest request, HttpServletResponse servletResponse) {
         try {
             CurrentSession current = sessions.current(request).orElse(null);
-            login.logout(current == null ? null : current.id(), current == null ? null : current.principal(),
+            login.logout(
+                    current == null ? null : current.id(),
+                    current == null ? null : current.principal(),
                     UUID.randomUUID());
         } catch (AuthException failure) {
             if (failure.status() == 503) sessions.clearCookie(request, servletResponse);
@@ -211,7 +293,8 @@ public class AdminAuthController {
     }
 
     @PostMapping("/logout-all")
-    public ResponseEntity<Void> logoutAll(HttpServletRequest request, HttpServletResponse servletResponse) {
+    public ResponseEntity<Void> logoutAll(
+            HttpServletRequest request, HttpServletResponse servletResponse) {
         CurrentSession current = required(request);
         try {
             login.logoutAll(current.id(), current.principal(), UUID.randomUUID());
@@ -227,17 +310,29 @@ public class AdminAuthController {
     }
 
     private CurrentSession required(HttpServletRequest request) {
-        CurrentSession current = sessions.current(request).orElseThrow(() -> AuthException.unauthorized("AUTH_REQUIRED"));
-        if (!login.isActive(current.id(), current.principal())) throw AuthException.unauthorized("AUTH_REQUIRED");
+        CurrentSession current =
+                sessions.current(request)
+                        .orElseThrow(() -> AuthException.unauthorized("AUTH_REQUIRED"));
+        if (!login.isActive(current.id(), current.principal()))
+            throw AuthException.unauthorized("AUTH_REQUIRED");
         return current;
     }
 
     private SessionPrincipal actor(CurrentSession current) {
-        // Me rechecks app session and account state; invitations recheck authority and reauthentication under lock.
+        // Me rechecks app session and account state; invitations recheck authority and
+        // reauthentication under lock.
         AuthModels.Me verified = login.me(current.id(), current.principal());
-        return new SessionPrincipal(current.principal().accountId(), verified.accountKey(),
-                current.principal().sessionKey(), verified.absoluteExpiresAt(), verified.idleExpiresAt(),
-                verified.reauthExpiresAt(), false, false, false, false);
+        return new SessionPrincipal(
+                current.principal().accountId(),
+                verified.accountKey(),
+                current.principal().sessionKey(),
+                verified.absoluteExpiresAt(),
+                verified.idleExpiresAt(),
+                verified.reauthExpiresAt(),
+                false,
+                false,
+                false,
+                false);
     }
 
     private static String cookie(HttpServletRequest request, String name) {
@@ -247,18 +342,34 @@ public class AdminAuthController {
         return null;
     }
 
-    private static void setFlowCookie(HttpServletResponse response, FlowCookie cookie, String expectedName) {
-        if (cookie == null || !expectedName.equals(cookie.name())) throw AuthException.unavailable("AUTH_UNAVAILABLE");
+    private static void setFlowCookie(
+            HttpServletResponse response, FlowCookie cookie, String expectedName) {
+        if (cookie == null || !expectedName.equals(cookie.name()))
+            throw AuthException.unavailable("AUTH_UNAVAILABLE");
         Duration remaining = Duration.between(Instant.now(), cookie.expiresAt());
-        response.addHeader("Set-Cookie", ResponseCookie.from(expectedName, cookie.value())
-                .secure(true).httpOnly(true).sameSite("Lax").path("/")
-                .maxAge(remaining.isNegative() ? Duration.ZERO : remaining)
-                .build().toString());
+        response.addHeader(
+                "Set-Cookie",
+                ResponseCookie.from(expectedName, cookie.value())
+                        .secure(true)
+                        .httpOnly(true)
+                        .sameSite("Lax")
+                        .path("/")
+                        .maxAge(remaining.isNegative() ? Duration.ZERO : remaining)
+                        .build()
+                        .toString());
     }
 
     private static void clearCookie(HttpServletResponse response, String name) {
-        response.addHeader("Set-Cookie", ResponseCookie.from(name, "")
-                .secure(true).httpOnly(true).sameSite("Lax").path("/").maxAge(Duration.ZERO).build().toString());
+        response.addHeader(
+                "Set-Cookie",
+                ResponseCookie.from(name, "")
+                        .secure(true)
+                        .httpOnly(true)
+                        .sameSite("Lax")
+                        .path("/")
+                        .maxAge(Duration.ZERO)
+                        .build()
+                        .toString());
     }
 
     private static ResponseEntity<?> ok(Object value) {

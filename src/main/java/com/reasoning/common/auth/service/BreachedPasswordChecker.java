@@ -1,5 +1,7 @@
 package com.reasoning.common.auth.service;
 
+import org.springframework.stereotype.Component;
+
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -12,7 +14,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Set;
-import org.springframework.stereotype.Component;
 
 /** Offline lookup against a sorted, LF-delimited corpus of uppercase SHA-1 hex digests. */
 @Component
@@ -54,11 +55,17 @@ public class BreachedPasswordChecker {
     public boolean isBreached(String password) {
         byte[] digest;
         try {
-            digest = MessageDigest.getInstance("SHA-1").digest(password.getBytes(StandardCharsets.UTF_8));
+            digest =
+                    MessageDigest.getInstance("SHA-1")
+                            .digest(password.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-1 is unavailable");
         }
-        byte[] target = HexFormat.of().withUpperCase().formatHex(digest).getBytes(StandardCharsets.US_ASCII);
+        byte[] target =
+                HexFormat.of()
+                        .withUpperCase()
+                        .formatHex(digest)
+                        .getBytes(StandardCharsets.US_ASCII);
         try {
             checkFile();
             try (RandomAccessFile corpus = new RandomAccessFile(file.toFile(), "r")) {
@@ -85,10 +92,12 @@ public class BreachedPasswordChecker {
 
     private void checkFile() throws IOException {
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw invalid();
-        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file, LinkOption.NOFOLLOW_LINKS);
+        Set<PosixFilePermission> permissions =
+                Files.getPosixFilePermissions(file, LinkOption.NOFOLLOW_LINKS);
         if (!permissions.contains(PosixFilePermission.OWNER_READ)) throw invalid();
         for (PosixFilePermission permission : permissions) {
-            if (permission.name().startsWith("GROUP_") || permission.name().startsWith("OTHERS_")) throw invalid();
+            if (permission.name().startsWith("GROUP_") || permission.name().startsWith("OTHERS_"))
+                throw invalid();
         }
     }
 
@@ -102,6 +111,9 @@ public class BreachedPasswordChecker {
     }
 
     private static IllegalStateException invalid() {
-        return new IllegalStateException(CONFIG + " requires an external owner-only regular file of sorted uppercase SHA-1 hex lines");
+        return new IllegalStateException(
+                CONFIG
+                        + " requires an external owner-only regular file of sorted uppercase SHA-1"
+                        + " hex lines");
     }
 }

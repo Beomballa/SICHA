@@ -1,21 +1,22 @@
 package com.reasoning.common.auth.service;
 
+import org.springframework.stereotype.Service;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
-import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
+
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.stereotype.Service;
 
 @Service
 public class CryptoService {
@@ -25,13 +26,17 @@ public class CryptoService {
     private final byte[] limitKey;
 
     public CryptoService(AuthProperties properties) {
-        this.cryptoKey = properties.decodeRequiredKey(properties.getCryptoKeyFile(), "AUTH_CRYPTO_KEY_FILE");
-        this.searchKey = properties.decodeRequiredKey(properties.getSearchKeyFile(), "AUTH_SEARCH_KEY_FILE");
-        this.limitKey = properties.decodeRequiredKey(properties.getLimitKeyFile(), "AUTH_LIMIT_KEY_FILE");
+        this.cryptoKey =
+                properties.decodeRequiredKey(properties.getCryptoKeyFile(), "AUTH_CRYPTO_KEY_FILE");
+        this.searchKey =
+                properties.decodeRequiredKey(properties.getSearchKeyFile(), "AUTH_SEARCH_KEY_FILE");
+        this.limitKey =
+                properties.decodeRequiredKey(properties.getLimitKeyFile(), "AUTH_LIMIT_KEY_FILE");
     }
 
     /**
      * Creates a URL-safe random token with the requested entropy.
+     *
      * @param byteLength number of random bytes; use 32 for authentication flow secrets
      * @return base64url token without padding
      */
@@ -43,6 +48,7 @@ public class CryptoService {
 
     /**
      * Generates a random UUID from the process CSPRNG.
+     *
      * @return unpredictable UUID for public correlation keys
      */
     public UUID randomUuid() {
@@ -51,6 +57,7 @@ public class CryptoService {
 
     /**
      * Encrypts sensitive account material using AES-256-GCM with record-bound AAD.
+     *
      * @param plaintext secret text to encrypt; must not be logged
      * @param aad stable record context, for example admin-account/{key}/field/v1
      * @return versioned envelope v1.1.nonce.ciphertext.tag using base64url components
@@ -60,14 +67,22 @@ public class CryptoService {
             byte[] nonce = new byte[12];
             secureRandom.nextBytes(nonce);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(cryptoKey, "AES"), new GCMParameterSpec(128, nonce));
+            cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    new SecretKeySpec(cryptoKey, "AES"),
+                    new GCMParameterSpec(128, nonce));
             cipher.updateAAD(aad.getBytes(StandardCharsets.UTF_8));
             byte[] encrypted = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
             int tagStart = encrypted.length - 16;
             byte[] ciphertext = Arrays.copyOf(encrypted, tagStart);
             byte[] tag = Arrays.copyOfRange(encrypted, tagStart, encrypted.length);
             Base64.Encoder enc = Base64.getUrlEncoder().withoutPadding();
-            return "v1.1." + enc.encodeToString(nonce) + "." + enc.encodeToString(ciphertext) + "." + enc.encodeToString(tag);
+            return "v1.1."
+                    + enc.encodeToString(nonce)
+                    + "."
+                    + enc.encodeToString(ciphertext)
+                    + "."
+                    + enc.encodeToString(tag);
         } catch (GeneralSecurityException e) {
             throw AuthException.unavailable("AUTH_UNAVAILABLE");
         }
@@ -75,6 +90,7 @@ public class CryptoService {
 
     /**
      * Decrypts an AES-256-GCM envelope after verifying the supplied AAD.
+     *
      * @param envelope stored encrypted value
      * @param aad stable record context used at encryption time
      * @return decrypted secret text
@@ -92,9 +108,16 @@ public class CryptoService {
             if (nonce.length != 12 || tag.length != 16) {
                 throw AuthException.unavailable("AUTH_UNAVAILABLE");
             }
-            byte[] joined = ByteBuffer.allocate(ciphertext.length + tag.length).put(ciphertext).put(tag).array();
+            byte[] joined =
+                    ByteBuffer.allocate(ciphertext.length + tag.length)
+                            .put(ciphertext)
+                            .put(tag)
+                            .array();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(cryptoKey, "AES"), new GCMParameterSpec(128, nonce));
+            cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    new SecretKeySpec(cryptoKey, "AES"),
+                    new GCMParameterSpec(128, nonce));
             cipher.updateAAD(aad.getBytes(StandardCharsets.UTF_8));
             return new String(cipher.doFinal(joined), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException e) {
@@ -104,6 +127,7 @@ public class CryptoService {
 
     /**
      * Creates the exact-login search token for the configured key version.
+     *
      * @param loginId already validated lowercase login ID
      * @return 32-byte HMAC-SHA-256 token
      */
@@ -113,6 +137,7 @@ public class CryptoService {
 
     /**
      * Hashes an opaque flow token for a single allowed purpose.
+     *
      * @param purpose non-secret purpose name
      * @param token raw token value received from a cookie or one-time code
      * @return 32-byte SHA-256 purpose hash
@@ -123,6 +148,7 @@ public class CryptoService {
 
     /**
      * Hashes an authentication limit bucket without storing the source text.
+     *
      * @param purpose limit scope name
      * @param value account, source, or synthetic missing-user bucket value
      * @return 32-byte HMAC-SHA-256 bucket hash
@@ -133,6 +159,7 @@ public class CryptoService {
 
     /**
      * Hashes a framework or app session cookie for DB binding.
+     *
      * @param token opaque browser cookie value
      * @return 32-byte session binding hash
      */
@@ -142,6 +169,7 @@ public class CryptoService {
 
     /**
      * Performs constant-time equality for nullable byte arrays.
+     *
      * @param left first byte array
      * @param right second byte array
      * @return true when both arrays are non-null and equal
@@ -152,6 +180,7 @@ public class CryptoService {
 
     /**
      * Returns a safe non-secret fingerprint for diagnostics and audits.
+     *
      * @param bytes binary value to summarize
      * @return first 12 hex characters of SHA-256 over the value
      */

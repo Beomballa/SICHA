@@ -12,10 +12,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.reasoning.common.auth.service.AuthException;
-import java.util.Set;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.Set;
 
 class StoryRubricRuleTest {
     private final ObjectMapper mapper = new ObjectMapper();
@@ -27,7 +29,9 @@ class StoryRubricRuleTest {
         when(db.queryForObject(anyString(), eq(Integer.class), any())).thenReturn(1);
         when(db.queryForObject(anyString(), eq(Integer.class), any(), any())).thenReturn(1);
         when(db.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(1);
-        when(db.queryForObject(eq("SELECT octet_length(?::jsonb::text)"), eq(Integer.class), anyString())).thenReturn(100);
+        when(db.queryForObject(
+                        eq("SELECT octet_length(?::jsonb::text)"), eq(Integer.class), anyString()))
+                .thenReturn(100);
     }
 
     @Test
@@ -35,7 +39,8 @@ class StoryRubricRuleTest {
         JsonNode rule = sample();
         assertThat(StoryRubricRule.factCodes(rule)).containsExactly("F");
         assertThat(StoryRubricRule.clueCodes(rule)).containsExactly("C");
-        ((ObjectNode) rule.path("claims").get(0)).put("meaning", "C F other references are only prose");
+        ((ObjectNode) rule.path("claims").get(0))
+                .put("meaning", "C F other references are only prose");
         assertThat(StoryRubricRule.factCodes(rule)).isEqualTo(Set.of("F"));
         assertThat(StoryRubricRule.clueCodes(rule)).isEqualTo(Set.of("C"));
         assertThat(StoryRubricRule.factCodes(null)).isEmpty();
@@ -56,10 +61,13 @@ class StoryRubricRuleTest {
 
     @Test
     void malformedShapesScoresRoutesAndCodesAreValueErrors() throws Exception {
-        for (String json : new String[] {
-                "[]", "{}", "{\"formatNo\":1}",
-                "{\"formatNo\":1,\"requiredNotice\":null,\"claims\":[],\"levels\":[],\"contradictions\":[]}"})
-            rejected("INVALID_INPUT", mapper.readTree(json));
+        for (String json :
+                new String[] {
+                    "[]",
+                    "{}",
+                    "{\"formatNo\":1}",
+                    "{\"formatNo\":1,\"requiredNotice\":null,\"claims\":[],\"levels\":[],\"contradictions\":[]}"
+                }) rejected("INVALID_INPUT", mapper.readTree(json));
         for (String pointer : new String[] {"/formatNo", "/claims", "/levels", "/contradictions"}) {
             JsonNode rule = sample();
             ((ObjectNode) rule).remove(pointer.substring(1));
@@ -87,7 +95,8 @@ class StoryRubricRuleTest {
         JsonNode canonical = rules.culprit();
         assertThat(StoryRubricRule.factCodes(canonical)).isEmpty();
         assertThat(StoryRubricRule.clueCodes(canonical)).isEmpty();
-        assertThat(rules.validate(canonical.deepCopy(), 1, "CULPRIT", 25, true, true)).contains("SELECTED_CULPRIT");
+        assertThat(rules.validate(canonical.deepCopy(), 1, "CULPRIT", 25, true, true))
+                .contains("SELECTED_CULPRIT");
         JsonNode altered = canonical.deepCopy();
         ((ObjectNode) altered.path("contradictions").get(0)).put("meaning", "different");
         rejected("INVALID_INPUT", altered, true);
@@ -100,12 +109,14 @@ class StoryRubricRuleTest {
     void linkedExamplesMustExistInActiveRelationNotJustClue() throws Exception {
         JsonNode valid = sample();
         assertThat(rules.validate(valid.deepCopy(), 7, "R", 10, true, false)).contains("\"C\"");
-        when(db.queryForObject(anyString(), eq(Integer.class), eq(7L), eq("C"), eq("R"))).thenReturn(0);
+        when(db.queryForObject(anyString(), eq(Integer.class), eq(7L), eq("C"), eq("R")))
+                .thenReturn(0);
         rejected("INVALID_INPUT", valid);
     }
 
     private JsonNode sample() throws Exception {
-        return mapper.readTree("""
+        return mapper.readTree(
+                """
                 {"formatNo":1,"requiredNotice":"Find the fact","claims":[{"code":"CLAIM",
                 "meaning":"Evidence supports this","factCodes":["F"],"exampleClueRoutes":[["C"]]}],
                 "levels":[{"code":"ZERO","score":0,"routes":[]},
@@ -120,7 +131,7 @@ class StoryRubricRuleTest {
 
     private void rejected(String code, JsonNode rule, boolean culprit) {
         assertThatThrownBy(() -> rules.validate(rule, 7, "R", culprit ? 25 : 10, true, culprit))
-                .isInstanceOf(AuthException.class).satisfies(error ->
-                        assertThat(((AuthException) error).code()).isEqualTo(code));
+                .isInstanceOf(AuthException.class)
+                .satisfies(error -> assertThat(((AuthException) error).code()).isEqualTo(code));
     }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.reasoning.common.util.CommonUtil;
+
 import org.junit.jupiter.api.Test;
 
 class StoryTextTest {
@@ -19,8 +20,18 @@ class StoryTextTest {
     /** DB가 담을 수 없는 NUL·surrogate와 공백 전용 필수값을 저장 전에 거절한다. */
     @Test
     void rejectsInvalidStorageAndRequiredText() {
-        for (String value : new String[] {null, "\0", "", "　", "가나", String.valueOf((char) 0xd800), String.valueOf((char) 0xdc00)}) {
-            assertThatThrownBy(() -> CommonUtil.normalizeText(value, 1, false)).isInstanceOf(IllegalArgumentException.class);
+        for (String value :
+                new String[] {
+                    null,
+                    "\0",
+                    "",
+                    "　",
+                    "가나",
+                    String.valueOf((char) 0xd800),
+                    String.valueOf((char) 0xdc00)
+                }) {
+            assertThatThrownBy(() -> CommonUtil.normalizeText(value, 1, false))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 }

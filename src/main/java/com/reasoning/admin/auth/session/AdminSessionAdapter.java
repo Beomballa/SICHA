@@ -2,14 +2,11 @@ package com.reasoning.admin.auth.session;
 
 import com.reasoning.common.auth.service.AdminActor;
 import com.reasoning.common.auth.service.AdminSessionVerifier;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.io.Serial;
-import java.io.Serializable;
-import java.time.Duration;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -18,25 +15,35 @@ import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.stereotype.Component;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.Duration;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public final class AdminSessionAdapter implements AdminSessionVerifier {
-    private static final String CONTEXT_KEY = HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY;
+    private static final String CONTEXT_KEY =
+            HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY;
     private final SessionRepository<? extends Session> repository;
     private final CookieSerializer cookies;
     private final TransactionTemplate independentTransaction;
 
-    public AdminSessionAdapter(SessionRepository<? extends Session> repository, CookieSerializer cookies,
+    public AdminSessionAdapter(
+            SessionRepository<? extends Session> repository,
+            CookieSerializer cookies,
             PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.cookies = cookies;
         this.independentTransaction = new TransactionTemplate(transactionManager);
-        this.independentTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.independentTransaction.setPropagationBehavior(
+                TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /** Generate the JDBC ID before the business PENDING transaction; do not persist it yet. */
@@ -46,21 +53,29 @@ public final class AdminSessionAdapter implements AdminSessionVerifier {
         return new PreparedSession(session);
     }
 
-    /** Persist after PENDING commits, in a transaction independent of the caller's business transaction. */
+    /**
+     * Persist after PENDING commits, in a transaction independent of the caller's business
+     * transaction.
+     */
     public void save(PreparedSession prepared, AdminPrincipal principal) {
         Objects.requireNonNull(prepared);
         Objects.requireNonNull(principal);
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(principal, null, java.util.List.of()));
+        context.setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(
+                        principal, null, java.util.List.of()));
         prepared.session.setAttribute(CONTEXT_KEY, context);
-        independentTransaction.executeWithoutResult(status -> saveSession(repository, prepared.session));
+        independentTransaction.executeWithoutResult(
+                status -> saveSession(repository, prepared.session));
         if (!principal.equals(findStoredPrincipal(prepared.id()).orElse(null))) {
             throw new IllegalStateException("Framework session save could not be confirmed");
         }
     }
 
-    private static <S extends Session> void saveSession(SessionRepository<S> repository, Session session) {
-        @SuppressWarnings("unchecked") S typedSession = (S) session;
+    private static <S extends Session> void saveSession(
+            SessionRepository<S> repository, Session session) {
+        @SuppressWarnings("unchecked")
+        S typedSession = (S) session;
         repository.save(typedSession);
     }
 
@@ -78,11 +93,16 @@ public final class AdminSessionAdapter implements AdminSessionVerifier {
 
     @Override
     public boolean matchesStored(String id, AdminActor actor) {
-        return id != null && actor != null && findStoredPrincipal(id).filter(stored ->
-                stored.accountId() == actor.accountId()
-                        && stored.accountKey().equals(actor.accountKey())
-                        && stored.sessionKey().equals(actor.sessionKey())
-                        && stored.authRev() == actor.authRev()).isPresent();
+        return id != null
+                && actor != null
+                && findStoredPrincipal(id)
+                        .filter(
+                                stored ->
+                                        stored.accountId() == actor.accountId()
+                                                && stored.accountKey().equals(actor.accountKey())
+                                                && stored.sessionKey().equals(actor.sessionKey())
+                                                && stored.authRev() == actor.authRev())
+                        .isPresent();
     }
 
     public Optional<CurrentSession> current(HttpServletRequest request) {
@@ -109,14 +129,16 @@ public final class AdminSessionAdapter implements AdminSessionVerifier {
     }
 
     public void clearCookie(HttpServletRequest request, HttpServletResponse response) {
-        CookieSerializer.CookieValue value = new CookieSerializer.CookieValue(request, response, "");
+        CookieSerializer.CookieValue value =
+                new CookieSerializer.CookieValue(request, response, "");
         value.setCookieMaxAge(0);
         cookies.writeCookieValue(value);
     }
 
     public static Optional<AdminPrincipal> principalFrom(Object contextAttribute) {
         if (!(contextAttribute instanceof SecurityContext context)
-                || !(context.getAuthentication() instanceof UsernamePasswordAuthenticationToken authentication)
+                || !(context.getAuthentication()
+                        instanceof UsernamePasswordAuthenticationToken authentication)
                 || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof AdminPrincipal principal)) {
             return Optional.empty();
@@ -136,7 +158,10 @@ public final class AdminSessionAdapter implements AdminSessionVerifier {
 
     public record CurrentSession(String id, AdminPrincipal principal) {}
 
-    /** Only nonsecret identity/linkage is serialized into Spring Session. Authorization is rechecked per request. */
+    /**
+     * Only nonsecret identity/linkage is serialized into Spring Session. Authorization is rechecked
+     * per request.
+     */
     public record AdminPrincipal(long accountId, UUID accountKey, UUID sessionKey, long authRev)
             implements AdminActor, Serializable {
         @Serial private static final long serialVersionUID = 1L;
