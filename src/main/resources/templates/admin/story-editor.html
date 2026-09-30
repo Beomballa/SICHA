@@ -63,7 +63,12 @@
           </div>
         </section>
         <div class="workbench">
-          <nav id="editor-nav" class="section-nav" aria-label="원고 영역">
+          <nav
+            id="editor-nav"
+            class="section-nav"
+            aria-label="원고 영역"
+            tabindex="-1"
+          >
             <p class="index-label">보고서 목차</p>
             <a href="#basic-heading"
               ><span class="index-number">01</span> 사건 개요</a
@@ -81,31 +86,35 @@
           </nav>
           <div class="manuscript">
             <section aria-labelledby="basic-heading">
-              <div class="chapter-head">
-                <span class="chapter-number" aria-hidden="true">01</span>
-                <div>
-                  <p class="eyebrow">사건의 시작과 조사 배경</p>
-                  <h2 id="basic-heading" tabindex="-1">사건 개요</h2>
+              <div class="reading">
+                <div class="chapter-head">
+                  <span class="chapter-number" aria-hidden="true">01</span>
+                  <div>
+                    <p class="eyebrow">사건의 시작과 조사 배경</p>
+                    <h2 id="basic-heading" tabindex="-1">사건 개요</h2>
+                  </div>
                 </div>
+                <p class="section-guide">
+                  기록 유지는 서버값을 유지합니다. 직접 수정한 항목과 비우기로
+                  선택한 항목만 이 영역의 저장에 포함됩니다.
+                </p>
+                <form data-section="basic"></form>
               </div>
-              <p class="section-guide">
-                기록 유지는 서버값을 유지합니다. 직접 수정한 항목과 비우기로
-                선택한 항목만 이 영역의 저장에 포함됩니다.
-              </p>
-              <form data-section="basic"></form>
             </section>
-            <section aria-labelledby="child-heading">
-              <div class="chapter-head">
-                <span class="chapter-number" aria-hidden="true">02</span>
-                <div>
-                  <p class="eyebrow">관계와 공개 소개 · 제작자 비밀 분리</p>
-                  <h2 id="child-heading" tabindex="-1">사건 자료</h2>
+            <section aria-labelledby="child-heading" hidden>
+              <div class="reading">
+                <div class="chapter-head">
+                  <span class="chapter-number" aria-hidden="true">02</span>
+                  <div>
+                    <p class="eyebrow">관계와 공개 소개 · 제작자 비밀 분리</p>
+                    <h2 id="child-heading" tabindex="-1">사건 자료</h2>
+                  </div>
                 </div>
+                <p class="section-guide">
+                  필요한 자료부터 자유롭게 작성하세요. 목록은 키와 상태만 보여
+                  주며 선택한 자료만 열람합니다.
+                </p>
               </div>
-              <p class="section-guide">
-                필요한 자료부터 자유롭게 작성하세요. 목록은 키와 상태만 보여
-                주며 선택한 자료만 열람합니다.
-              </p>
               <div class="child-toolbar">
                 <div>
                   <label for="child-resource">자료 종류</label>
@@ -138,82 +147,112 @@
                   </button>
                 </div>
               </div>
-              <p id="child-list-status" role="status">
-                목록을 조회하거나 새 인물을 작성하세요.
-              </p>
-              <div id="child-rows"></div>
-              <button type="button" id="child-next" class="secondary" hidden>
-                다음 인물
-              </button>
-              <div id="child-edit" hidden>
-                <h3 id="child-edit-heading" tabindex="-1">
-                  선택한 인물의 기록
-                </h3>
-                <p id="child-state"></p>
-                <p id="child-guide" class="section-guide">
-                  코드는 영문 대문자·숫자·밑줄 1~32자이며 생성 뒤 고정됩니다.
-                  이름은 필수이고 공개 소개·비밀 원고는 각각 8,000자까지 작성할
-                  수 있습니다.
-                </p>
-                <p id="pair-key-preview" class="muted" role="status" hidden></p>
-                <form data-section="child"></form>
-                <div class="state-action">
+              <div class="child-layout">
+                <aside class="child-list-pane" aria-label="자료 목록">
+                  <p id="child-list-status" role="status">
+                    목록을 조회하거나 새 인물을 작성하세요.
+                  </p>
+                  <div id="child-rows"></div>
                   <button
                     type="button"
-                    id="child-active"
+                    id="child-next"
                     class="secondary"
                     hidden
-                  ></button>
-                  <p class="muted">
-                    논리 삭제는 원고 저장과 별개입니다. 활성 참조를 먼저
-                    해제하세요. 삭제된 키도 예약되며 같은 자료를 복원할 수
-                    있습니다.
-                  </p>
+                  >
+                    다음 인물
+                  </button>
+                </aside>
+                <div id="child-edit" hidden>
+                  <div class="reading">
+                    <h3 id="child-edit-heading" tabindex="-1">
+                      선택한 인물의 기록
+                    </h3>
+                    <p id="child-state"></p>
+                    <p id="child-guide" class="section-guide">
+                      코드는 영문 대문자·숫자·밑줄 1~32자이며 생성 뒤
+                      고정됩니다. 이름은 필수이고 공개 소개·비밀 원고는 각각
+                      8,000자까지 작성할 수 있습니다.
+                    </p>
+                    <p
+                      id="pair-key-preview"
+                      class="muted"
+                      role="status"
+                      hidden
+                    ></p>
+                    <form data-section="child"></form>
+                    <div class="state-action">
+                      <button
+                        type="button"
+                        id="child-active"
+                        class="secondary"
+                        hidden
+                      ></button>
+                      <p class="muted">
+                        논리 삭제는 원고 저장과 별개입니다. 활성 참조를 먼저
+                        해제하세요. 삭제된 키도 예약되며 같은 자료를 복원할 수
+                        있습니다.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
             <section
               aria-labelledby="answer-heading"
               class="restricted-chapter"
+              hidden
             >
-              <div class="chapter-head">
-                <span class="chapter-number" aria-hidden="true">03</span>
-                <div>
-                  <p class="eyebrow">
-                    제작자 전용 · 플레이어에게 표시되지 않음
-                  </p>
-                  <h2 id="answer-heading" tabindex="-1">진상과 정답</h2>
+              <div class="reading">
+                <div class="chapter-head">
+                  <span class="chapter-number" aria-hidden="true">03</span>
+                  <div>
+                    <p class="eyebrow">
+                      제작자 전용 · 플레이어에게 표시되지 않음
+                    </p>
+                    <h2 id="answer-heading" tabindex="-1">진상과 정답</h2>
+                  </div>
                 </div>
+                <p class="section-guide">
+                  범인·수법·시간·동기의 연결을 기록합니다. 범인은 같은 버전의
+                  활성 인물 코드만 지정할 수 있습니다.
+                </p>
+                <form data-section="answer"></form>
               </div>
-              <p class="section-guide">
-                범인·수법·시간·동기의 연결을 기록합니다. 범인은 같은 버전의 활성
-                인물 코드만 지정할 수 있습니다.
-              </p>
-              <form data-section="answer"></form>
             </section>
-            <section aria-labelledby="reveal-heading">
-              <div class="chapter-head">
-                <span class="chapter-number" aria-hidden="true">04</span>
-                <div>
-                  <p class="eyebrow">종료 후 공개용 원고</p>
-                  <h2 id="reveal-heading" tabindex="-1">종결 해설</h2>
+            <section aria-labelledby="reveal-heading" hidden>
+              <div class="reading">
+                <div class="chapter-head">
+                  <span class="chapter-number" aria-hidden="true">04</span>
+                  <div>
+                    <p class="eyebrow">종료 후 공개용 원고</p>
+                    <h2 id="reveal-heading" tabindex="-1">종결 해설</h2>
+                  </div>
                 </div>
+                <p class="section-guide">
+                  조사로 드러난 사실을 연결해 설명합니다. 현재는 편집 원고이며
+                  저장만으로 공개되지 않습니다.
+                </p>
+                <form data-section="reveal"></form>
               </div>
-              <p class="section-guide">
-                조사로 드러난 사실을 연결해 설명합니다. 현재는 편집 원고이며
-                저장만으로 공개되지 않습니다.
-              </p>
-              <form data-section="reveal"></form>
             </section>
           </div>
           <aside class="report-notes" aria-label="작성 참고">
             <section aria-labelledby="policy-heading">
-              <p class="eyebrow">읽기 전용</p>
-              <h2 id="policy-heading" tabindex="-1">작성 기준</h2>
-              <p class="muted">난이도 저장 후 적용되는 서버 정책입니다.</p>
-              <dl id="policy"></dl>
+              <details id="policy-details">
+                <summary id="policy-heading">작성 기준 · 읽기 전용</summary>
+                <p class="muted">난이도 저장 후 적용되는 서버 정책입니다.</p>
+                <dl id="policy"></dl>
+              </details>
             </section>
-            <section aria-label="저장 경고"><div id="warnings"></div></section>
+            <section aria-label="저장 경고">
+              <details id="warning-details">
+                <summary>
+                  <strong id="warning-count">작성 확인 0건</strong> · 저장은
+                  가능하며 검수 통과를 의미하지 않습니다.
+                </summary>
+                <div id="warnings"></div>
+              </details>
+            </section>
             <p class="muted">
               미저장 입력은 현재 페이지에만 있습니다. 새로고침·이동하면 사라질
               수 있으며 자동 저장은 하지 않습니다.

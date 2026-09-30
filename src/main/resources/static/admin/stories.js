@@ -3,6 +3,7 @@
   const api = "/admin/api/stories";
   const notice = document.getElementById("notice");
   const editor = document.getElementById("editor");
+  let editorFragmentApplied = false;
   const versionStates = {
     DRAFT: "초안",
     REVIEW: "검수 중",
@@ -531,7 +532,7 @@
     updateDraftSummary();
   }
 
-  /** 실제 선택된 영역·필드 수만 표시하며 저장 여부를 추정하지 않는다. */
+  /** 매개변수 없이 실제 선택된 영역·필드 수와 목차의 변경 여부만 표시한다. 원고 값은 노출하지 않는다. */
   function updateDraftSummary() {
     if (!editor) return;
     let sections = 0;
@@ -542,6 +543,9 @@
       );
       if (selected.length) sections++;
       count += selected.length;
+      editor
+        .querySelector(`#editor-nav a[href="#${form.dataset.section}-heading"]`)
+        ?.setAttribute("data-dirty", String(selected.length > 0));
       for (const field of form.querySelectorAll("[data-field]")) {
         field.closest(".field").dataset.dirty = String(field.value !== "keep");
         syncRecordView(field);
@@ -592,7 +596,67 @@
     }
   }
 
-  /** 고정 오류 문구를 해당 필드에 연결하고, 입력이 숨겨졌으면 표시된 저장 동작 선택기로 포커스를 옮긴다. */
+  /** 매개변수 없이 현재 표시된 원고 영역의 제목을 반환하며 원고 DOM은 교체하지 않는다. */
+  function activeEditorHeading() {
+    return editor.querySelector(".manuscript > section:not([hidden]) h2");
+  }
+
+  /**
+   * 대상이 속한 원고 영역의 표시와 목차 위치만 갱신한다. 요청·입력·세대는 변경하지 않는다.
+   * @param {Element|null} target 기존 DOM 대상. 원고 밖이거나 null이면 표시를 바꾸지 않는다.
+   */
+  function revealEditorPanel(target) {
+    const panel = target?.closest(".manuscript > section");
+    if (!panel) return;
+    for (const section of editor.querySelectorAll(".manuscript > section")) {
+      section.hidden = section !== panel;
+    }
+    for (const link of editor.querySelectorAll("#editor-nav a")) {
+      if (
+        link.getAttribute("href") ===
+        `#${panel.getAttribute("aria-labelledby")}`
+      ) {
+        link.setAttribute("aria-current", "location");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    }
+  }
+
+  /**
+   * 알려진 문서 조각의 영역과 접힌 참고를 먼저 표시한 뒤 대상에 초점을 옮긴다.
+   * @param {string} hash 같은 문서의 #id. 빈 값·잘못된 인코딩·없는 대상은 무시한다.
+   * @returns {boolean} 표시된 대상으로 이동했는지 여부.
+   */
+  function focusEditorFragment(hash) {
+    if (!editor || editor.hidden || !hash.startsWith("#")) return false;
+    let id;
+    try {
+      id = decodeURIComponent(hash.slice(1));
+    } catch {
+      return false;
+    }
+    let target = document.getElementById(id);
+    if (!target) return false;
+    revealEditorPanel(target);
+    const disclosure = target.closest("details");
+    if (disclosure) disclosure.open = true;
+    if (target.hidden && target.matches("[data-value]")) {
+      target = target.closest(".field").querySelector("[data-field]");
+    }
+    if (target?.matches(":disabled")) target = activeEditorHeading();
+    if (!target || target.closest("[hidden]")) return false;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: "start" });
+    return true;
+  }
+
+  /**
+   * 고정 오류를 필드에 연결하고 숨겨진 영역을 먼저 표시한다.
+   * @param {HTMLFormElement} form 기존 영역 폼. null은 허용하지 않는다.
+   * @param {string} key 해당 폼에 존재하는 기존 필드 키.
+   * @param {string} message 원고 값을 포함하지 않는 검증 안내.
+   */
   function fieldError(form, key, message) {
     const input = form.querySelector(`[data-value="${key}"]`);
     const previous = document.getElementById(`${input.id}-error`);
@@ -610,6 +674,7 @@
       : input;
     target.setAttribute("aria-invalid", "true");
     target.setAttribute("aria-describedby", error.id);
+    revealEditorPanel(target);
     target.focus();
   }
 
@@ -626,6 +691,13 @@
     for (const [key, label, kind, nullable] of fields[section]) {
       const group = document.createElement("div");
       group.className = "field";
+      if (
+        section === "child" &&
+        ((childResource === "persons" && key === "secretText") ||
+          (childResource === "clues" && key === "sourceText"))
+      ) {
+        group.dataset.boundary = "private";
+      }
       const id = `${section}-${key}`;
       const head = document.createElement("div");
       head.className = "field-head";
@@ -794,7 +866,11 @@
     return drafts;
   }
 
-  /** 확인된 서버본을 반영하되 확정된 제출 외 미저장 입력과 포커스를 보존한다. */
+  /**
+   * 확인된 서버본을 반영하되 확정된 제출 외 입력과 현재 영역을 보존한다.
+   * @param {object} data 기존 상세 조회 계약의 서버본.
+   * @param {object} options preserve는 입력 보존 여부(기본 false), confirmed는 확정된 제출 영수증이며 생략 가능하다.
+   */
   function fillDetail(data, { preserve = false, confirmed } = {}) {
     ++comparisonRequest;
     const focusedId = document.activeElement?.id;
@@ -819,6 +895,8 @@
     ])
       labelValue(state, label, value);
     const warning = document.getElementById("warnings");
+    document.getElementById("warning-count").textContent =
+      `작성 확인 ${(data.warnings || []).length}건`;
     warning.replaceChildren();
     const heading = document.createElement("h3");
     heading.textContent = "저장 경고 (검수 통과가 아님)";
@@ -951,8 +1029,12 @@
         if (selection != null && ["text", "textarea"].includes(target.type))
           target.setSelectionRange(selection, selection);
       } else {
-        document.getElementById("basic-heading").focus();
+        activeEditorHeading()?.focus();
       }
+    }
+    if (!editorFragmentApplied) {
+      editorFragmentApplied = true;
+      focusEditorFragment(window.location.hash);
     }
     status(
       data.status === "DRAFT" && data.storyActiveYn && data.activeYn
@@ -1167,7 +1249,10 @@
     status(message, true);
   }
 
-  /** key는 현재 자원의 같은 버전 키이며 생략하면 새 작성이다. 다른 영역의 미저장 원고는 유지한다. */
+  /**
+   * 같은 버전 자료를 조회하며 다른 영역의 입력과 탐색 위치를 보존한다.
+   * @param {string|undefined} key 현재 자원의 키. 생략하면 새 작성이며 비동기 응답은 다른 영역의 초점을 빼앗지 않는다.
+   */
   async function selectChild(key) {
     if (!detail || saveLocked) return;
     const previous = captureDrafts().child;
@@ -1207,7 +1292,12 @@
       if (current !== generation || key !== childKey) return;
       if (data.editRev !== detail.editRev) showComparison(data);
       else fillDetail(data, { preserve: true });
-      document.getElementById("child-edit-heading").focus();
+      if (
+        !document.getElementById("child-heading").closest("section").hidden &&
+        document.getElementById("comparison").hidden
+      ) {
+        document.getElementById("child-edit-heading").focus();
+      }
     } catch (error) {
       if (current === generation && ![401, 403, 404].includes(error.status))
         lockForReview(
@@ -2382,6 +2472,39 @@
   }
 
   if (editor) {
+    revealEditorPanel(document.getElementById("basic-heading"));
+    // 같은 문서의 일반 왼쪽 클릭만 처리하며 보조키·외부 링크의 브라우저 동작은 유지한다.
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("a[href]");
+      if (
+        !link ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const url = new URL(link.href, window.location.href);
+      if (
+        url.origin !== window.location.origin ||
+        url.pathname !== window.location.pathname ||
+        url.search !== window.location.search ||
+        !url.hash
+      )
+        return;
+      if (focusEditorFragment(url.hash)) {
+        event.preventDefault();
+        // 이력만 갱신해 지연된 hashchange가 새 입력 중 포커스를 다시 옮기지 않게 한다.
+        if (window.location.hash !== url.hash)
+          window.history.pushState(null, "", url.hash);
+      }
+    });
+    // 뒤로/앞으로 이동과 직접 변경한 문서 조각도 현재 표시된 입력으로 안내한다.
+    window.addEventListener("hashchange", () => {
+      focusEditorFragment(window.location.hash);
+    });
     document
       .getElementById("child-resource")
       .addEventListener("change", (event) => {

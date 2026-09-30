@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 
-/** 폐기형 HTTPS 편집기의 사실 분류·문서 참조·원고 경계와 명시적 복구를 확인한다. */
+/**
+ * 폐기형 HTTPS 편집기의 사실 분류·문서 참조·원고 경계와 명시적 복구를 확인한다.
+ * @param {object} flow 인증된 page, 시험 API 경로와 실제 목차를 여는 openSection 및 기존 시험 헬퍼. null은 허용하지 않는다.
+ */
 export async function exerciseFacts({
+  openSection,
   page,
   apiPath,
   api,
@@ -12,6 +16,7 @@ export async function exerciseFacts({
   loseResponse,
   baseUrl,
 }) {
+  await openSection(page, "child");
   await page.select("#child-resource", "facts");
   await page.click("#child-new");
   await edit(page, "child", "code", "FACT_A");
@@ -85,6 +90,7 @@ export async function exerciseFacts({
     null,
   );
 
+  await openSection(page, "child");
   await page.select("#child-resource", "events");
   let reads = 0;
   const countRead = (r) => {
@@ -95,6 +101,7 @@ export async function exerciseFacts({
       reads++;
   };
   page.on("request", countRead);
+  await openSection(page, "child");
   await page.select("#child-resource", "facts");
   await page.waitForSelector('[data-child-key="FACT_A"]');
   assert.equal(reads, 0);
@@ -136,6 +143,7 @@ export async function exerciseFacts({
     "사실 원장과 독립된 미저장 정답",
   );
   await save(page, "answer");
+  await openSection(page, "child");
   await page.click("#child-active");
   await notice(page, "최신 원고를 조회했습니다");
   assert.equal(
@@ -143,6 +151,7 @@ export async function exerciseFacts({
     false,
   );
   assert.equal(await page.$eval("#child-save", (e) => e.disabled), true);
+  await openSection(page, "child");
   await page.click("#child-active");
   await notice(page, "최신 원고를 조회했습니다");
   assert.equal(
@@ -150,6 +159,7 @@ export async function exerciseFacts({
     true,
   );
 
+  await openSection(page, "child");
   await page.click("#child-new");
   await edit(page, "child", "code", "FACT_LOST");
   await edit(page, "child", "statement", "응답 유실 합성 명제");

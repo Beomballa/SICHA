@@ -1,142 +1,42 @@
-/* Runtime subset of docs/design/design-tokens.css (the source is not served as a static asset). */
-:root {
-  --color-background: #121417;
-  --color-surface: #1e2228;
-  --color-text: #e5e8eb;
-  --color-text-muted: #9ca3af;
-  --color-brand: #c91a1a;
-  --color-border: #2b323d;
-  --color-focus: #ffc700;
-  --font-ui: "SUIT Variable", "Apple SD Gothic Neo", sans-serif;
-  --space-2: 8px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --radius-control: 8px;
-  --radius-card: 12px;
-}
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-  background: var(--color-background);
-  color: var(--color-text);
-  font: 1rem/1.5 var(--font-ui);
-}
+@import url("/admin/ui.css");
+
 .shell {
-  max-width: 720px;
+  max-width: calc(var(--reading-max-width) + 2 * var(--page-gutter));
   margin: auto;
-  padding: 32px 16px 64px;
+  padding: var(--gap-section) var(--page-gutter) var(--space-16);
 }
-.eyebrow {
-  color: var(--color-focus);
-  letter-spacing: 0.1em;
-}
-h1 {
-  font-size: clamp(1.5rem, 4vw, 2rem);
-  line-height: 1.25;
-}
-h2 {
-  font-size: 1.25rem;
-}
-#content > section,
-dialog {
+#content > section {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  padding: var(--space-6);
-  margin: var(--space-4) 0;
+  padding: var(--panel-padding);
+  margin-block: var(--gap-related);
 }
-dialog {
-  color: var(--color-text);
-  max-width: min(92vw, 520px);
-}
-dialog::backdrop {
-  background: rgb(0 0 0 / 70%);
-}
-label {
-  display: block;
-  font-weight: 600;
-  margin: 16px 0 6px;
-}
-input,
-select {
-  display: block;
-  width: 100%;
-  min-height: 48px;
-  padding: 10px 12px;
-  border: 1px solid #9ca3af;
-  border-radius: var(--radius-control);
-  background: #121417;
-  color: var(--color-text);
-  font: inherit;
-}
-input:focus-visible,
-select:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
-button {
-  min-height: 48px;
-  padding: 10px 16px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--color-brand);
-  color: var(--color-text);
-  font: inherit;
-  cursor: pointer;
-}
-button.secondary {
-  background: #252a32;
-  border: 1px solid #9ca3af;
-}
-button:disabled {
-  opacity: 0.6;
-  cursor: wait;
+#content > section > h2 {
+  margin-bottom: var(--gap-related);
 }
 .actions,
 .links {
   display: flex;
-  gap: 12px;
+  gap: var(--gap-related);
   flex-wrap: wrap;
-  margin-top: 24px;
-}
-a {
-  color: var(--color-focus);
-}
-p {
-  overflow-wrap: anywhere;
-}
-.muted {
-  color: var(--color-text-muted);
+  margin-top: var(--gap-group);
 }
 .secret {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-code);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   user-select: text;
 }
-.error {
-  color: #ffc700;
-}
 #notice {
   min-height: 2em;
-}
-fieldset {
-  border: 1px solid var(--color-border);
-  margin: 16px 0;
-  padding: 12px;
-}
-legend {
-  font-weight: 600;
+  margin-block: var(--gap-related);
 }
 .account-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--space-4);
-  margin: var(--space-6) 0;
+  gap: var(--gap-related);
+  margin: var(--gap-group) 0;
 }
 .account-fields dt {
   font-weight: 600;
@@ -147,72 +47,36 @@ legend {
 }
 .account-row {
   border-top: 1px solid var(--color-border);
-  padding: var(--space-4) 0;
-}
-.account-row a {
-  display: inline-block;
-  min-height: 48px;
-  align-content: center;
-  overflow-wrap: anywhere;
+  padding: var(--gap-related) 0;
 }
 .account-row p {
-  margin: var(--space-2) 0 0;
+  margin: var(--gap-helper) 0 0;
 }
 .permission-choices {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
+  gap: var(--gap-label);
 }
 .permission-choice {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 48px;
   margin: 0;
   overflow-wrap: anywhere;
-}
-.permission-choice input {
-  width: 24px;
-  min-height: 24px;
-  flex: none;
-  margin: 0;
 }
 #manage-link {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-4);
-}
-fieldset {
-  min-width: 0;
-}
-[hidden] {
-  display: none !important;
+  gap: var(--gap-related);
 }
 .impact-hash {
   overflow-wrap: anywhere;
 }
-#reactivation-confirm input[type="checkbox"] {
-  display: inline-block;
-  width: 24px;
-  min-height: 24px;
-  margin-right: var(--space-2);
-  vertical-align: middle;
+form > button,
+form > input + button,
+form > select + button {
+  margin-top: var(--gap-group);
 }
 @media (max-width: 400px) {
-  #content > section {
-    padding: var(--space-4);
-  }
-  .account-fields {
+  .account-fields,
+  .permission-choices {
     grid-template-columns: minmax(0, 1fr);
-  }
-}
-@media (min-width: 768px) {
-  .shell {
-    padding-inline: 24px;
-  }
-}
-@media (min-width: 1200px) {
-  .shell {
-    padding-inline: 32px;
   }
 }

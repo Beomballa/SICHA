@@ -62,13 +62,31 @@ tasks.register('integrationTest', Test) {
     shouldRunAfter tasks.named('test')
 }
 
+tasks.register('uiTest', Exec) {
+    description = '공통 UI 규격과 관리자 화면의 Node 회귀를 실행한다.'
+    group = 'verification'
+    workingDir projectDir
+    doFirst {
+        def uiFiles = fileTree('src/test/js') { include '*.test.mjs' }.files.sort()
+        if (uiFiles.empty) {
+            throw new GradleException('관리자 UI 회귀 파일이 없습니다.')
+        }
+        commandLine(['node', '--test'] + uiFiles.collect { it.absolutePath })
+    }
+}
+
 tasks.register('browserTest', Test) {
     description = '격리 PostgreSQL과 실제 HTTPS 로그인으로 관리자 화면을 검증한다.'
     group = 'verification'
+    inputs.files(fileTree('src/test/browser') {
+        include '**/*.mjs', 'zoom-extension/*.js', 'zoom-extension/*.json'
+        exclude 'node_modules/**'
+    })
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     include '**/*BrowserIT.class'
     useJUnitPlatform()
+    dependsOn tasks.named('uiTest')
     shouldRunAfter tasks.named('integrationTest')
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 /** 폐기형 HTTPS 사건에서 힌트 원고의 경계, 단계 충돌과 비교 복구를 검증한다. */
 export async function exerciseHints({
   page,
+  openSection,
   apiPath,
   api,
   edit,
@@ -14,6 +15,7 @@ export async function exerciseHints({
 }) {
   /** 자원 선택 뒤 키 목록을 열고 단건 원고 조회까지 기다린다. */
   async function open(key, active = true) {
+    await openSection(page, "child");
     await page.select("#child-resource", "hints");
     await page.select("#child-filter", String(active));
     await page.waitForSelector(`[data-child-key="${key}"]`);
@@ -28,6 +30,7 @@ export async function exerciseHints({
     return (await api(page, apiPath)).body.editRev;
   }
 
+  await openSection(page, "child");
   await page.select("#child-resource", "hints");
   await page.click("#child-new");
   await edit(page, "child", "code", "HINT_A");

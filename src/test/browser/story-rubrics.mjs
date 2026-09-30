@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 
-/** 폐기형 HTTPS 편집기에서 소항목·단서 연결·규칙 원문과 수동 복구를 확인한다. */
+/**
+ * 폐기형 HTTPS 편집기에서 소항목·단서 연결·규칙 원문과 수동 복구를 확인한다.
+ * @param {object} flow 인증된 page, 시험 API 경로와 실제 목차를 여는 openSection 및 기존 시험 헬퍼. null은 허용하지 않는다.
+ */
 export async function exerciseRubrics({
+  openSection,
   page,
   apiPath,
   baseUrl,
@@ -28,8 +32,14 @@ export async function exerciseRubrics({
     await page.reload({ waitUntil: "domcontentloaded" });
     await notice(page, "현재 원고를 조회했습니다");
   }
-  /** 선택된 자료 종류의 키 목록만 거쳐 상세 원고를 연다. */
+
+  /**
+   * 실제 목차와 선택된 자료 종류의 키 목록을 거쳐 상세 원고를 연다.
+   * @param {string} resource 기존 하위 자료 종류. null은 허용하지 않는다.
+   * @param {string} key 목록에 존재하는 합성 자료 키. null은 허용하지 않는다.
+   */
   async function open(resource, key) {
+    await openSection(page, "child");
     await page.select("#child-resource", resource);
     await page.waitForSelector(`[data-child-key="${key}"]`);
     await page.click(`[data-child-key="${key}"]`);
@@ -37,7 +47,13 @@ export async function exerciseRubrics({
       () => !document.getElementById("child-resource").disabled,
     );
   }
+
+  /**
+   * 표시된 하위 원고 영역에 규칙 검증용 원문을 입력한다.
+   * @param {string} value 검증에 사용할 JSON 원문. 잘못된 JSON도 허용하며 null은 허용하지 않는다.
+   */
   const json = async (value) => {
+    await openSection(page, "child");
     await page.select("#child-ruleData-mode", "value");
     await page.$eval(
       "#child-ruleData",
@@ -49,6 +65,7 @@ export async function exerciseRubrics({
     );
   };
 
+  await openSection(page, "child");
   await page.select("#child-resource", "rubrics");
   await page.click("#child-new");
   await edit(page, "child", "code", "UI_RUBRIC");
@@ -87,7 +104,9 @@ export async function exerciseRubrics({
       detailReads++;
   };
   page.on("request", countDetail);
+  await openSection(page, "child");
   await page.select("#child-resource", "facts");
+  await openSection(page, "child");
   await page.select("#child-resource", "rubrics");
   await page.waitForSelector('[data-child-key="UI_RUBRIC"]');
   assert.equal(detailReads, 0);
@@ -167,6 +186,7 @@ export async function exerciseRubrics({
     201,
   );
   await latest();
+  await openSection(page, "child");
   await page.select("#child-resource", "rubric-clues");
   await page.click("#child-new");
   await edit(page, "child", "rubricCode", "UI_RUBRIC");
@@ -188,7 +208,9 @@ export async function exerciseRubrics({
       linkReads++;
   };
   page.on("request", countLink);
+  await openSection(page, "child");
   await page.select("#child-resource", "rubrics");
+  await openSection(page, "child");
   await page.select("#child-resource", "rubric-clues");
   await page.waitForSelector('[data-child-key="UI_RUBRIC~RUBRIC_CLUE"]');
   assert.equal(linkReads, 0);
@@ -361,6 +383,7 @@ export async function exerciseRubrics({
     "충돌에도 보존할 정답 안내",
   );
 
+  await openSection(page, "child");
   await page.click("#child-new");
   await edit(page, "child", "code", "RUBRIC_CULPRIT");
   await page.select("#child-category", "CULPRIT");
@@ -402,6 +425,7 @@ export async function exerciseRubrics({
     409,
   );
 
+  await openSection(page, "child");
   await page.click("#child-new");
   await edit(page, "child", "code", "RUBRIC_LOST");
   await page.select("#child-category", "EVIDENCE");

@@ -67,6 +67,21 @@ class SecurityIT extends DatabaseContextTest {
         mvc.perform(get("/admin/api/auth/me").secure(true)).andExpect(status().isUnauthorized());
     }
 
+    /** 공통 스타일 한 경로의 공개가 인접 관리자 자산·화면·API의 인증을 해제하지 않는지 확인한다. */
+    @Test
+    @DisplayName("UI-SYSTEM-01: only shared CSS is public; neighboring administrator resources stay protected")
+    void sharedStyleKeepsAdministratorBoundary() throws Exception {
+        mvc.perform(get("/admin/ui.css").secure(true)).andExpect(status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                .contentTypeCompatibleWith("text/css"));
+        for (String path : java.util.List.of("/admin/ui.css/extra", "/admin/stories.css", "/admin/api/stories")) {
+            mvc.perform(get(path).secure(true)).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_REQUIRED"));
+        }
+        mvc.perform(get("/admin/stories").secure(true)).andExpect(status().isSeeOther())
+            .andExpect(header().string("Location", "/admin/login"));
+    }
+
     @Test
     @DisplayName("SEC-03: CSRF token is available, but protected API stays closed")
     void csrfAndDefaultDeny() throws Exception {

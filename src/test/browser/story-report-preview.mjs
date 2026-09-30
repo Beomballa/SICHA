@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 /**
  * 공개 가능한 합성 원고를 폐기형 HTTPS 시험 사건에 입력해 보고서 레이아웃을 검증한다.
  * 제외된 문서·비공개 콘텐츠에 의존하지 않으며 실제 서비스 DB는 변경하지 않는다.
- * @param {object} flow 인증된 browser, 서버가 반환한 시험 사건 url과 기존 layout/edit/save/notice 헬퍼.
+ * @param {object} flow 인증된 browser, 서버가 반환한 시험 사건 url, 실제 목차를 여는 openSection과 기존 layout/edit/save/notice 헬퍼. null은 허용하지 않는다.
  */
 export async function captureReportPreview({
+  openSection,
   browser,
   url,
   layout,
@@ -61,7 +62,10 @@ export async function captureReportPreview({
     tab.on("pageerror", (error) => errors.push(error.message));
   }
 
-  /** 지정 탭을 활성화해 열고 실패 시 원고 대신 고정 상태 문구와 런타임 오류만 진단한다. */
+  /**
+   * 지정 탭을 활성화해 열고 실패 시 원고 대신 고정 상태 문구와 런타임 오류만 진단한다.
+   * @param {object} tab 합성 시험 사건을 열 Puppeteer 페이지. null은 허용하지 않는다.
+   */
   async function openReport(tab) {
     await tab.bringToFront();
     const response = await tab.goto(url);
@@ -104,6 +108,7 @@ export async function captureReportPreview({
       /hintsPerPerson|hintsPerChild/,
     );
     for (const child of persons) {
+      await openSection(page, "child");
       await page.click("#child-new");
       await page.waitForFunction(
         () => document.getElementById("child-code")?.value === "",
@@ -129,8 +134,10 @@ export async function captureReportPreview({
     await save(page, "answer");
     await edit(page, "reveal", "revealText", answer.evidence);
     await save(page, "reveal");
+    await openSection(page, "child");
     await page.select("#child-resource", "roles");
     for (const { code, name } of roles) {
+      await openSection(page, "child");
       await page.click("#child-new");
       for (const [field, value] of Object.entries({
         code,
@@ -140,15 +147,20 @@ export async function captureReportPreview({
         await edit(page, "child", field, value);
       await save(page, "child");
     }
+    await openSection(page, "child");
     await layout(page, "child-role-report");
+    await openSection(page, "child");
     await page.select("#child-resource", "pairs");
     await page.click("#child-new");
     await edit(page, "child", "roleA", roles[1].code);
     await edit(page, "child", "roleB", roles[0].code);
     await save(page, "child");
+    await openSection(page, "child");
     await layout(page, "child-pair-report");
+    await openSection(page, "child");
     await page.select("#child-resource", "clues");
     for (const { code, roleCode, title: clueTitle, body } of clues) {
+      await openSection(page, "child");
       await page.click("#child-new");
       for (const [field, value] of Object.entries({
         code,
@@ -161,7 +173,9 @@ export async function captureReportPreview({
         await page.$eval("#child-body-record", (e) => e.textContent),
         body,
       );
+      await openSection(page, "child");
       await layout(page, `child-clue-${code}-report`);
+      await openSection(page, "child");
       await page.select("#child-resource", "clue-roles");
       await page.click("#child-new");
       await edit(page, "child", "clueCode", code);
@@ -171,9 +185,12 @@ export async function captureReportPreview({
         await page.$eval("#pair-key-preview", (e) => e.hidden),
         true,
       );
+      await openSection(page, "child");
       await layout(page, `child-clue-${code}-assignment-report`);
+      await openSection(page, "child");
       await page.select("#child-resource", "clues");
     }
+    await openSection(page, "child");
     await page.select("#child-resource", "persons");
     await page.click("#child-list");
     await page.waitForSelector('[data-child-key="P01"]');
@@ -186,8 +203,10 @@ export async function captureReportPreview({
       await page.$eval("#basic-intro-record", (e) => e.hidden),
       false,
     );
+    await openSection(page, "basic");
     await layout(page, "report-editor");
 
+    await openSection(page, "child");
     await page.click('[data-child-key="P01"]');
     await page.waitForFunction(
       (name) =>
@@ -207,6 +226,7 @@ export async function captureReportPreview({
       ),
       "저장할 변경 없음",
     );
+    await openSection(page, "child");
     await layout(page, "child-report");
 
     const draft = `${intro}\n\n${answer.time}`;
@@ -215,7 +235,9 @@ export async function captureReportPreview({
       await page.$eval("#basic-intro-record", (e) => e.hidden),
       true,
     );
+    await openSection(page, "basic");
     await layout(page, "report-editing");
+    await openSection(page, "basic");
     await page.select("#basic-intro-mode", "keep");
     assert.equal(
       await page.$eval("#basic-intro-record", (e) => e.textContent),
@@ -225,9 +247,11 @@ export async function captureReportPreview({
       await page.$eval("#basic-intro-record", (e) => e.hidden),
       false,
     );
+    await openSection(page, "basic");
     await page.select("#basic-intro-mode", "value");
     assert.equal(await page.$eval("#basic-intro", (e) => e.value), draft);
     assert.equal(await page.$eval("#basic-intro", (e) => e.hidden), false);
+    await openSection(page, "basic");
     await page.select("#basic-intro-mode", "clear");
     assert.equal(await page.$eval("#basic-intro", (e) => e.hidden), true);
     assert.equal(
@@ -242,16 +266,20 @@ export async function captureReportPreview({
       ),
       false,
     );
+    await openSection(page, "basic");
     await layout(page, "report-clearing");
+    await openSection(page, "basic");
     await page.select("#basic-intro-mode", "value");
 
     await openReport(peer);
     await edit(peer, "basic", "intro", `${intro}\n\n${answer.evidence}`);
     await save(peer, "basic");
     await page.bringToFront();
+    await openSection(page, "basic");
     await page.click("#basic-save");
     await notice(page, "검토 전 저장은 차단");
     assert.equal(await page.$eval("#basic-intro", (e) => e.value), draft);
+    await openSection(page, "basic");
     await layout(page, "report-conflict");
 
     await peer.bringToFront();

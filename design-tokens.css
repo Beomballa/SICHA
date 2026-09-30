@@ -15,8 +15,8 @@
   --color-border: #2b323d;
   --color-control-border: #9ca3af;
   --color-focus: #ffc700;
-  --font-ui: 'SUIT Variable', 'Apple SD Gothic Neo', sans-serif;
-  --font-code: 'JetBrains Mono', ui-monospace, monospace;
+  --font-ui: "SUIT Variable", "Apple SD Gothic Neo", sans-serif;
+  --font-code: "JetBrains Mono", ui-monospace, monospace;
   --font-size-caption: 0.875rem;
   --font-size-body: 1rem;
   --font-size-section: 1.25rem;
@@ -41,19 +41,34 @@
   --content-max-width: 1200px;
   --reading-max-width: 720px;
   --touch-target-min: 48px;
+  --gap-label: var(--space-2);
+  --gap-helper: var(--space-2);
+  --gap-related: var(--space-4);
+  --gap-group: var(--space-6);
+  --gap-section: var(--space-8);
+  --panel-padding: var(--space-4);
+  --select-arrow-inset: var(--space-4);
+  --select-padding-end: var(--space-12);
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
   --motion-duration: 160ms;
 }
 
 @media (min-width: 768px) {
-  :root { --page-gutter: 24px; }
+  :root {
+    --page-gutter: 24px;
+    --panel-padding: var(--space-6);
+  }
 }
 
 @media (min-width: 1200px) {
-  :root { --page-gutter: 32px; }
+  :root {
+    --page-gutter: 32px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --motion-duration: 0ms; }
+  :root {
+    --motion-duration: 0ms;
+  }
 }

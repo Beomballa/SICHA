@@ -63,9 +63,34 @@ async function notice(page, fragment) {
   );
 }
 
+/**
+ * 실제 목차로 원고 영역을 표시하고 패널 준비를 기다린다.
+ * @param {object} page 편집기가 로드된 인증된 Puppeteer 페이지. null은 허용하지 않는다.
+ * @param {"basic"|"child"|"answer"|"reveal"} section 표시할 기존 원고 영역. 생략·null·다른 값은 허용하지 않는다.
+ * @throws {Error} 영역 값이 잘못되거나 실제 목차·표시 패널을 제한 시간 안에 찾지 못하면 실패한다.
+ */
+async function openSection(page, section) {
+  assert.ok(["basic", "child", "answer", "reveal"].includes(section));
+  await page.bringToFront();
+  const selector = `#editor-nav a[href="#${section}-heading"]`;
+  await page.waitForSelector(selector);
+  if (
+    !(await page.$eval(
+      selector,
+      (link) => link.getAttribute("aria-current") === "location",
+    ))
+  ) {
+    await page.click(selector);
+  }
+  await page.waitForSelector(
+    `.manuscript > section[aria-labelledby="${section}-heading"]`,
+    { visible: true },
+  );
+}
+
 /** 명시적 저장 동작을 선택하고 텍스트·정수 필드를 입력한다. */
 async function edit(page, section, field, value) {
-  await page.bringToFront();
+  await openSection(page, section);
   await page.select(`#${section}-${field}-mode`, "value");
   await page.$eval(`#${section}-${field}`, (element) => {
     element.value = "";
@@ -75,7 +100,7 @@ async function edit(page, section, field, value) {
 
 /** 영역별 저장 버튼만 실행하고 저장 후 조회 완료를 기다린다. */
 async function save(page, section) {
-  await page.bringToFront();
+  await openSection(page, section);
   await page.click(`#${section}-save`);
   await notice(page, "최신 원고를 조회했습니다");
 }
@@ -153,6 +178,126 @@ async function holdResponse(page, pattern) {
 }
 
 const layoutEvidence = [];
+
+/**
+ * 실제 편집 목차·모드 왕복·경고·문서 조각을 합성 폐기 사건에서 확인한다.
+ * @param {object} page 합성 사건 편집기가 준비된 Puppeteer 페이지. null은 허용하지 않는다.
+ */
+async function inspectEditorNavigation(page) {
+  for (const width of [360, 768, 900, 1200, 1440]) {
+    await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+    const widths = [];
+    for (const section of ["basic", "child", "answer", "reveal"]) {
+      await openSection(page, section);
+      const visibleCount = await page.$$eval(
+        ".manuscript > section",
+        (nodes) => nodes.filter((node) => node.getClientRects().length).length,
+      );
+      assert.equal(visibleCount, 1, `${width}px ${section} 단일 표시`);
+      widths.push(
+        await page.$eval(
+          `.manuscript > section[aria-labelledby="${section}-heading"]`,
+          (node) => node.getBoundingClientRect().width,
+        ),
+      );
+      await inspectLayout(page, `panel-${section}`, `${width}px`);
+    }
+    assert.ok(
+      Math.max(...widths) - Math.min(...widths) <= 1,
+      `${width}px 영역 외곽 폭 동일`,
+    );
+  }
+  assert.equal(await page.$eval("#policy-details", (node) => node.open), false);
+  await page.click('#editor-nav a[href="#policy-heading"]');
+  assert.equal(await page.$eval("#policy-details", (node) => node.open), true);
+  assert.equal(
+    await page.evaluate(() => document.activeElement.id),
+    "policy-heading",
+  );
+  assert.equal(
+    await page.$eval('#editor-nav a[href="#reveal-heading"]', (node) =>
+      node.getAttribute("aria-current"),
+    ),
+    "location",
+  );
+  await page.click("#policy-heading");
+  assert.equal(await page.$eval("#policy-details", (node) => node.open), false);
+  await openSection(page, "basic");
+  const original = await text(page, "#basic-intro-record");
+  await edit(page, "basic", "intro", "모드 왕복 보존 입력");
+  assert.equal(
+    await page.$eval(
+      '#editor-nav a[href="#basic-heading"]',
+      (node) => node.dataset.dirty,
+    ),
+    "true",
+  );
+  for (const mode of ["keep", "clear"]) {
+    await page.select("#basic-intro-mode", mode);
+    assert.equal(
+      await page.$eval("#basic-intro", (node) => node.value),
+      "모드 왕복 보존 입력",
+    );
+    assert.equal(await text(page, "#basic-intro-record"), original);
+    assert.equal(
+      await page.$eval(
+        '#editor-nav a[href="#basic-heading"]',
+        (node) => node.dataset.dirty,
+      ),
+      String(mode !== "keep"),
+    );
+    await page.select("#basic-intro-mode", "value");
+    assert.equal(
+      await page.$eval("#basic-intro", (node) => node.value),
+      "모드 왕복 보존 입력",
+    );
+  }
+  await page.select("#basic-intro-mode", "keep");
+  await page.click("#warning-details summary");
+  assert.equal(await page.$eval("#warning-details", (node) => node.open), true);
+  const count = await page.$$eval("#warnings li", (nodes) => nodes.length);
+  assert.equal(await text(page, "#warning-count"), `작성 확인 ${count}건`);
+  const warning = await page.$eval('#warnings a[href$="-mode"]', (node) =>
+    node.getAttribute("href"),
+  );
+  await page.click(`#warnings a[href="${warning}"]`);
+  assert.equal(
+    await page.evaluate(() => document.activeElement.id),
+    warning.slice(1),
+  );
+  assert.equal(
+    await page.$eval(warning, (node) => Boolean(node.getClientRects().length)),
+    true,
+  );
+  await openSection(page, "reveal");
+  await page.focus(".skip-link");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    () => document.activeElement.id === "basic-heading",
+  );
+  await page.goto(`${page.url().split("#")[0]}#reveal-heading`);
+  await page.reload();
+  await page.waitForSelector("#editor:not([hidden])");
+  await page.waitForFunction(
+    () => document.activeElement.id === "reveal-heading",
+  );
+  await page.evaluate(() => {
+    location.hash = "#answer-heading";
+  });
+  await page.waitForFunction(
+    () => document.activeElement.id === "answer-heading",
+  );
+  await openSection(page, "basic");
+  await page.goBack();
+  await page.waitForFunction(
+    () => document.activeElement.id === "answer-heading",
+  );
+  await page.goForward();
+  await page.waitForFunction(
+    () => document.activeElement.id === "basic-heading",
+  );
+  await page.click("#warning-details summary");
+}
 
 /** 표시된 실제 DOM의 크기·계산 색상을 검사한다. 원고나 식별자 값은 측정 파일에 기록하지 않는다. */
 async function inspectLayout(page, name, viewport) {
@@ -386,6 +531,7 @@ try {
     "/admin/stories/",
     "/admin/api/stories/",
   );
+  await inspectEditorNavigation(page);
   assert.match(
     await text(page, "#basic-title-record"),
     /<script>확인<\/script>/,
@@ -401,6 +547,11 @@ try {
   await edit(page, "basic", "estMax", 30);
   await edit(page, "basic", "limitSec", 2100);
   await save(page, "basic");
+  assert.equal(await page.$eval("#warning-details", (node) => node.open), true);
+  assert.equal(
+    await text(page, "#warning-count"),
+    `작성 확인 ${await page.$$eval("#warnings li", (nodes) => nodes.length)}건`,
+  );
   assert.equal(
     await page.$eval("#answer-methodAnswer", (e) => e.value),
     "local-answer 보존할 미저장 원고",
@@ -517,7 +668,24 @@ try {
   await failedRead.detach();
   await page.click("#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
+  await openSection(page, "reveal");
+  assert.equal(await page.$eval("#comparison", (node) => node.hidden), false);
   await page.click("#accept-latest");
+  assert.equal(
+    await page.$eval('#editor-nav a[href="#reveal-heading"]', (node) =>
+      node.getAttribute("aria-current"),
+    ),
+    "location",
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        Boolean(document.activeElement.getClientRects().length) &&
+        !document.activeElement.closest("[hidden]") &&
+        document.activeElement !== document.body,
+    ),
+    true,
+  );
   assert.match(await text(page, "#notice"), /영역별로 저장/);
   await save(page, "answer");
   await other.close();
@@ -632,6 +800,7 @@ try {
     assert.equal(result.status, 201);
     pageRev = result.body.editRev;
   }
+  await openSection(page, "child");
   await page.click("#child-list");
   await notice(page, "검토 전 저장은 차단");
   await page.click("#accept-latest");
@@ -848,10 +1017,45 @@ try {
   await page.click("#accept-latest");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_01"]');
+  const selectedResponse = await holdResponse(
+    page,
+    `${fixture.url}${childPath}/PAGE_01`,
+  );
   await page.click('[data-child-key="PAGE_01"]');
+  await selectedResponse.ready;
+  await openSection(page, "answer");
+  await page.focus("#answer-methodAnswer");
+  const pendingInput = await page.$eval(
+    "#answer-methodAnswer",
+    (node) => node.value,
+  );
+  const pendingComparison = await page.$eval(
+    "#comparison",
+    (node) => node.hidden,
+  );
+  await selectedResponse.release();
   await page.waitForFunction(
     () => document.getElementById("child-name").value === "목록 비노출 원고 1",
   );
+  assert.equal(
+    await page.$eval('#editor-nav a[href="#answer-heading"]', (node) =>
+      node.getAttribute("aria-current"),
+    ),
+    "location",
+  );
+  assert.equal(
+    await page.evaluate(() => document.activeElement.id),
+    "answer-methodAnswer",
+  );
+  assert.equal(
+    await page.$eval("#answer-methodAnswer", (node) => node.value),
+    pendingInput,
+  );
+  assert.equal(
+    await page.$eval("#comparison", (node) => node.hidden),
+    pendingComparison,
+  );
+  await openSection(page, "child");
   assert.equal(await page.$eval("#child-code", (e) => e.value), "PAGE_01");
   console.log("PASS delayed list cannot replace selected child identity");
 
@@ -887,12 +1091,14 @@ try {
     (await childApi(page, apiPath)).body.sections.basic.intro,
     "잠금 소유권 확인 본문",
   );
+  await openSection(page, "child");
   await layout(page, "child-restored");
   console.log(
     "PASS persons UI paging, validation, draft preservation, response loss, soft delete/restore and conflicts",
   );
 
   await exerciseRolePairs({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -905,6 +1111,7 @@ try {
     loseResponse,
   });
   await exerciseClueAssignments({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -917,6 +1124,7 @@ try {
     loseResponse,
   });
   await exerciseHints({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -928,6 +1136,7 @@ try {
     loseResponse,
   });
   await exerciseEvents({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -939,6 +1148,7 @@ try {
     loseResponse,
   });
   await exerciseFacts({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -950,6 +1160,7 @@ try {
     loseResponse,
   });
   await exerciseRubrics({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -961,6 +1172,7 @@ try {
     loseResponse,
   });
   await exerciseGradeSamples({
+    openSection,
     page,
     apiPath,
     baseUrl: fixture.url,
@@ -1014,6 +1226,7 @@ try {
   await failedDetail.detach();
   await page.click("#retry-detail");
   await page.waitForSelector("#editor:not([hidden])");
+  await openSection(page, "child");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_00"]');
   await page.click("#child-next");
@@ -1026,6 +1239,7 @@ try {
   await mkdir(output, { recursive: true });
   layoutEvidence.length = 0;
   await captureReportPreview({
+    openSection,
     browser,
     url: previewUrl,
     layout,

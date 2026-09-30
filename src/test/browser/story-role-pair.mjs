@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
  */
 export async function exerciseRolePairs({
   page,
+  openSection,
   apiPath,
   baseUrl,
   api,
@@ -19,6 +20,7 @@ export async function exerciseRolePairs({
 }) {
   /** 자원과 활성 필터를 명시하고 키 목록에서 선택한 단건 조회의 완료를 기다린다. */
   async function open(resource, key, active = true) {
+    await openSection(page, "child");
     await page.select("#child-resource", resource);
     await page.select("#child-filter", String(active));
     await page.waitForSelector(`[data-child-key="${key}"]`);
@@ -30,6 +32,7 @@ export async function exerciseRolePairs({
 
   /** 서버 조회까지 끝난 논리 삭제·복원을 확인하며 자동 재전송을 하지 않는다. */
   async function changeActive() {
+    await openSection(page, "child");
     await page.click("#child-active");
     await notice(page, "최신 원고를 조회했습니다");
     await page.waitForFunction(
@@ -43,6 +46,7 @@ export async function exerciseRolePairs({
     "methodAnswer",
     "역할 조합 작업 동안 보존할 다른 영역 입력",
   );
+  await openSection(page, "child");
   await page.select("#child-resource", "roles");
   await page.waitForFunction(() =>
     document

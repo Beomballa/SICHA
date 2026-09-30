@@ -66,6 +66,16 @@ public class AdminSecurityConfig {
                 }).build();
     }
 
+    /**
+     * 인증 단계의 공개 경로와 비밀 없는 공통 자산만 허용하고 나머지 관리자 요청을 보호한다.
+     * @param http 현재 웹 보안 구성. null은 허용하지 않는다.
+     * @param sessions 서버 저장 세션 조회 어댑터. null은 허용하지 않는다.
+     * @param verifier 활성 세션 검증기의 선택적 조회 제공자. 제공자 자체는 null일 수 없다.
+     * @param mapper 고정 인증 오류 응답 직렬화기. null은 허용하지 않는다.
+     * @param db 서버 접근 이력 기록용 DB 연결 도구. null은 허용하지 않는다.
+     * @return 관리자 인증·CSRF·접근 이력 경계를 적용한 필터 체인.
+     * @throws Exception 보안 필터 구성을 초기화할 수 없는 경우.
+     */
     @Bean
     SecurityFilterChain adminSecurity(HttpSecurity http, AdminSessionAdapter sessions,
             ObjectProvider<ActiveSessionVerifier> verifier, ObjectMapper mapper, JdbcTemplate db) throws Exception {
@@ -87,7 +97,7 @@ public class AdminSecurityConfig {
                         .requestMatchers("/admin/api/auth/csrf", "/admin/api/auth/login", "/admin/api/auth/login/mfa",
                                 "/admin/api/auth/login/status", "/admin/api/auth/enrollment/**",
                                 "/admin/api/auth/recovery/**", "/admin/api/auth/logout",
-                                "/admin/auth.js", "/admin/auth.css",
+                                "/admin/auth.js", "/admin/auth.css", "/admin/ui.css",
                                 "/admin/login", "/admin/login/mfa", "/admin/enroll",
                                 "/admin/recovery/password", "/admin/recovery/mfa").permitAll()
                         .requestMatchers("/admin/**").authenticated()

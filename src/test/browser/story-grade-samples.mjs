@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 
-/** 폐기형 HTTPS에서 구조화 예시의 보호 조회·수정·복구를 확인한다. */
+/**
+ * 폐기형 HTTPS에서 구조화 예시의 보호 조회·수정·복구를 확인한다.
+ * @param {object} flow 인증된 page, 시험 API 경로와 실제 목차를 여는 openSection 및 기존 시험 헬퍼. null은 허용하지 않는다.
+ */
 export async function exerciseGradeSamples({
+  openSection,
   page,
   apiPath,
   baseUrl,
@@ -14,6 +18,7 @@ export async function exerciseGradeSamples({
 }) {
   const root = `${apiPath}/grade-samples/UI_SAMPLE`;
   const rev = async () => (await api(page, apiPath)).body.editRev;
+  await openSection(page, "child");
   await page.select("#child-resource", "grade-samples");
   await page.click("#child-new");
   await edit(page, "child", "code", "UI_SAMPLE");
@@ -69,7 +74,9 @@ export async function exerciseGradeSamples({
       detailReads++;
   };
   page.on("request", countDetail);
+  await openSection(page, "child");
   await page.select("#child-resource", "facts");
+  await openSection(page, "child");
   await page.select("#child-resource", "grade-samples");
   await page.waitForSelector('[data-child-key="UI_SAMPLE"]');
   assert.equal(detailReads, 0);
@@ -117,6 +124,7 @@ export async function exerciseGradeSamples({
       posts++;
   };
   page.on("request", count);
+  await openSection(page, "child");
   await page.click("#child-new");
   await edit(page, "child", "code", "SAMPLE_LOST");
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/grade-samples`);

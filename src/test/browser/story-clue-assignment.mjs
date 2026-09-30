@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 /** 폐기형 HTTPS 사건에서 단서·배정의 원고, 관계, 충돌과 화면 상태를 검증한다. */
 export async function exerciseClueAssignments({
   page,
+  openSection,
   apiPath,
   baseUrl,
   api,
@@ -15,6 +16,7 @@ export async function exerciseClueAssignments({
 }) {
   /** 자료 종류의 목록 조회 후 키를 선택해 단건 조회가 끝날 때까지 기다린다. */
   async function open(resource, key, active = true) {
+    await openSection(page, "child");
     await page.select("#child-resource", resource);
     await page.select("#child-filter", String(active));
     await page.waitForSelector(`[data-child-key="${key}"]`);
@@ -24,6 +26,7 @@ export async function exerciseClueAssignments({
     );
   }
   async function active() {
+    await openSection(page, "child");
     await page.click("#child-active");
     await notice(page, "최신 원고를 조회했습니다");
   }
@@ -37,6 +40,7 @@ export async function exerciseClueAssignments({
     "timeAnswer",
     "단서 변경 중 보존할 다른 영역 입력",
   );
+  await openSection(page, "child");
   await page.select("#child-resource", "clues");
   await page.click("#child-new");
   await edit(page, "child", "code", "A");
