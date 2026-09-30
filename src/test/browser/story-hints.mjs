@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clickWithConfirmation, selectChildResource } from "./confirmation.mjs";
 
 /** 폐기형 HTTPS 사건에서 힌트 원고의 경계, 단계 충돌과 비교 복구를 검증한다. */
 export async function exerciseHints({
@@ -16,10 +17,10 @@ export async function exerciseHints({
   /** 자원 선택 뒤 키 목록을 열고 단건 원고 조회까지 기다린다. */
   async function open(key, active = true) {
     await openSection(page, "child");
-    await page.select("#child-resource", "hints");
+    await selectChildResource(page, "hints");
     await page.select("#child-filter", String(active));
     await page.waitForSelector(`[data-child-key="${key}"]`);
-    await page.click(`[data-child-key="${key}"]`);
+    await clickWithConfirmation(page, `[data-child-key="${key}"]`);
     await page.waitForFunction(
       () => !document.getElementById("child-resource").disabled,
     );
@@ -31,19 +32,19 @@ export async function exerciseHints({
   }
 
   await openSection(page, "child");
-  await page.select("#child-resource", "hints");
-  await page.click("#child-new");
+  await selectChildResource(page, "hints");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "HINT_A");
   assert.equal(await page.$eval("#child-level", (input) => input.max), "3");
   assert.match(
     await page.$eval("#child-guide", (e) => e.textContent),
     /논리 삭제된 힌트도 단계와 코드를 예약/,
   );
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력을 확인하세요");
   assert.equal((await api(page, `${apiPath}/hints/HINT_A`)).status, 404);
   await edit(page, "child", "level", "4");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력을 확인하세요");
   await edit(page, "child", "level", "1");
   await page.select("#child-body-mode", "value");
@@ -51,7 +52,7 @@ export async function exerciseHints({
     input.value = "😀".repeat(4001);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "4000자를 넘을 수 없습니다");
   await edit(page, "child", "body", "<script>실행 금지</script>\n첫 힌트");
   await save(page, "child");
@@ -66,7 +67,7 @@ export async function exerciseHints({
   await layout(page, "child-hint-record");
 
   // 힌트 목록을 재진입해도 선택 전에는 원고 단건을 미리 읽지 않는다.
-  await page.select("#child-resource", "clues");
+  await selectChildResource(page, "clues");
   let reads = 0;
   const countRead = (request) => {
     if (
@@ -76,7 +77,7 @@ export async function exerciseHints({
       reads++;
   };
   page.on("request", countRead);
-  await page.select("#child-resource", "hints");
+  await selectChildResource(page, "hints");
   await page.waitForSelector('[data-child-key="HINT_A"]');
   assert.equal(reads, 0);
   const list = await api(page, `${apiPath}/hints?size=1&activeYn=true`);
@@ -90,17 +91,17 @@ export async function exerciseHints({
   assert.equal(reads, 1);
   page.off("request", countRead);
 
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
   assert.equal(
     (await api(page, `${apiPath}/hints/HINT_A`)).body.item.activeYn,
     false,
   );
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "HINT_B");
   await edit(page, "child", "level", "1");
   await edit(page, "child", "body", "충돌해도 남길 원고");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.match(await page.$eval("#notice", (e) => e.textContent), /예약/);
   assert.equal(
@@ -109,7 +110,7 @@ export async function exerciseHints({
   );
   assert.equal((await api(page, `${apiPath}/hints/HINT_B`)).status, 404);
   await layout(page, "child-hint-slot-conflict");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(await page.$eval("#child-level", (e) => e.value), "1");
   assert.equal(
     await page.$eval("#child-body", (e) => e.value),
@@ -131,7 +132,7 @@ export async function exerciseHints({
     ).body.code,
     "SLOT_CONFLICT",
   );
-  await page.click("#child-list");
+  await clickWithConfirmation(page, "#child-list");
   await open("HINT_B");
   await page.select("#child-body-mode", "clear");
   await save(page, "child");
@@ -139,7 +140,7 @@ export async function exerciseHints({
     (await api(page, `${apiPath}/hints/HINT_B`)).body.item.body,
     null,
   );
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "HINT_C");
   await edit(page, "child", "level", "3");
   await edit(page, "child", "body", "응답 유실도 원고 유지");
@@ -153,7 +154,7 @@ export async function exerciseHints({
   };
   page.on("request", countWrite);
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/hints`);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(posts, 1);
   assert.equal(
@@ -162,7 +163,7 @@ export async function exerciseHints({
   );
   await lost.detach();
   page.off("request", countWrite);
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(posts, 1);
   assert.equal((await api(page, `${apiPath}/hints/HINT_C`)).body.item.level, 3);
   await layout(page, "child-hint-recovered");

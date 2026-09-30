@@ -97,7 +97,7 @@ public class AdminSecurityConfig {
                         .requestMatchers("/admin/api/auth/csrf", "/admin/api/auth/login", "/admin/api/auth/login/mfa",
                                 "/admin/api/auth/login/status", "/admin/api/auth/enrollment/**",
                                 "/admin/api/auth/recovery/**", "/admin/api/auth/logout",
-                                "/admin/auth.js", "/admin/auth.css", "/admin/ui.css",
+                                "/admin/auth.js", "/admin/auth.css", "/admin/ui.css", "/admin/ui.js",
                                 "/admin/login", "/admin/login/mfa", "/admin/enroll",
                                 "/admin/recovery/password", "/admin/recovery/mfa").permitAll()
                         .requestMatchers("/admin/**").authenticated()

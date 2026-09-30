@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clickWithConfirmation, selectChildResource } from "./confirmation.mjs";
 
 /**
  * 폐기형 HTTPS 편집기에서 시간선의 nullable·분 경계와 충돌·응답 유실을 확인한다.
@@ -17,13 +18,13 @@ export async function exerciseEvents({
   baseUrl,
 }) {
   await openSection(page, "child");
-  await page.select("#child-resource", "events");
-  await page.click("#child-new");
+  await selectChildResource(page, "events");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "EVENT_A");
   assert.equal(await page.$eval("#child-startMin", (e) => e.min), "0");
   assert.equal(await page.$eval("#child-endMin", (e) => e.max), "2147483647");
   await edit(page, "child", "endMin", "1");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "종료는 시작과 함께");
   assert.equal((await api(page, `${apiPath}/events/EVENT_A`)).status, 404);
   await edit(page, "child", "startMin", "0");
@@ -32,7 +33,7 @@ export async function exerciseEvents({
     e.value = "𐐀".repeat(8001);
     e.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "8000자를 넘을 수 없습니다");
   await edit(
     page,
@@ -52,7 +53,7 @@ export async function exerciseEvents({
   await layout(page, "child-event-record");
 
   await page.select("#child-startMin-mode", "clear");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "종료는 시작과 함께");
   await page.select("#child-endMin-mode", "clear");
   await save(page, "child");
@@ -69,7 +70,7 @@ export async function exerciseEvents({
   );
 
   await openSection(page, "child");
-  await page.select("#child-resource", "hints");
+  await selectChildResource(page, "hints");
   let reads = 0;
   const countRead = (r) => {
     if (
@@ -80,7 +81,7 @@ export async function exerciseEvents({
   };
   page.on("request", countRead);
   await openSection(page, "child");
-  await page.select("#child-resource", "events");
+  await selectChildResource(page, "events");
   await page.waitForSelector('[data-child-key="EVENT_A"]');
   assert.equal(reads, 0);
   const list = (await api(page, `${apiPath}/events`)).body;
@@ -89,7 +90,7 @@ export async function exerciseEvents({
     "code",
     "updatedAt",
   ]);
-  await page.click('[data-child-key="EVENT_A"]');
+  await clickWithConfirmation(page, '[data-child-key="EVENT_A"]');
   await page.waitForFunction(
     () => !document.getElementById("child-resource").disabled,
   );
@@ -108,14 +109,14 @@ export async function exerciseEvents({
     ).status,
     200,
   );
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(
     await page.$eval("#child-apparentText", (e) => e.value),
     "충돌 중 남길 표면 기록",
   );
   await layout(page, "child-event-conflict");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "child");
   assert.equal(
     await page.$eval("#answer-methodAnswer", (e) => e.value),
@@ -123,7 +124,7 @@ export async function exerciseEvents({
   );
   await save(page, "answer");
   await openSection(page, "child");
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
   assert.equal(
     (await api(page, `${apiPath}/events/EVENT_A`)).body.item.activeYn,
@@ -131,7 +132,7 @@ export async function exerciseEvents({
   );
   assert.equal(await page.$eval("#child-save", (e) => e.disabled), true);
   await openSection(page, "child");
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
   assert.equal(
     (await api(page, `${apiPath}/events/EVENT_A`)).body.item.activeYn,
@@ -139,7 +140,7 @@ export async function exerciseEvents({
   );
 
   await openSection(page, "child");
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "EVENT_LOST");
   await edit(page, "child", "actualText", "응답 유실 합성 기록");
   let posts = 0;
@@ -152,7 +153,7 @@ export async function exerciseEvents({
   };
   page.on("request", countWrite);
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/events`);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(posts, 1);
   assert.equal(
@@ -160,7 +161,7 @@ export async function exerciseEvents({
     "응답 유실 합성 기록",
   );
   await lost.detach();
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(posts, 1);
   page.off("request", countWrite);
   assert.equal(

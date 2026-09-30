@@ -10,7 +10,13 @@ const source = readFileSync(
 const footer = /\n  restore\(\);\n\}\)\(\);\s*$/;
 assert.match(source, footer);
 
+/**
+ * 기존 계정 VM 시험에서 확인 창 취소의 표시 경계만 기록한다.
+ * @param {Function} fetch 기존 시험의 응답 함수. null은 허용하지 않는다.
+ * @returns {object} 계정 함수·가상 요소·취소 기록. 실제 확인 컴포넌트 시험은 대체하지 않는다.
+ */
 function ui(fetch) {
+  const cancellations = [];
   class Element {
     children = [];
     hidden = false;
@@ -50,13 +56,21 @@ function ui(fetch) {
   );
   const context = {
     document,
-    window: { addEventListener() {} },
+    window: {
+      addEventListener() {},
+      AdminUI: {
+        cancelConfirmation() {
+          cancellations.push("cancel");
+        },
+      },
+    },
     fetch,
     Response,
     Date,
   };
+  context.AdminUI = context.window.AdminUI;
   vm.runInNewContext(script, context, { filename: "auth.js", timeout: 1000 });
-  return { ...context.testUi, elements, checkbox };
+  return { ...context.testUi, elements, checkbox, cancellations };
 }
 
 const view = {
@@ -89,6 +103,7 @@ test("a refreshed relation preview requires a new explicit confirmation", () => 
   assert.equal(page.checkbox.checked, false);
   page.checkbox.checked = true;
   page.showReactivationPreview(preview("b".repeat(64)));
+  assert.ok(page.cancellations.length >= 2);
   assert.equal(page.checkbox.checked, false);
   assert.equal(page.elements.get("reactivation-confirm").hidden, false);
 });
@@ -105,6 +120,7 @@ test("state refresh after lost self-change response directs revoked session to l
         }),
   );
   await page.restore();
+  assert.ok(page.cancellations.length > 0);
   const content = page.elements.get("content");
   assert.match(content.innerHTML, /href="\/admin\/login"/);
   assert.match(content.innerHTML, /변경 요청을 다시 보내지 말고/);

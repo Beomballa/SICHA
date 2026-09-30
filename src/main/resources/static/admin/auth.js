@@ -18,6 +18,8 @@
   let accountFilters = {};
   let nextAccountId;
   let accountListRequest = 0;
+  let submitOwner;
+  let cancelOwner;
 
   const names = {
     AUTH_LOGIN: "관리자 로그인",
@@ -54,7 +56,9 @@
     notice.textContent = message;
     notice.classList.toggle("error", error);
   }
+  /** 확인을 거절하고 화면·제한 단계·영향 메모리를 폐기한다. 반환값은 없으며 기존 응답도 세대로 무효화한다. */
   function clear() {
+    AdminUI.cancelConfirmation();
     ++epoch;
     content.replaceChildren();
     stage = undefined;
@@ -62,7 +66,14 @@
     content.setAttribute("aria-busy", "true");
     if (dialog.open) dialog.close();
   }
+  /**
+   * 확인을 거절한 뒤 기존 화면 마크업을 교체한다. 사용자 값은 이 인자로 삽입하지 않는다.
+   * @param {string} html 기존 내부 화면 생성 함수의 마크업. null은 허용하지 않는다.
+   * @param {boolean} heading 첫 제목으로 초점을 옮길지 여부. 기본 true.
+   * @returns {void} 현재 콘텐츠와 로딩 표시만 갱신한다.
+   */
   function render(html, heading = true) {
+    AdminUI.cancelConfirmation();
     content.innerHTML = html;
     content.setAttribute("aria-busy", "false");
     if (heading) content.querySelector("h2")?.focus();
@@ -663,8 +674,14 @@
       "현재 페이지를 조회했습니다. 변경 승인 전에는 계정 상세의 최신 상태를 확인하세요.",
     );
   }
+  /**
+   * 이전 영향 동의를 거절하고 경로의 계정 최신 상태를 표시한다.
+   * @returns {Promise<void>} 계정 상태와 현재 폼을 교체한다.
+   * @throws {object} 잘못된 계정 경로나 기존 API 조회 오류는 호출자가 처리한다.
+   */
   async function accountDetail() {
     const path = accountPath();
+    AdminUI.cancelConfirmation();
     reactivationPreview = undefined;
     account = await request("GET", path, undefined, accountsBase);
     render(
@@ -719,7 +736,13 @@
       !account.activeYn;
     status("최신 계정 상태입니다. 수정번호는 변경 요청에 그대로 사용합니다.");
   }
+  /**
+   * 이전 동의를 거절하고 새 재활성 영향과 계정 기준을 표시한다.
+   * @param {object} preview 기존 서버 계약의 계정·영향 해시·관계 표본. null은 허용하지 않는다.
+   * @returns {void} 영향 확인 체크를 초기화하며 조회만으로 변경하지 않는다.
+   */
   function showReactivationPreview(preview) {
+    AdminUI.cancelConfirmation();
     reactivationPreview = preview;
     account = preview.account;
     document
@@ -794,6 +817,13 @@
       value,
     );
   }
+  /**
+   * 확인된 폼 행동을 기존 API 계약대로 실행하며 이전 쓰기를 자동 재시도하지 않는다.
+   * @param {string} action 현재 폼의 기존 행동 코드. 계정 행동은 호출자가 계정·영향 기준을 검증한다.
+   * @param {object} values 첫 await 전에 복사한 폼 값과 선택 자격 배열. null은 허용하지 않는다.
+   * @returns {Promise<void>} 기존 성공 표시·후속 조회·화면 이동을 수행한다.
+   * @throws {object} 입력 검사와 기존 API 오류를 호출자의 고정 안내로 전달한다.
+   */
   async function execute(action, values) {
     switch (action) {
       case "account-filter": {
@@ -806,6 +836,7 @@
         return;
       }
       case "account-preview": {
+        AdminUI.cancelConfirmation();
         reactivationPreview = undefined;
         document.getElementById("reactivation-confirm").hidden = true;
         showReactivationPreview(
@@ -974,7 +1005,7 @@
         codes((await request("POST", "/mfa/recovery-codes", {})).recoveryCodes);
         return;
       case "inspect":
-        inspect(values.registrationKey);
+        await inspect(values.registrationKey);
         return;
       case "invite":
         if (!validKey(values.registrationKey)) throw { status: 400 };
@@ -1052,7 +1083,13 @@
       (!me?.reauthExpiresAt || Date.parse(me.reauthExpiresAt) <= Date.now())
     );
   }
+  /**
+   * 기존 변경 동의를 거절한 뒤 별도 재인증을 연다. 이전 변경을 자동 실행하지 않는다.
+   * @param {HTMLButtonElement} button 재인증 뒤 돌아갈 현재 행동 버튼. null은 허용하지 않는다.
+   * @returns {void} 비밀번호 입력으로 초점을 이동한다.
+   */
   function openReauth(button) {
+    AdminUI.cancelConfirmation();
     lastButton = button;
     document.getElementById("reauth-error").textContent = "";
     dialog.showModal();
@@ -1113,52 +1150,92 @@
         button.disabled = false;
       }
     });
+  /**
+   * 현재 폼·계정·영향에 결속한 단일 제출만 처리하며 중복 호출은 소유 잠금을 해제하지 않는다.
+   * @param {SubmitEvent} event 현재 콘텐츠의 제출 이벤트. 폼·값·버튼은 비동기 대기 전에 복사한다.
+   * @returns {Promise<void>} 취소·오래된 동의는 무변경, 오류는 기존 고정 안내로 처리한다.
+   */
   content.addEventListener("submit", async (event) => {
     const formElement = event.target.closest("form[data-action]");
     if (!formElement) return;
     event.preventDefault();
     const action = formElement.dataset.action;
     const button = formElement.querySelector('[type="submit"]');
+    if (submitOwner || cancelOwner || button.disabled) return;
     if (needReauth(action)) {
       openReauth(button);
       return;
     }
-    if (
-      [
-        "logout-all",
-        "codes-replace",
-        "reissue",
-        "revoke",
-        "invite",
-        "issue",
-        "enroll-complete",
-        "recovery-complete",
-        "account-grant",
-        "account-revoke",
-        "account-deactivate",
-        "account-reactivate",
-      ].includes(action) &&
-      !confirm(
-        "현재 계정 상태와 변경 영향을 확인했습니까? 변경 요청은 자동으로 다시 보내지 않습니다.",
-      )
-    )
-      return;
-    if (screen === "ADMIN_AUTH_MANAGE")
-      content
-        .querySelectorAll(".secret")
-        .forEach((node) => node.closest("section")?.remove());
-    button.disabled = true;
-    status(
-      "요청 처리 중입니다. 응답이 사라져도 변경을 자동 반복하지 않습니다.",
-    );
     const id = epoch;
+    const currentAccount = account;
+    const accountRev = account?.editRev;
+    const preview = reactivationPreview;
+    const previewRev = preview?.account.editRev;
+    const impactHash = preview?.impactHash;
+    const currentStage = stage;
+    const values = payload(formElement);
+    if (action === "account-grant" || action === "account-revoke") {
+      values.permissions = [
+        ...formElement.querySelectorAll('[name="permissions"]:checked'),
+      ].map((input) => input.value);
+    }
+    const owner = {};
+    submitOwner = owner;
     try {
-      const values = payload(formElement);
-      if (action === "account-grant" || action === "account-revoke") {
-        values.permissions = [
-          ...formElement.querySelectorAll('[name="permissions"]:checked'),
-        ].map((input) => input.value);
+      if (
+        [
+          "logout-all",
+          "codes-replace",
+          "reissue",
+          "revoke",
+          "invite",
+          "issue",
+          "enroll-complete",
+          "recovery-complete",
+          "account-grant",
+          "account-revoke",
+          "account-deactivate",
+          "account-reactivate",
+        ].includes(action) &&
+        !(await AdminUI.confirm({
+          title: button.textContent.trim(),
+          message:
+            "현재 계정 상태와 변경 영향을 확인했습니까? 변경 요청은 자동으로 다시 보내지 않습니다.",
+          confirmLabel: button.textContent.trim(),
+        }))
+      )
+        return;
+      if (
+        id !== epoch ||
+        submitOwner !== owner ||
+        stage !== currentStage ||
+        !formElement.isConnected ||
+        !content.contains(formElement) ||
+        formElement.dataset.action !== action ||
+        formElement.closest("[hidden]") ||
+        button.disabled ||
+        !button.isConnected ||
+        (action.startsWith("account-") &&
+          (account !== currentAccount || account?.editRev !== accountRev)) ||
+        (action === "account-reactivate" &&
+          (reactivationPreview !== preview ||
+            !preview ||
+            preview.account.editRev !== previewRev ||
+            preview.impactHash !== impactHash))
+      )
+        return;
+      if (needReauth(action)) {
+        openReauth(button);
+        return;
       }
+      if (screen === "ADMIN_AUTH_MANAGE")
+        content
+          .querySelectorAll(".secret")
+          .forEach((node) => node.closest("section")?.remove());
+      button.disabled = true;
+      status(
+        "요청 처리 중입니다. 응답이 사라져도 변경을 자동 반복하지 않습니다.",
+      );
       await execute(action, values);
       if (id !== epoch) return;
       if (!action.startsWith("account-")) formElement.reset();
@@ -1199,9 +1276,17 @@
         render(section("로그인이 필요합니다", loginLink));
       }
     } finally {
-      button.disabled = false;
+      if (submitOwner === owner) {
+        submitOwner = undefined;
+        if (button.isConnected) button.disabled = false;
+      }
     }
   });
+  /**
+   * 제한 자격 취소 동의를 현재 단계·버튼·경로에 결속하고 별도 소유 잠금으로 중복을 거절한다.
+   * @param {MouseEvent} event 기존 조회·재인증·설정·취소 버튼의 클릭. 대상은 대기 전에 복사한다.
+   * @returns {Promise<void>} 취소 성공만 상태를 복원하며 오래된 응답은 현재 화면을 바꾸지 않는다.
+   */
   content.addEventListener("click", async (event) => {
     if (event.target.matches("[data-refresh]")) {
       await restore();
@@ -1227,18 +1312,25 @@
     const setup = event.target.dataset.actionButton;
     if (setup) {
       const button = event.target;
+      if (submitOwner || cancelOwner || button.disabled) return;
+      const id = epoch;
+      const owner = {};
+      submitOwner = owner;
       button.disabled = true;
       try {
         await execute(setup, {});
       } catch (e) {
+        if (id !== epoch) return;
         status(errorText(e), true);
       } finally {
-        button.disabled = false;
+        if (submitOwner === owner) {
+          submitOwner = undefined;
+          if (button.isConnected) button.disabled = false;
+        }
       }
       return;
     }
-    if (!action || !confirm("현재 제한 자격을 취소합니다. 계속하시겠습니까?"))
-      return;
+    if (!action || cancelOwner || submitOwner || event.target.disabled) return;
     const path =
       action === "login"
         ? "/login"
@@ -1246,13 +1338,45 @@
           ? "/enrollment"
           : "/recovery";
     const button = event.target;
-    button.disabled = true;
+    const id = epoch;
+    const currentStage = stage;
+    const container = button.closest("form") || content;
+    const owner = {};
+    cancelOwner = owner;
     try {
+      if (
+        !(await AdminUI.confirm({
+          title: button.textContent.trim(),
+          message: "현재 제한 자격을 취소합니다. 계속하시겠습니까?",
+          confirmLabel: "제한 자격 취소",
+        }))
+      )
+        return;
+      if (
+        id !== epoch ||
+        currentStage !== stage ||
+        cancelOwner !== owner ||
+        !button.isConnected ||
+        !content.contains(button) ||
+        !container.isConnected ||
+        !container.contains(button) ||
+        button.dataset.cancel !== action ||
+        button.closest("[hidden]") ||
+        button.disabled
+      )
+        return;
+      button.disabled = true;
       await request("DELETE", path, {});
+      if (id !== epoch || currentStage !== stage || !button.isConnected) return;
       await restore();
     } catch (e) {
+      if (id !== epoch) return;
       status(errorText(e), true);
-      button.disabled = false;
+    } finally {
+      if (cancelOwner === owner) {
+        cancelOwner = undefined;
+        if (button.isConnected) button.disabled = false;
+      }
     }
   });
   window.addEventListener("pageshow", (event) => {

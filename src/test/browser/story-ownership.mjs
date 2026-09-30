@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
+import {
+  installConfirmationDriver,
+  clickWithConfirmation,
+  waitForConfirmation,
+} from "./confirmation.mjs";
 
-/** 실제 HTTPS 관리자 두 세션에서 수신자 지정·최근 세대·수락·원본 아닌 현재 소유권을 검증한다. */
+/**
+ * 실제 HTTPS 두 세션의 수신자 지정·수락과 관리/인계 동의 취소를 검증한다.
+ * @param {object} flow 인증된 페이지, 폐기 계정, 실제 API/응답 보류 헬퍼와 해당 페이지의 confirmation 운전자. null은 허용하지 않는다.
+ * @returns {Promise<void>} 원래 소유권 검증과 취소/오래된 동의의 무쓰기 검증을 완료한다.
+ * @throws {Error} 실제 UI/API 결과가 계약과 다르거나 제한 시간 안에 응답하지 않으면 실패한다.
+ */
 export async function exerciseStoryOwnership({
   browser,
   page,
@@ -11,6 +21,8 @@ export async function exerciseStoryOwnership({
   api,
   notice,
   layout,
+  confirmation,
+  holdResponse,
 }) {
   await page.select("#access-operation", "grant");
   await page.select("#access-permission", "EDIT");
@@ -22,7 +34,49 @@ export async function exerciseStoryOwnership({
     element.value = "";
   });
   await page.type("#access-reference", "CHECK_UI_OWNER");
+  confirmation.automatic = false;
+  let writes = 0;
+  const countWrites = (request) => {
+    if (["POST", "PATCH"].includes(request.method())) writes++;
+  };
+  page.on("request", countWrites);
+  const accessBefore = await page.$eval(
+    "#access-rows",
+    (node) => node.textContent,
+  );
   await page.click("#access-submit");
+  await page.waitForSelector("#ui-confirm-dialog[open]");
+  assert.equal(writes, 0);
+  await page.click("#ui-confirm-cancel");
+  await waitForConfirmation(page);
+  assert.equal(
+    await page.$eval("#access-rows", (node) => node.textContent),
+    accessBefore,
+  );
+  assert.equal(writes, 0);
+  const managementRead = await holdResponse(
+    page,
+    `${baseUrl}/admin/api/stories?*`,
+  );
+  await page.click("#manage-refresh");
+  await managementRead.ready;
+  await page.click("#access-submit");
+  await page.waitForSelector("#ui-confirm-dialog[open]");
+  await managementRead.release();
+  await waitForConfirmation(page);
+  await page.waitForFunction(() =>
+    document
+      .getElementById("manage-result")
+      .textContent.includes("현재 사건과 접근 관계를 조회했습니다"),
+  );
+  assert.equal(writes, 0);
+  assert.equal(
+    await page.$eval("#access-account", (node) => node.value),
+    fixture.receiverKey,
+  );
+  page.off("request", countWrites);
+  confirmation.automatic = true;
+  await clickWithConfirmation(page, "#access-submit");
   await page.waitForFunction(() =>
     document.getElementById("access-rows").textContent.includes("EDIT · 활성"),
   );
@@ -41,7 +95,43 @@ export async function exerciseStoryOwnership({
   await page.type("#ownership-recipient", fixture.receiverKey);
   await page.click("#ownership-keep-editor");
   await page.type("#ownership-reference", "CHECK_UI_OWNER");
+  confirmation.automatic = false;
+  writes = 0;
+  page.on("request", countWrites);
   await page.click("#ownership-request-form button[type=submit]");
+  await page.waitForSelector("#ui-confirm-dialog[open]");
+  assert.equal(writes, 0);
+  await page.click("#ui-confirm-cancel");
+  await waitForConfirmation(page);
+  assert.equal(
+    (await api(page, `/admin/api/stories/${code}/ownership`)).body.pending,
+    null,
+  );
+  const ownershipRead = await holdResponse(
+    page,
+    `${baseUrl}/admin/api/stories/${code}/ownership`,
+  );
+  await page.click("#ownership-refresh");
+  await ownershipRead.ready;
+  await page.click("#ownership-request-form button[type=submit]");
+  await page.waitForSelector("#ui-confirm-dialog[open]");
+  await ownershipRead.release();
+  await waitForConfirmation(page);
+  assert.equal(writes, 0);
+  assert.equal(
+    await page.$eval("#ownership-recipient", (node) => node.value),
+    fixture.receiverKey,
+  );
+  assert.equal(
+    (await api(page, `/admin/api/stories/${code}/ownership`)).body.pending,
+    null,
+  );
+  page.off("request", countWrites);
+  confirmation.automatic = true;
+  await clickWithConfirmation(
+    page,
+    "#ownership-request-form button[type=submit]",
+  );
   await page.waitForFunction(() =>
     document.getElementById("ownership-result").textContent.includes("PENDING"),
   );
@@ -52,7 +142,9 @@ export async function exerciseStoryOwnership({
 
   const receiverContext = await browser.createBrowserContext();
   const receiver = await receiverContext.newPage();
-  receiver.on("dialog", (dialog) => dialog.accept());
+  const receiverConfirmation = await installConfirmationDriver(receiver);
+  const runtimeErrors = [];
+  receiver.on("pageerror", (error) => runtimeErrors.push(error.message));
   try {
     await receiver.goto(`${baseUrl}/admin/login`);
     await receiver.waitForSelector("[name=loginId]");
@@ -79,7 +171,7 @@ export async function exerciseStoryOwnership({
       await receiver.$eval("#ownership-pending-detail", (e) => e.textContent),
       /PENDING/,
     );
-    await receiver.click("#ownership-accept");
+    await clickWithConfirmation(receiver, "#ownership-accept");
     await receiver.waitForFunction(() =>
       document
         .getElementById("ownership-result")
@@ -101,6 +193,8 @@ export async function exerciseStoryOwnership({
     );
   } finally {
     await receiverContext.close();
+    assert.deepEqual(receiverConfirmation.errors, []);
+    assert.deepEqual(runtimeErrors, []);
   }
   console.log(
     "PASS HTTPS two-admin owner request, pending status and acceptance",

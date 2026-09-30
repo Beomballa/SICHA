@@ -313,8 +313,14 @@
     notice.classList.toggle("error", error);
   }
 
-  /** 접근 종료 시 원고·생성 의도·자격 메모리를 지우고 늦은 응답을 무효화한다. */
+  /**
+   * 접근 종료 시 동의를 거절하고 원고·생성 의도·자격 메모리와 늦은 응답을 무효화한다.
+   * @param {string} text 원고·비밀값을 포함하지 않는 고정 접근 종료 안내.
+   * @param {number} code 기존 HTTP 접근 실패 상태. 401이면 로그인 안내를 추가한다.
+   * @returns {void} 현재 화면의 민감 메모리와 입력을 폐기한다.
+   */
   function revoke(text, code) {
+    AdminUI.cancelConfirmation();
     ++generation;
     detail = latest = undefined;
     childKey = undefined;
@@ -870,8 +876,10 @@
    * 확인된 서버본을 반영하되 확정된 제출 외 입력과 현재 영역을 보존한다.
    * @param {object} data 기존 상세 조회 계약의 서버본.
    * @param {object} options preserve는 입력 보존 여부(기본 false), confirmed는 확정된 제출 영수증이며 생략 가능하다.
+   * @returns {void} 이전 동의를 거절하고 현재 서버본과 보존 가능한 입력을 표시한다.
    */
   function fillDetail(data, { preserve = false, confirmed } = {}) {
+    AdminUI.cancelConfirmation();
     ++comparisonRequest;
     const focusedId = document.activeElement?.id;
     const selection = document.activeElement?.selectionStart;
@@ -1063,8 +1071,12 @@
         : "논리 삭제";
   }
 
-  /** 편집 작업의 소유 세대를 교체해 이전 목록·선택·비교 응답과 수락을 모두 무효화한다. */
+  /**
+   * 편집 작업의 소유 세대를 교체해 이전 동의·목록·선택·비교 응답을 모두 무효화한다.
+   * @returns {number} 새 편집 작업이 소유하는 세대 번호.
+   */
   function beginEditorOperation() {
+    AdminUI.cancelConfirmation();
     ++childRequest;
     ++comparisonRequest;
     latest = undefined;
@@ -1086,23 +1098,42 @@
     );
   }
 
-  /** 자료 종류 변경은 현재 자식의 입력 폐기만 확인하고 다른 영역과 작성 순서는 건드리지 않는다. */
-  function selectChildResource(resource) {
+  /**
+   * 자료 종류 변경 동의를 기존 상세와 선택에 결속하고 대기 중 선택 표시를 유지한다.
+   * @param {string} resource childTypes에 등록된 요청 종류. 잘못된 값은 변경하지 않는다.
+   * @returns {Promise<void>} 유효한 동의 뒤 종류만 바꾸며 취소·오래된 동의는 입력을 보존한다.
+   */
+  async function selectChildResource(resource) {
     const select = document.getElementById("child-resource");
+    const current = generation;
+    const previousDetail = detail;
+    const previousResource = childResource;
+    const previousKey = childKey;
+    select.value = childResource;
+    if (!Object.hasOwn(childTypes, resource) || saveLocked || !detail) return;
     if (
-      !Object.hasOwn(childTypes, resource) ||
-      saveLocked ||
-      !detail ||
-      (Object.keys(captureDrafts().child).length &&
-        !confirm(
+      Object.keys(captureDrafts().child).length &&
+      !(await AdminUI.confirm({
+        title: "자료 종류 변경",
+        message:
           "현재 자료의 미저장 입력을 버리고 종류를 바꿉니까? 다른 영역 입력은 유지됩니다.",
-        ))
-    ) {
-      select.value = childResource;
+        confirmLabel: "종류 변경",
+      }))
+    )
       return;
-    }
+    if (
+      current !== generation ||
+      detail !== previousDetail ||
+      childResource !== previousResource ||
+      childKey !== previousKey ||
+      saveLocked ||
+      !select.isConnected ||
+      !Object.hasOwn(childTypes, resource)
+    )
+      return;
     beginEditorOperation();
     childResource = resource;
+    select.value = resource;
     childKey = undefined;
     childEditing = false;
     detail = {
@@ -1233,8 +1264,13 @@
     }
   }
 
-  /** 불확실한 다중 조회는 과거 비교 수락까지 무효화하고 명시적 GET 재시도만 허용한다. */
+  /**
+   * 불확실한 다중 조회는 동의와 과거 비교 수락을 무효화하고 명시적 GET 재시도만 허용한다.
+   * @param {string} message 원고를 포함하지 않는 고정 조회 실패 안내.
+   * @returns {void} 입력은 유지하고 쓰기를 잠근다. 상세가 없으면 아무것도 바꾸지 않는다.
+   */
   function lockForReview(message) {
+    AdminUI.cancelConfirmation();
     if (!detail) return;
     saveLocked = true;
     latest = undefined;
@@ -1252,15 +1288,42 @@
   /**
    * 같은 버전 자료를 조회하며 다른 영역의 입력과 탐색 위치를 보존한다.
    * @param {string|undefined} key 현재 자원의 키. 생략하면 새 작성이며 비동기 응답은 다른 영역의 초점을 빼앗지 않는다.
+   * @param {HTMLButtonElement} button 요청한 목록·새 작성 버튼. 분리되거나 비활성화되면 동의는 무효다.
+   * @returns {Promise<void>} 유효한 동의만 선택을 바꾸며 조회 오류는 입력 보존 안내로 처리한다.
    */
-  async function selectChild(key) {
+  async function selectChild(key, button) {
     if (!detail || saveLocked) return;
+    const generationBefore = generation;
+    const detailBefore = detail;
+    const resourceBefore = childResource;
+    const keyBefore = childKey;
+    if (
+      key !== undefined &&
+      !/^[A-Z0-9_]{1,32}(?:~[A-Z0-9_]{1,32})?$/.test(key)
+    )
+      return;
     const previous = captureDrafts().child;
     if (
       Object.keys(previous).length &&
-      !confirm(
-        "현재 자료의 미저장 입력을 버리고 다른 항목을 작성·조회합니까? 다른 영역 입력은 유지됩니다.",
-      )
+      !(await AdminUI.confirm({
+        title: "자료 열기",
+        message:
+          "현재 자료의 미저장 입력을 버리고 다른 항목을 작성·조회합니까? 다른 영역 입력은 유지됩니다.",
+        confirmLabel: "입력 버리고 열기",
+      }))
+    )
+      return;
+    if (
+      generationBefore !== generation ||
+      detailBefore !== detail ||
+      resourceBefore !== childResource ||
+      keyBefore !== childKey ||
+      saveLocked ||
+      !button.isConnected ||
+      button.disabled ||
+      button.closest("[hidden]") ||
+      (key !== undefined &&
+        key.split("~").length !== childTypes[resourceBefore].keys.length)
     )
       return;
     const current = beginEditorOperation();
@@ -1353,7 +1416,9 @@
         button.className = "secondary";
         button.dataset.childKey = key;
         button.textContent = `${key} · ${item.activeYn ? "활성" : "논리 삭제"} ${type.label} 열기`;
-        button.addEventListener("click", () => selectChild(key));
+        button.addEventListener("click", (event) =>
+          selectChild(key, event.currentTarget),
+        );
         const time = document.createElement("p");
         time.className = "muted";
         time.textContent = displayTime(item.updatedAt);
@@ -1404,8 +1469,13 @@
     return true;
   }
 
-  /** 충돌 시 현재 입력을 메모리에 유지하고 서버 최신본을 별도로 표시한다. */
+  /**
+   * 충돌 시 기존 동의를 거절하고 현재 입력과 서버 최신본을 별도로 표시한다.
+   * @param {object} data 현재 선택 자료를 포함한 기존 상세 조회 계약의 서버본. null은 허용하지 않는다.
+   * @returns {void} 입력은 유지하고 검토 전 쓰기를 잠근다.
+   */
   function showComparison(data) {
+    AdminUI.cancelConfirmation();
     saveLocked = true;
     syncChildControls();
     for (const button of editor.querySelectorAll("form[data-section] button"))
@@ -1912,9 +1982,17 @@
     }
   }
 
-  /** 인증된 소유자·운영자의 관계 목록을 읽고 복원 영향의 전체 수를 명확히 표시한다. */
+  /**
+   * 인증된 소유자·운영자의 관계 목록을 읽고 도착 시 기존 동의를 무효화한다.
+   * @param {boolean} append 다음 페이지 추가 여부. 기본 false이며 수정번호가 다르면 목록 기준을 폐기한다.
+   * @returns {Promise<void>} 현재 사건의 관계와 복원 영향을 표시한다. 오래된 응답은 무시한다.
+   * @throws {object} 기존 API 조회 오류를 호출자의 재조회 안내로 전달한다.
+   */
   async function loadAccess(append = false) {
     if (!selectedStory) return;
+    AdminUI.cancelConfirmation();
+    const current = generation;
+    const story = selectedStory;
     const epoch = manageEpoch;
     const code = selectedStory.storyCode;
     const after = append ? manageAfterKey : undefined;
@@ -1924,7 +2002,13 @@
       "GET",
       `/${encodeURIComponent(code)}/access?${query}`,
     );
-    if (epoch !== manageEpoch) return;
+    if (
+      current !== generation ||
+      epoch !== manageEpoch ||
+      story !== selectedStory
+    )
+      return;
+    AdminUI.cancelConfirmation();
     if (append && manageSnapshot && data.storyRev !== manageSnapshot.storyRev) {
       manageSnapshot = undefined;
       manageAfterKey = undefined;
@@ -1981,39 +2065,83 @@
     if (!append) document.getElementById("manage-heading").focus();
   }
 
-  /** 목록 행의 현재 상태를 직접 조회하며 쓰기 충돌 뒤 자동 재전송하지 않는다. */
+  /**
+   * 목록 행의 관리 문맥을 바꾸고 이전 동의를 거절한다.
+   * @param {object} item 서버 목록에서 선택한 사건 행. null은 허용하지 않는다.
+   * @returns {Promise<void>} 현재 관계를 조회하며 오류는 고정 안내로 표시한다. 쓰기는 재전송하지 않는다.
+   */
   async function openManage(item) {
+    AdminUI.cancelConfirmation();
     selectedStory = item;
     manageSnapshot = undefined;
     manageAfterKey = undefined;
     ++manageEpoch;
+    const current = generation;
+    const epoch = manageEpoch;
     document.getElementById("manage-panel").hidden = true;
     document.getElementById("manage-result").textContent = "";
     try {
       await loadAccess();
     } catch (error) {
-      if (error.code === "REAUTH_REQUIRED")
-        document.getElementById("story-reauth").showModal();
+      if (
+        current !== generation ||
+        epoch !== manageEpoch ||
+        selectedStory !== item
+      )
+        return;
+      if (error.code === "REAUTH_REQUIRED") openStoryReauth();
       status(errorMessage(error), true);
     }
   }
 
-  /** 현재 수정번호와 검토한 관계 영향을 이용해 단일 사건 상태 변경을 명시적으로 제출한다. */
+  /**
+   * 현재 수정번호와 검토한 관계 영향에 결속한 상태 변경만 한 번 제출한다.
+   * @param {HTMLButtonElement} button 현재 상태 변경 버튼. 비활성·숨김·분리 상태는 제출하지 않는다.
+   * @returns {Promise<void>} 취소·오래된 동의는 입력을 보존하고 API 오류는 기존 안내로 처리한다.
+   */
   async function changeStoryState(button) {
     if (!selectedStory || !manageSnapshot || button.disabled) return;
+    const current = generation;
+    const epoch = manageEpoch;
+    const story = selectedStory;
+    const snapshot = manageSnapshot;
+    const code = story.storyCode;
+    const editRev = story.editRev;
+    const storyRev = snapshot.storyRev;
     const input = document.getElementById("state-reference");
     if (!input.reportValidity()) return;
-    const active = manageSnapshot.activeYn;
-    if (!active && !document.getElementById("state-impact-reviewed").checked) {
+    const reference = input.value;
+    const active = snapshot.activeYn;
+    const impact = document.getElementById("state-impact-reviewed").checked;
+    if (!active && !impact) {
       status("복원 전 남은 활성 관계 수와 목록을 확인하세요.", true);
       return;
     }
     if (
-      !confirm(
-        active
+      !(await AdminUI.confirm({
+        title: active ? "사건 논리 삭제" : "사건 복원",
+        message: active
           ? "최초 초안 사건만 논리 삭제합니까? 원고와 관계는 유지되며 자동 재전송하지 않습니다."
-          : `활성 접근 관계 ${manageSnapshot.activeRelationCount}건의 접근이 다시 가능해집니다. 사건을 복원합니까?`,
-      )
+          : `활성 접근 관계 ${snapshot.activeRelationCount}건의 접근이 다시 가능해집니다. 사건을 복원합니까?`,
+        confirmLabel: active ? "논리 삭제" : "복원",
+      }))
+    )
+      return;
+    if (
+      current !== generation ||
+      epoch !== manageEpoch ||
+      selectedStory !== story ||
+      manageSnapshot !== snapshot ||
+      story.storyCode !== code ||
+      story.editRev !== editRev ||
+      snapshot.storyRev !== storyRev ||
+      snapshot.activeYn !== active ||
+      button.disabled ||
+      !button.isConnected ||
+      button.closest("[hidden]") ||
+      !input.isConnected ||
+      input.value !== reference ||
+      document.getElementById("state-impact-reviewed").checked !== impact
     )
       return;
     button.disabled = true;
@@ -2021,25 +2149,56 @@
     try {
       const result = await request(
         "POST",
-        `/${encodeURIComponent(selectedStory.storyCode)}/${operation}`,
+        `/${encodeURIComponent(code)}/${operation}`,
         {
-          expectedStoryRev: manageSnapshot.storyRev,
-          expectedRev: selectedStory.editRev,
+          expectedStoryRev: storyRev,
+          expectedRev: editRev,
           reasonCode: active ? "DRAFT_WITHDRAWN" : "WORK_RESUMED",
-          verificationRef: input.value,
+          verificationRef: reference,
         },
       );
+      if (
+        current !== generation ||
+        epoch !== manageEpoch ||
+        selectedStory !== story ||
+        manageSnapshot !== snapshot
+      )
+        return;
+      AdminUI.cancelConfirmation();
       input.value = "";
       document.getElementById("manage-panel").hidden = true;
       selectedStory = manageSnapshot = undefined;
       ++manageEpoch;
-      await loadList();
-      status(
-        `현재 사건 ${result.activeYn ? "복원" : "논리 삭제"} ${result.changed ? "확정" : "무변경"} · 사건 수정번호 ${result.storyRev}.`,
-      );
+      const receipt = `현재 사건 ${result.activeYn ? "복원" : "논리 삭제"} ${result.changed ? "확정" : "무변경"} · 사건 수정번호 ${result.storyRev}.`;
+      try {
+        await loadList();
+        if (
+          current !== generation ||
+          manageEpoch !== epoch + 1 ||
+          selectedStory
+        )
+          return;
+        status(receipt);
+      } catch (error) {
+        if (
+          current !== generation ||
+          manageEpoch !== epoch + 1 ||
+          selectedStory
+        )
+          return;
+        status(
+          `${receipt} 목록 새로 조회에 실패했습니다. 변경을 다시 보내지 말고 목록을 직접 조회하세요.`,
+          true,
+        );
+      }
     } catch (error) {
-      if (error.code === "REAUTH_REQUIRED")
-        document.getElementById("story-reauth").showModal();
+      if (
+        current !== generation ||
+        epoch !== manageEpoch ||
+        selectedStory !== story
+      )
+        return;
+      if (error.code === "REAUTH_REQUIRED") openStoryReauth();
       document.getElementById("manage-result").textContent =
         `${errorMessage(error)} 현재 사건·관계를 다시 조회한 뒤 직접 결정하세요.`;
       status(errorMessage(error), true);
@@ -2048,11 +2207,22 @@
     }
   }
 
-  /** 관계 변경은 서버 현재 사건 수정번호 한 번만 사용하고 결과가 불확실하면 조회로 멈춘다. */
+  /**
+   * 확인 전에 복사한 관계 변경과 사건 수정번호를 한 번만 사용한다.
+   * @param {HTMLFormElement} form 현재 접근 관계 폼. null은 허용하지 않으며 분리·숨김 뒤에는 제출하지 않는다.
+   * @returns {Promise<void>} 성공만 참조 입력을 지우고 취소·오래된 동의·오류는 자동 재전송하지 않는다.
+   */
   async function changeAccess(form) {
     if (!selectedStory || !manageSnapshot) return;
     const button = document.getElementById("access-submit");
     if (button.disabled) return;
+    const current = generation;
+    const epoch = manageEpoch;
+    const story = selectedStory;
+    const snapshot = manageSnapshot;
+    const code = story.storyCode;
+    const editRev = story.editRev;
+    const storyRev = snapshot.storyRev;
     const input = Object.fromEntries(new FormData(form));
     const operation = input.operation;
     const reason = input.reasonCode;
@@ -2061,26 +2231,55 @@
       return;
     }
     if (
-      !confirm(
-        `${input.permission} 관계를 ${operation === "grant" ? "부여" : "회수"}합니까? 자동 재전송하지 않습니다.`,
-      )
+      !(await AdminUI.confirm({
+        title: operation === "grant" ? "접근 관계 부여" : "접근 관계 회수",
+        message: `${input.permission} 관계를 ${operation === "grant" ? "부여" : "회수"}합니까? 자동 재전송하지 않습니다.`,
+        confirmLabel: operation === "grant" ? "관계 부여" : "관계 회수",
+      }))
+    )
+      return;
+    if (
+      current !== generation ||
+      epoch !== manageEpoch ||
+      selectedStory !== story ||
+      manageSnapshot !== snapshot ||
+      story.storyCode !== code ||
+      story.editRev !== editRev ||
+      snapshot.storyRev !== storyRev ||
+      button.disabled ||
+      !button.isConnected ||
+      !form.isConnected ||
+      form.closest("[hidden]")
     )
       return;
     button.disabled = true;
     try {
       const result = await request(
         "POST",
-        `/${encodeURIComponent(selectedStory.storyCode)}/access/${operation}`,
+        `/${encodeURIComponent(code)}/access/${operation}`,
         {
-          expectedStoryRev: manageSnapshot.storyRev,
+          expectedStoryRev: storyRev,
           accountKey: input.accountKey,
           permission: input.permission,
           reasonCode: reason,
           verificationRef: input.verificationRef,
         },
       );
+      if (
+        current !== generation ||
+        epoch !== manageEpoch ||
+        selectedStory !== story ||
+        manageSnapshot !== snapshot
+      )
+        return;
       form.elements.verificationRef.value = "";
       await loadAccess();
+      if (
+        current !== generation ||
+        epoch !== manageEpoch ||
+        selectedStory !== story
+      )
+        return;
       const message =
         result.auditStatus === "UNCONFIRMED"
           ? "접근 차단은 확정됐으나 업무 감사가 미확정입니다. 운영 점검이 필요합니다."
@@ -2090,14 +2289,25 @@
       document.getElementById("manage-result").textContent = message;
       status(message, result.auditStatus === "UNCONFIRMED");
     } catch (error) {
-      if (error.code === "REAUTH_REQUIRED")
-        document.getElementById("story-reauth").showModal();
+      if (
+        current !== generation ||
+        epoch !== manageEpoch ||
+        selectedStory !== story
+      )
+        return;
+      if (error.code === "REAUTH_REQUIRED") openStoryReauth();
       document.getElementById("manage-result").textContent =
         `${errorMessage(error)} 현재 관계를 다시 조회하고 직접 결정하세요.`;
       status(errorMessage(error), true);
     } finally {
       button.disabled = false;
     }
+  }
+
+  /** 기존 확인을 거절하고 별도 재인증 창만 연다. 반환값은 없고 이전 변경은 재실행하지 않는다. */
+  function openStoryReauth() {
+    AdminUI.cancelConfirmation();
+    document.getElementById("story-reauth").showModal();
   }
 
   /** 정확한 인증 입력만 별도 인증 API에 보내고 이전 변경 요청을 재실행하지 않는다. */
@@ -2133,9 +2343,16 @@
     );
   }
 
-  /** 현재 소유자·지정 수신자·MANAGE에게만 원고 없는 인계 효력을 조회한다. */
+  /**
+   * 현재 인계 문맥의 원고 없는 효력을 조회하고 응답 반영 전에 기존 동의를 거절한다.
+   * @returns {Promise<void>} 현재 소유자·지정 수신자·MANAGE에게만 인계 메타를 표시한다. 오래된 응답은 무시한다.
+   * @throws {object} 기존 API 조회 오류를 호출자의 재조회 안내로 전달한다.
+   */
   async function loadOwnership() {
     if (!ownershipStory) return;
+    AdminUI.cancelConfirmation();
+    const current = generation;
+    const story = ownershipStory;
     const epoch = ownershipEpoch;
     const result = await request(
       "GET",
@@ -2143,7 +2360,13 @@
       undefined,
       true,
     );
-    if (epoch !== ownershipEpoch) return;
+    if (
+      current !== generation ||
+      epoch !== ownershipEpoch ||
+      story !== ownershipStory
+    )
+      return;
+    AdminUI.cancelConfirmation();
     if (!result) {
       ownershipSnapshot = undefined;
       document.getElementById("ownership-panel").hidden = !ownershipIntent;
@@ -2175,11 +2398,18 @@
     document.getElementById("ownership-heading").focus();
   }
 
-  /** 목록 선택 시 이전 인계 응답을 폐기하고 최소 인계 메타만 표시한다. */
+  /**
+   * 목록 선택 시 이전 동의와 인계 응답을 폐기하고 최소 인계 메타만 표시한다.
+   * @param {object} item 서버 목록에서 선택한 사건 행. null은 허용하지 않는다.
+   * @returns {Promise<void>} 현재 인계를 표시하며 오류는 고정 안내로 처리한다.
+   */
   async function openOwnership(item) {
+    AdminUI.cancelConfirmation();
     ownershipStory = item;
     ownershipSnapshot = ownershipIntent = undefined;
     ++ownershipEpoch;
+    const current = generation;
+    const epoch = ownershipEpoch;
     document.getElementById("manage-panel").hidden = true;
     selectedStory = manageSnapshot = undefined;
     ++manageEpoch;
@@ -2187,15 +2417,26 @@
     try {
       await loadOwnership();
     } catch (error) {
-      if (error.code === "REAUTH_REQUIRED")
-        document.getElementById("story-reauth").showModal();
+      if (
+        current !== generation ||
+        epoch !== ownershipEpoch ||
+        ownershipStory !== item
+      )
+        return;
+      if (error.code === "REAUTH_REQUIRED") openStoryReauth();
       status(errorMessage(error), true);
     }
   }
 
-  /** 현재 수정번호에 결속된 단일 의도와 UUID v4를 생성해 결과 확정 전 유지한다. */
+  /**
+   * 현재 수정번호에 결속된 단일 의도와 UUID v4를 생성해 결과 확정 전 유지한다.
+   * @param {string} path 기존 인계 API의 상대 접미사. 확인한 동작만 허용한다.
+   * @param {object} body 확인 전에 복사한 기존 인계 요청 필드. null은 허용하지 않는다.
+   * @returns {void} 기존 의도가 있으면 새 의도를 만들지 않으며 제출 오류는 별도 안내로 처리한다.
+   */
   function ownerIntent(path, body) {
     if (!ownershipStory || !ownershipSnapshot || ownershipIntent) return;
+    AdminUI.cancelConfirmation();
     ownershipIntent = {
       path: `/${encodeURIComponent(ownershipStory.storyCode)}/ownership${path}`,
       body: {
@@ -2207,14 +2448,28 @@
     submitOwnership();
   }
 
-  /** 결과 유실 때 원래 요청만 사용자의 명시 행동으로 다시 보내며 자동 재시도하지 않는다. */
+  /**
+   * 결과 유실 때 원래 요청만 사용자의 명시 행동으로 다시 보내며 자동 재시도하지 않는다.
+   * @returns {Promise<void>} 동일 문맥에만 영수증을 표시하며 API 오류는 의도를 유지한 안내로 처리한다.
+   */
   async function submitOwnership() {
     if (!ownershipIntent) return;
     const intent = ownershipIntent;
+    const current = generation;
+    const epoch = ownershipEpoch;
+    const story = ownershipStory;
     const panel = document.getElementById("ownership-panel");
     panel.setAttribute("aria-busy", "true");
     try {
       const result = await request("POST", intent.path, intent.body);
+      if (
+        current !== generation ||
+        epoch !== ownershipEpoch ||
+        story !== ownershipStory ||
+        intent !== ownershipIntent
+      )
+        return;
+      AdminUI.cancelConfirmation();
       status(
         result.replayed
           ? "원래 확정된 인계 영수증을 확인했습니다. 현재 소유권과 구분하세요."
@@ -2230,31 +2485,79 @@
       document.getElementById("ownership-reconcile").hidden = true;
       // 수락 후 소유권 조회 자격을 잃어도 원래 영수증을 실패로 번역하지 않는다.
     } catch (error) {
+      if (
+        current !== generation ||
+        epoch !== ownershipEpoch ||
+        story !== ownershipStory ||
+        intent !== ownershipIntent
+      )
+        return;
+      AdminUI.cancelConfirmation();
       document.getElementById("ownership-reconcile").hidden = false;
       document.getElementById("ownership-result").textContent =
         `${errorMessage(error)} 원래 의도 키를 유지합니다. 자동으로 새 요청을 만들지 않습니다.`;
-      if (error.code === "REAUTH_REQUIRED")
-        document.getElementById("story-reauth").showModal();
+      if (error.code === "REAUTH_REQUIRED") openStoryReauth();
       status(errorMessage(error), true);
     } finally {
-      panel.setAttribute("aria-busy", "false");
+      if (
+        current === generation &&
+        epoch === ownershipEpoch &&
+        story === ownershipStory
+      )
+        panel.setAttribute("aria-busy", "false");
     }
   }
 
-  /** 현재 유효한 요청에 대해서만 수신 수락·취소·거절의 각 의도를 만든다. */
-  function closeOwnership(decision) {
+  /**
+   * 표시된 인계와 수정번호에만 수신 수락·취소·거절 동의를 적용한다.
+   * @param {string} decision ACCEPT/CANCEL/DECLINE 중 기존 버튼의 결정.
+   * @param {HTMLButtonElement} button 현재 결정 버튼. 분리되거나 숨겨지면 동의는 무효다.
+   * @returns {Promise<void>} 유효한 동의만 단일 의도를 생성하며 오류는 기존 제출 경로에서 안내한다.
+   */
+  async function closeOwnership(decision, button) {
+    const current = generation;
+    const epoch = ownershipEpoch;
+    const story = ownershipStory;
+    const snapshot = ownershipSnapshot;
+    const intent = ownershipIntent;
     const pending = ownershipSnapshot?.pending;
-    if (!pending || pending.effectiveState !== "PENDING") return;
+    if (
+      !story ||
+      intent ||
+      !pending ||
+      pending.effectiveState !== "PENDING" ||
+      button.disabled
+    )
+      return;
+    const transferKey = pending.transferKey;
+    const storyRev = snapshot.storyRev;
     const verb =
       decision === "ACCEPT" ? "수락" : decision === "CANCEL" ? "취소" : "거절";
     if (
-      !confirm(
-        `현재 사건 수정번호로 인계를 ${verb}합니까? 결과 유실 시 같은 의도를 확인하세요.`,
-      )
+      !(await AdminUI.confirm({
+        title: `소유권 인계 ${verb}`,
+        message: `현재 사건 수정번호로 인계를 ${verb}합니까? 결과 유실 시 같은 의도를 확인하세요.`,
+        confirmLabel: `인계 ${verb}`,
+      }))
+    )
+      return;
+    if (
+      current !== generation ||
+      epoch !== ownershipEpoch ||
+      story !== ownershipStory ||
+      snapshot !== ownershipSnapshot ||
+      intent !== ownershipIntent ||
+      snapshot.storyRev !== storyRev ||
+      snapshot.pending !== pending ||
+      pending.transferKey !== transferKey ||
+      pending.effectiveState !== "PENDING" ||
+      !button.isConnected ||
+      button.closest("[hidden]") ||
+      button.disabled
     )
       return;
     ownerIntent(
-      `/requests/${encodeURIComponent(pending.transferKey)}/${decision === "ACCEPT" ? "accept" : "close"}`,
+      `/requests/${encodeURIComponent(transferKey)}/${decision === "ACCEPT" ? "accept" : "close"}`,
       decision === "ACCEPT" ? {} : { decision },
     );
   }
@@ -2419,19 +2722,26 @@
     }
   }
 
-  /** 현재 CREATE 권한을 확인한 뒤에만 생성 폼을 공개한다. */
+  /**
+   * 현재 CREATE 권한을 확인한 뒤 기존 동의를 거절하고 생성 폼을 공개한다.
+   * @returns {Promise<void>} 현재 세대의 자격만 반영하며 오류는 고정 안내로 처리한다.
+   */
   async function configureCreate() {
+    const current = generation;
     try {
       const response = await fetch("/admin/api/auth/me", {
         credentials: "same-origin",
         cache: "no-store",
       });
+      if (current !== generation) return;
       if (response.status === 401) {
         revoke("세션이 만료되었습니다.", 401);
         return;
       }
       if (!response.ok) throw { status: response.status };
       const me = await response.json();
+      if (current !== generation) return;
+      AdminUI.cancelConfirmation();
       viewer = me;
       for (const button of document.querySelectorAll(".manage-open")) {
         const row = button.closest(".story-row");
@@ -2443,6 +2753,7 @@
       document.getElementById("create-panel").hidden = !allowed;
       document.getElementById("create-jump").hidden = !allowed;
     } catch {
+      if (current !== generation) return;
       status(
         "생성 권한을 확인할 수 없어 생성 기능을 숨겼습니다. 사건 목록은 계속 사용할 수 있습니다.",
         true,
@@ -2512,7 +2823,9 @@
       });
     document
       .getElementById("child-new")
-      .addEventListener("click", () => selectChild());
+      .addEventListener("click", (event) =>
+        selectChild(undefined, event.currentTarget),
+      );
     document
       .getElementById("child-list")
       .addEventListener("click", () => loadChildren());
@@ -2523,17 +2836,45 @@
       resetChildren();
       loadChildren();
     });
-    document.getElementById("child-active").addEventListener("click", () => {
-      if (saveLocked || !detail?.childItem) return;
-      const operation = detail.childItem.activeYn ? "deactivate" : "reactivate";
-      if (
-        !confirm(
-          `${childTypes[childResource].label}을 ${operation === "deactivate" ? "논리 삭제" : "복원"}합니까? 미저장 원고는 저장하지 않으며 다른 연결을 자동으로 바꾸지 않습니다.`,
+    document
+      .getElementById("child-active")
+      .addEventListener("click", async (event) => {
+        if (saveLocked || !detail?.childItem) return;
+        const button = event.currentTarget;
+        const current = generation;
+        const previousDetail = detail;
+        const resource = childResource;
+        const key = childKey;
+        const item = detail.childItem;
+        const form = editor.querySelector('[data-section="child"]');
+        const operation = detail.childItem.activeYn
+          ? "deactivate"
+          : "reactivate";
+        if (
+          !(await AdminUI.confirm({
+            title: `${childTypes[resource].label} ${operation === "deactivate" ? "논리 삭제" : "복원"}`,
+            message: `${childTypes[resource].label}을 ${operation === "deactivate" ? "논리 삭제" : "복원"}합니까? 미저장 원고는 저장하지 않으며 다른 연결을 자동으로 바꾸지 않습니다.`,
+            confirmLabel: operation === "deactivate" ? "논리 삭제" : "복원",
+          }))
         )
-      )
-        return;
-      save(editor.querySelector('[data-section="child"]'), operation);
-    });
+          return;
+        if (
+          current !== generation ||
+          detail !== previousDetail ||
+          resource !== childResource ||
+          key !== childKey ||
+          detail.childItem !== item ||
+          saveLocked ||
+          !writableSection("basic") ||
+          (item.activeYn ? "deactivate" : "reactivate") !== operation ||
+          !form.isConnected ||
+          form !== editor.querySelector('[data-section="child"]') ||
+          !button.isConnected ||
+          button.disabled
+        )
+          return;
+        save(form, operation);
+      });
     document.getElementById("refresh-latest").addEventListener("click", () => {
       compare().catch((error) => {
         if (![401, 403, 404].includes(error.status))
@@ -2549,29 +2890,56 @@
     document
       .getElementById("editor")
       .addEventListener("change", syncRubricFixedFields);
-    document.getElementById("accept-latest").addEventListener("click", () => {
-      if (
-        !latest ||
-        latest.childKey !== childKey ||
-        latest.childResource !== childResource ||
-        !latest.storyActiveYn ||
-        !latest.activeYn ||
-        latest.status !== "DRAFT"
-      )
-        return;
-      if (
-        !confirm(
-          "최신 저장값과 남은 입력을 비교했습니까? 저장은 현재 입력에서 선택한 필드만 최신 수정번호를 기준으로 적용합니다.",
+    document
+      .getElementById("accept-latest")
+      .addEventListener("click", async (event) => {
+        const accepted = latest;
+        const current = generation;
+        const serial = comparisonRequest;
+        const previousDetail = detail;
+        const resource = childResource;
+        const key = childKey;
+        const button = event.currentTarget;
+        if (
+          !latest ||
+          latest.childKey !== childKey ||
+          latest.childResource !== childResource ||
+          !latest.storyActiveYn ||
+          !latest.activeYn ||
+          latest.status !== "DRAFT"
         )
-      )
-        return;
-      const accepted = latest;
-      beginEditorOperation();
-      fillDetail(accepted, { preserve: true });
-      status(
-        "서버 최신값과 수정번호를 화면에 반영했습니다. 남은 입력을 확인하고 영역별로 저장하세요.",
-      );
-    });
+          return;
+        if (
+          !(await AdminUI.confirm({
+            title: "서버 최신본 수락",
+            message:
+              "최신 저장값과 남은 입력을 비교했습니까? 저장은 현재 입력에서 선택한 필드만 최신 수정번호를 기준으로 적용합니다.",
+            confirmLabel: "최신본 수락",
+          }))
+        )
+          return;
+        if (
+          accepted !== latest ||
+          current !== generation ||
+          serial !== comparisonRequest ||
+          previousDetail !== detail ||
+          resource !== childResource ||
+          key !== childKey ||
+          accepted.childResource !== resource ||
+          accepted.childKey !== key ||
+          !accepted.storyActiveYn ||
+          !accepted.activeYn ||
+          accepted.status !== "DRAFT" ||
+          !button.isConnected ||
+          button.disabled
+        )
+          return;
+        beginEditorOperation();
+        fillDetail(accepted, { preserve: true });
+        status(
+          "서버 최신값과 수정번호를 화면에 반영했습니다. 남은 입력을 확인하고 영역별로 저장하세요.",
+        );
+      });
     document.getElementById("retry-detail").addEventListener("click", () => {
       loadDetail().catch(detailFailure);
     });
@@ -2581,11 +2949,22 @@
       .getElementById("manage-refresh")
       .addEventListener("click", async () => {
         if (!selectedStory) return;
+        AdminUI.cancelConfirmation();
+        const current = generation;
+        const epoch = manageEpoch;
+        const story = selectedStory;
         try {
           const state = await request(
             "GET",
             `?${new URLSearchParams({ code: selectedStory.storyCode, activeYn: String(manageSnapshot?.activeYn ?? selectedStory.activeYn) })}`,
           );
+          if (
+            current !== generation ||
+            epoch !== manageEpoch ||
+            selectedStory !== story
+          )
+            return;
+          AdminUI.cancelConfirmation();
           selectedStory = state.items[0];
           if (!selectedStory) {
             document.getElementById("manage-panel").hidden = true;
@@ -2595,16 +2974,24 @@
             );
             return;
           }
+          const refreshedStory = selectedStory;
           await loadAccess();
+          if (
+            current !== generation ||
+            epoch !== manageEpoch ||
+            selectedStory !== refreshedStory
+          )
+            return;
           document.getElementById("manage-result").textContent =
             "현재 사건과 접근 관계를 조회했습니다. 입력을 확인한 뒤 직접 실행하세요.";
         } catch (error) {
-          if (error.code === "REAUTH_REQUIRED")
-            document.getElementById("story-reauth").showModal();
+          if (current !== generation || epoch !== manageEpoch) return;
+          if (error.code === "REAUTH_REQUIRED") openStoryReauth();
           status(errorMessage(error), true);
         }
       });
     document.getElementById("manage-close").addEventListener("click", () => {
+      AdminUI.cancelConfirmation();
       document.getElementById("manage-panel").hidden = true;
       selectedStory = manageSnapshot = undefined;
       ++manageEpoch;
@@ -2672,51 +3059,123 @@
       .addEventListener("click", () =>
         loadOwnership().catch((error) => status(errorMessage(error), true)),
       );
-    document.getElementById("ownership-close").addEventListener("click", () => {
-      if (
-        ownershipIntent &&
-        !confirm("인계 결과가 불확실합니다. 원래 의도 키를 버리고 닫습니까?")
-      )
-        return;
-      ownershipStory = ownershipSnapshot = ownershipIntent = undefined;
-      ++ownershipEpoch;
-      document.getElementById("ownership-panel").hidden = true;
-    });
     document
-      .getElementById("ownership-request-form")
-      .addEventListener("submit", (event) => {
-        event.preventDefault();
+      .getElementById("ownership-close")
+      .addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const current = generation;
+        const epoch = ownershipEpoch;
+        const story = ownershipStory;
+        const snapshot = ownershipSnapshot;
+        const intent = ownershipIntent;
         if (
-          !confirm(
-            "활성 공동 EDIT 관리자에게 24시간 소유권 수락 요청을 만듭니까?",
-          )
+          intent &&
+          !(await AdminUI.confirm({
+            title: "인계 의도 버리고 닫기",
+            message:
+              "인계 결과가 불확실합니다. 원래 의도 키를 버리고 닫습니까?",
+            confirmLabel: "의도 버리고 닫기",
+          }))
         )
           return;
+        if (
+          current !== generation ||
+          epoch !== ownershipEpoch ||
+          story !== ownershipStory ||
+          snapshot !== ownershipSnapshot ||
+          intent !== ownershipIntent ||
+          !button.isConnected ||
+          button.closest("[hidden]")
+        )
+          return;
+        AdminUI.cancelConfirmation();
+        ownershipStory = ownershipSnapshot = ownershipIntent = undefined;
+        ++ownershipEpoch;
+        document.getElementById("ownership-panel").hidden = true;
+      });
+    document
+      .getElementById("ownership-request-form")
+      .addEventListener("submit", async (event) => {
+        event.preventDefault();
         const form = event.currentTarget;
-        ownerIntent("/requests", {
+        const button = form.querySelector('[type="submit"]');
+        const current = generation;
+        const epoch = ownershipEpoch;
+        const story = ownershipStory;
+        const snapshot = ownershipSnapshot;
+        const intent = ownershipIntent;
+        if (!story || !snapshot || intent || button.disabled) return;
+        const storyRev = snapshot.storyRev;
+        const body = {
           toAccountKey: form.elements.toAccountKey.value.trim(),
           keepEditor: form.elements.keepEditor.checked,
           reasonCode: "HANDOVER",
           verificationRef: form.elements.verificationRef.value.trim(),
-        });
+        };
+        if (
+          !(await AdminUI.confirm({
+            title: "소유권 인계 요청",
+            message:
+              "활성 공동 EDIT 관리자에게 24시간 소유권 수락 요청을 만듭니까?",
+            confirmLabel: "인계 요청",
+          }))
+        )
+          return;
+        if (
+          current !== generation ||
+          epoch !== ownershipEpoch ||
+          story !== ownershipStory ||
+          snapshot !== ownershipSnapshot ||
+          intent !== ownershipIntent ||
+          snapshot.storyRev !== storyRev ||
+          !form.isConnected ||
+          form.closest("[hidden]") ||
+          button.disabled
+        )
+          return;
+        ownerIntent("/requests", body);
       });
     document
       .getElementById("ownership-override-form")
-      .addEventListener("submit", (event) => {
+      .addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (
-          !confirm(
-            "현재 소유자의 실제 비활성/복구 제한을 별도 확인했고 새 소유자에게 인계합니까?",
-          )
-        )
-          return;
         const form = event.currentTarget;
-        ownerIntent("/override", {
+        const button = form.querySelector('[type="submit"]');
+        const current = generation;
+        const epoch = ownershipEpoch;
+        const story = ownershipStory;
+        const snapshot = ownershipSnapshot;
+        const intent = ownershipIntent;
+        if (!story || !snapshot || intent || button.disabled) return;
+        const storyRev = snapshot.storyRev;
+        const body = {
           toAccountKey: form.elements.toAccountKey.value.trim(),
           keepEditor: false,
           reasonCode: form.elements.reasonCode.value,
           verificationRef: form.elements.verificationRef.value.trim(),
-        });
+        };
+        if (
+          !(await AdminUI.confirm({
+            title: "소유권 운영 인계",
+            message:
+              "현재 소유자의 실제 비활성/복구 제한을 별도 확인했고 새 소유자에게 인계합니까?",
+            confirmLabel: "운영 인계",
+          }))
+        )
+          return;
+        if (
+          current !== generation ||
+          epoch !== ownershipEpoch ||
+          story !== ownershipStory ||
+          snapshot !== ownershipSnapshot ||
+          intent !== ownershipIntent ||
+          snapshot.storyRev !== storyRev ||
+          !form.isConnected ||
+          form.closest("[hidden]") ||
+          button.disabled
+        )
+          return;
+        ownerIntent("/override", body);
       });
     for (const [button, decision] of [
       ["ownership-accept", "ACCEPT"],
@@ -2725,25 +3184,65 @@
     ])
       document
         .getElementById(button)
-        .addEventListener("click", () => closeOwnership(decision));
+        .addEventListener("click", (event) =>
+          closeOwnership(decision, event.currentTarget),
+        );
     document
       .getElementById("ownership-replay")
       .addEventListener("click", submitOwnership);
     document
       .getElementById("ownership-new-intent")
-      .addEventListener("click", async () => {
+      .addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const current = generation;
+        const epoch = ownershipEpoch;
+        const story = ownershipStory;
+        const snapshot = ownershipSnapshot;
+        const intent = ownershipIntent;
+        if (!story || !intent || button.disabled) return;
         if (
-          !confirm(
-            "이전 인계 확정 여부를 확인했습니까? 새 의도는 원래 요청을 되돌리지 않습니다.",
-          )
+          !(await AdminUI.confirm({
+            title: "새 인계 의도 시작",
+            message:
+              "이전 인계 확정 여부를 확인했습니까? 새 의도는 원래 요청을 되돌리지 않습니다.",
+            confirmLabel: "새 의도 시작",
+          }))
+        )
+          return;
+        if (
+          current !== generation ||
+          epoch !== ownershipEpoch ||
+          story !== ownershipStory ||
+          snapshot !== ownershipSnapshot ||
+          intent !== ownershipIntent ||
+          !button.isConnected ||
+          button.closest("[hidden]") ||
+          button.disabled
         )
           return;
         try {
           await loadOwnership();
-          if (!ownershipSnapshot) return;
+          if (
+            current !== generation ||
+            epoch !== ownershipEpoch ||
+            story !== ownershipStory ||
+            intent !== ownershipIntent ||
+            !ownershipSnapshot ||
+            !button.isConnected ||
+            button.closest("[hidden]")
+          )
+            return;
+          AdminUI.cancelConfirmation();
           ownershipIntent = undefined;
           document.getElementById("ownership-reconcile").hidden = true;
         } catch (error) {
+          if (
+            current !== generation ||
+            epoch !== ownershipEpoch ||
+            story !== ownershipStory ||
+            intent !== ownershipIntent
+          )
+            return;
           status(errorMessage(error), true);
         }
       });
@@ -2783,20 +3282,41 @@
           status(errorMessage(error), true);
       });
     });
-    document.getElementById("new-create").addEventListener("click", () => {
-      if (
-        !confirm(
-          "이전 생성 결과가 불확실할 수 있습니다. 새 사건 생성 의도를 시작합니까?",
+    document
+      .getElementById("new-create")
+      .addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const current = generation;
+        const key = createKey;
+        const title = createTitle;
+        const form = document.getElementById("create-form");
+        if (
+          !(await AdminUI.confirm({
+            title: "새 사건 생성 의도",
+            message:
+              "이전 생성 결과가 불확실할 수 있습니다. 새 사건 생성 의도를 시작합니까?",
+            confirmLabel: "새 생성 의도 시작",
+          }))
         )
-      )
-        return;
-      createKey = createTitle = undefined;
-      document.getElementById("create-form").reset();
-      document.getElementById("create-check").hidden = true;
-      status(
-        "새 생성 의도입니다. 이전 생성의 완료 여부는 자동 확인되지 않습니다.",
-      );
-    });
+          return;
+        if (
+          current !== generation ||
+          key !== createKey ||
+          title !== createTitle ||
+          !form.isConnected ||
+          form.closest("[hidden]") ||
+          !button.isConnected ||
+          button.disabled
+        )
+          return;
+        AdminUI.cancelConfirmation();
+        createKey = createTitle = undefined;
+        form.reset();
+        document.getElementById("create-check").hidden = true;
+        status(
+          "새 생성 의도입니다. 이전 생성의 완료 여부는 자동 확인되지 않습니다.",
+        );
+      });
     loadList()
       .then(() => {
         navigation();

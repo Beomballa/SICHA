@@ -13,6 +13,12 @@ import { exerciseRubrics } from "./story-rubrics.mjs";
 import { exerciseGradeSamples } from "./story-grade-samples.mjs";
 import { exerciseStoryAccess } from "./story-access.mjs";
 import { exerciseStoryOwnership } from "./story-ownership.mjs";
+import {
+  installConfirmationDriver,
+  clickWithConfirmation,
+  selectChildResource,
+  waitForConfirmation,
+} from "./confirmation.mjs";
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -80,7 +86,7 @@ async function openSection(page, section) {
       (link) => link.getAttribute("aria-current") === "location",
     ))
   ) {
-    await page.click(selector);
+    await clickWithConfirmation(page, selector);
   }
   await page.waitForSelector(
     `.manuscript > section[aria-labelledby="${section}-heading"]`,
@@ -88,20 +94,35 @@ async function openSection(page, section) {
   );
 }
 
-/** 명시적 저장 동작을 선택하고 텍스트·정수 필드를 입력한다. */
+/**
+ * 명시적 저장 동작을 선택하고 실제 필드에 텍스트·정수를 입력한다.
+ * @param {object} page 인증된 Puppeteer 페이지. null은 허용하지 않는다.
+ * @param {"basic"|"child"|"answer"|"reveal"} section 기존 원고 영역. null은 허용하지 않는다.
+ * @param {string} field 해당 영역의 실제 필드명. null은 허용하지 않는다.
+ * @param {string|number} value 입력할 원고 또는 해당 필드 범위의 수. null은 허용하지 않는다.
+ * @returns {Promise<void>} 모드 선택의 확인 종료 뒤 실제 입력을 완료한다.
+ * @throws {Error} 영역·필드가 없거나 실제 선택/입력이 실패하면 전파한다.
+ */
 async function edit(page, section, field, value) {
   await openSection(page, section);
   await page.select(`#${section}-${field}-mode`, "value");
+  await waitForConfirmation(page);
   await page.$eval(`#${section}-${field}`, (element) => {
     element.value = "";
   });
   await page.type(`#${section}-${field}`, String(value));
 }
 
-/** 영역별 저장 버튼만 실행하고 저장 후 조회 완료를 기다린다. */
+/**
+ * 영역별 실제 저장 버튼과 확인 창 종료, 저장 후 조회 완료를 기다린다.
+ * @param {object} page 인증된 Puppeteer 페이지. null은 허용하지 않는다.
+ * @param {"basic"|"child"|"answer"|"reveal"} section 저장할 기존 원고 영역. null은 허용하지 않는다.
+ * @returns {Promise<void>} 기존 저장 완료 안내를 확인한다.
+ * @throws {Error} 실제 클릭/확인 또는 저장 안내가 제한 시간 안에 완료되지 않으면 실패한다.
+ */
 async function save(page, section) {
   await openSection(page, section);
-  await page.click(`#${section}-save`);
+  await clickWithConfirmation(page, `#${section}-save`);
   await notice(page, "최신 원고를 조회했습니다");
 }
 
@@ -451,7 +472,7 @@ async function layout(page, name) {
 try {
   const page = await browser.newPage();
   page.setDefaultTimeout(15000);
-  page.on("dialog", (dialog) => dialog.accept());
+  const confirmation = await installConfirmationDriver(page);
   const runtimeErrors = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.name));
   page.on("response", async (response) => {
@@ -642,7 +663,8 @@ try {
 
   const other = await browser.newPage();
   console.log("Conflict second tab opened");
-  other.on("dialog", (dialog) => dialog.accept());
+  const otherConfirmation = await installConfirmationDriver(other);
+  other.on("pageerror", (error) => runtimeErrors.push(error.name));
   await other.goto(editorUrl);
   await other.waitForSelector("#editor:not([hidden])");
   await edit(page, "answer", "methodAnswer", "local-answer 충돌 후 보존");
@@ -670,7 +692,7 @@ try {
   await notice(page, "검토 전 저장은 차단");
   await openSection(page, "reveal");
   assert.equal(await page.$eval("#comparison", (node) => node.hidden), false);
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(
     await page.$eval('#editor-nav a[href="#reveal-heading"]', (node) =>
       node.getAttribute("aria-current"),
@@ -688,6 +710,7 @@ try {
   );
   assert.match(await text(page, "#notice"), /영역별로 저장/);
   await save(page, "answer");
+  assert.deepEqual(otherConfirmation.errors, []);
   await other.close();
   console.log(
     "PASS real DB conflict, failed comparison refresh, explicit revision acceptance",
@@ -714,7 +737,7 @@ try {
   assert.equal(await page.$eval("#reveal-save", (e) => e.disabled), true);
   await layout(page, "uncertain-save");
   await lostPatch.detach();
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "reveal");
   assert.match(await text(page, "#notice"), /변화가 없습니다/);
 
@@ -803,7 +826,7 @@ try {
   await openSection(page, "child");
   await page.click("#child-list");
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await page.select("#child-filter", "false");
   await page.waitForFunction(() =>
     document
@@ -825,7 +848,7 @@ try {
     await page.$$eval("[data-child-key]", (nodes) => nodes.length),
     22,
   );
-  await page.click('[data-child-key="P_BROWSER"]');
+  await clickWithConfirmation(page, '[data-child-key="P_BROWSER"]');
   await page.waitForFunction(
     () => document.getElementById("child-name").value === "합성 인물",
   );
@@ -849,6 +872,58 @@ try {
     await page.$eval("#answer-methodAnswer", (e) => e.value),
     "인물 저장 중 보존할 미저장 정답",
   );
+  await edit(page, "child", "name", "취소할 때 남는 인물 입력");
+  /** 현재 키·종류·모드·입력만 읽으며 원고를 로그로 내보내지 않는다. */
+  const childDraftState = () =>
+    page.evaluate(() => ({
+      resource: document.getElementById("child-resource").value,
+      key: document.getElementById("child-code").value,
+      mode: document.getElementById("child-name-mode").value,
+      name: document.getElementById("child-name").value,
+      answerMode: document.getElementById("answer-methodAnswer-mode").value,
+      answer: document.getElementById("answer-methodAnswer").value,
+    }));
+  const draftBeforeConsent = await childDraftState();
+  let consentWrites = 0;
+  const countConsentWrites = (request) => {
+    if (["POST", "PATCH"].includes(request.method())) consentWrites++;
+  };
+  page.on("request", countConsentWrites);
+  confirmation.automatic = false;
+  for (const action of ["cancel", "escape"]) {
+    await page.select("#child-resource", "roles");
+    await page.waitForSelector("#ui-confirm-dialog[open]");
+    assert.deepEqual(await childDraftState(), draftBeforeConsent);
+    assert.equal(consentWrites, 0);
+    if (action === "cancel") await page.click("#ui-confirm-cancel");
+    else await page.keyboard.press("Escape");
+    await waitForConfirmation(page);
+    assert.deepEqual(await childDraftState(), draftBeforeConsent);
+    assert.equal(consentWrites, 0);
+  }
+  await page.select("#child-resource", "roles");
+  await page.waitForSelector("#ui-confirm-dialog[open]");
+  await page.click("#ui-confirm-accept");
+  await waitForConfirmation(page);
+  const acceptedDraft = await childDraftState();
+  assert.equal(acceptedDraft.resource, "roles");
+  assert.equal(acceptedDraft.key, "");
+  assert.equal(acceptedDraft.name, "");
+  assert.equal(acceptedDraft.mode, "keep");
+  assert.equal(acceptedDraft.answer, draftBeforeConsent.answer);
+  assert.equal(acceptedDraft.answerMode, draftBeforeConsent.answerMode);
+  assert.equal(consentWrites, 0);
+  page.off("request", countConsentWrites);
+  confirmation.automatic = true;
+  await selectChildResource(page, "persons");
+  await page.click("#child-list");
+  await page.waitForSelector('[data-child-key="PAGE_00"]');
+  await page.click("#child-next");
+  await page.waitForSelector('[data-child-key="P_BROWSER"]');
+  await clickWithConfirmation(page, '[data-child-key="P_BROWSER"]');
+  await page.waitForFunction(
+    () => document.getElementById("child-code").value === "P_BROWSER",
+  );
   await layout(page, "child-editor");
   await page.click("#child-name-mode");
   assert.equal(
@@ -858,7 +933,7 @@ try {
   // 네이티브 선택 팝업을 닫은 뒤 별개 행동을 실행한다. 팝업 바깥 첫 클릭은 닫기에 소비될 수 있다.
   await page.keyboard.press("Escape");
 
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await page.waitForFunction(
     () => document.getElementById("child-code").value === "",
   );
@@ -884,10 +959,10 @@ try {
   assert.equal(await page.$eval("#child-save", (e) => e.disabled), true);
   await lostChild.detach();
   page.off("request", countChildPosts);
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "child");
   assert.match(await text(page, "#notice"), /변화가 없습니다/);
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
   await page.waitForFunction(
     () => document.getElementById("child-active").textContent === "인물 복원",
@@ -895,7 +970,7 @@ try {
   assert.equal(await page.$eval("#child-save", (e) => e.disabled), true);
   await page.select("#child-filter", "false");
   await page.waitForSelector('[data-child-key="UI_PERSON"]');
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await page.waitForFunction(
     () =>
       document.getElementById("child-active").textContent === "인물 논리 삭제",
@@ -925,7 +1000,7 @@ try {
   await failedChildRead.detach();
   await page.click("#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "child");
   assert.equal(
     (await childApi(page, `${childPath}/UI_PERSON`)).body.item.name,
@@ -979,7 +1054,7 @@ try {
   await splitRead.detach();
   await page.click("#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(
     await page.$eval("#child-name", (e) => e.value),
     "부모 조회 직후 변경",
@@ -1003,7 +1078,7 @@ try {
     page,
     `${fixture.url}${childPath}/PAGE_00`,
   );
-  await page.click('[data-child-key="PAGE_00"]');
+  await clickWithConfirmation(page, '[data-child-key="PAGE_00"]');
   await delayedA.ready;
   await delayedList.release();
   assert.equal(await page.$eval("#comparison", (e) => e.hidden), true);
@@ -1014,14 +1089,14 @@ try {
   assert.equal(await page.$eval("#accept-latest", (e) => e.disabled), true);
   await delayedA.release();
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_01"]');
   const selectedResponse = await holdResponse(
     page,
     `${fixture.url}${childPath}/PAGE_01`,
   );
-  await page.click('[data-child-key="PAGE_01"]');
+  await clickWithConfirmation(page, '[data-child-key="PAGE_01"]');
   await selectedResponse.ready;
   await openSection(page, "answer");
   await page.focus("#answer-methodAnswer");
@@ -1085,7 +1160,7 @@ try {
   assert.equal(await page.$eval("#child-new", (e) => e.disabled), true);
   await pendingWrite.release();
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "basic");
   assert.equal(
     (await childApi(page, apiPath)).body.sections.basic.intro,
@@ -1201,6 +1276,8 @@ try {
     api: childApi,
     notice,
     layout,
+    confirmation,
+    holdResponse,
   });
 
   await page.goto(`${fixture.url}/admin/stories`);
@@ -1231,7 +1308,7 @@ try {
   await page.waitForSelector('[data-child-key="PAGE_00"]');
   await page.click("#child-next");
   await page.waitForSelector('[data-child-key="UI_PERSON"]');
-  await page.click('[data-child-key="UI_PERSON"]');
+  await clickWithConfirmation(page, '[data-child-key="UI_PERSON"]');
   await page.waitForFunction(
     () => document.getElementById("child-name").value === "부모 조회 직후 변경",
   );
@@ -1273,6 +1350,7 @@ try {
     0,
   );
   assert.deepEqual(runtimeErrors, []);
+  assert.deepEqual(confirmation.errors, []);
   console.log(
     "PASS committed PATCH/POST response loss, no auto retry, memory-only drafts",
   );

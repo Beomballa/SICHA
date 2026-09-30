@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clickWithConfirmation, selectChildResource } from "./confirmation.mjs";
 
 /**
  * 폐기형 HTTPS 세션에서 역할·조합의 실제 저장과 복구를 시험한다.
@@ -21,10 +22,10 @@ export async function exerciseRolePairs({
   /** 자원과 활성 필터를 명시하고 키 목록에서 선택한 단건 조회의 완료를 기다린다. */
   async function open(resource, key, active = true) {
     await openSection(page, "child");
-    await page.select("#child-resource", resource);
+    await selectChildResource(page, resource);
     await page.select("#child-filter", String(active));
     await page.waitForSelector(`[data-child-key="${key}"]`);
-    await page.click(`[data-child-key="${key}"]`);
+    await clickWithConfirmation(page, `[data-child-key="${key}"]`);
     await page.waitForFunction(
       () => !document.getElementById("child-resource").disabled,
     );
@@ -33,7 +34,7 @@ export async function exerciseRolePairs({
   /** 서버 조회까지 끝난 논리 삭제·복원을 확인하며 자동 재전송을 하지 않는다. */
   async function changeActive() {
     await openSection(page, "child");
-    await page.click("#child-active");
+    await clickWithConfirmation(page, "#child-active");
     await notice(page, "최신 원고를 조회했습니다");
     await page.waitForFunction(
       () => !document.getElementById("child-resource").disabled,
@@ -47,16 +48,16 @@ export async function exerciseRolePairs({
     "역할 조합 작업 동안 보존할 다른 영역 입력",
   );
   await openSection(page, "child");
-  await page.select("#child-resource", "roles");
+  await selectChildResource(page, "roles");
   await page.waitForFunction(() =>
     document
       .getElementById("child-list-status")
       .textContent.includes("이 상태의 역할이 없습니다"),
   );
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "A");
   await edit(page, "child", "name", " ");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "공백일 수 없습니다");
   assert.equal(
     await page.$eval("#child-name", (e) => document.activeElement === e),
@@ -84,7 +85,7 @@ export async function exerciseRolePairs({
   );
   await layout(page, "child-role-editor");
 
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "B");
   await edit(page, "child", "name", "역할 B");
   await save(page, "child");
@@ -120,15 +121,15 @@ export async function exerciseRolePairs({
     };
   }, heldUrl);
   const oldList = await holdResponse(page, heldUrl);
-  await page.click("#child-list");
+  await clickWithConfirmation(page, "#child-list");
   await oldList.ready;
-  await page.select("#child-resource", "pairs");
+  await selectChildResource(page, "pairs");
   await page.waitForFunction(() =>
     document
       .getElementById("child-list-status")
       .textContent.includes("이 상태의 역할 조합이 없습니다"),
   );
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "roleA", "B");
   await edit(page, "child", "roleB", "A");
   assert.match(
@@ -178,7 +179,7 @@ export async function exerciseRolePairs({
   };
   page.on("request", count);
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/pairs`);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(creates, 1);
   assert.equal(await page.$eval("#child-resource", (e) => e.disabled), true);
@@ -189,7 +190,7 @@ export async function exerciseRolePairs({
   );
   await lost.detach();
   page.off("request", count);
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(await page.$eval("#child-save", (e) => e.hidden), true);
   assert.equal(
     await page.$eval("#child-roleA-record", (e) => e.textContent),
@@ -202,7 +203,7 @@ export async function exerciseRolePairs({
   await layout(page, "child-pair-record");
 
   await open("roles", "A");
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await notice(page, "참조 중인 자료");
   await page.waitForFunction(
     () => !document.getElementById("accept-latest").disabled,
@@ -211,7 +212,7 @@ export async function exerciseRolePairs({
     (await api(page, `${apiPath}/roles/A`)).body.item.activeYn,
     true,
   );
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await open("pairs", "A~B");
   await changeActive();
   assert.equal(
@@ -222,7 +223,7 @@ export async function exerciseRolePairs({
   await changeActive();
   await open("pairs", "A~B", false);
   const before = (await api(page, apiPath)).body.editRev;
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await page.waitForFunction(
     () =>
       document.getElementById("notice").classList.contains("error") &&
@@ -255,7 +256,7 @@ export async function exerciseRolePairs({
     ).status,
     200,
   );
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(
     await page.$eval("#child-brief", (e) => e.value),
@@ -266,7 +267,7 @@ export async function exerciseRolePairs({
     /별도 요청의 최신 역할/,
   );
   await layout(page, "child-role-conflict");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "child");
   assert.equal(
     (await api(page, `${apiPath}/roles/A`)).body.item.brief,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clickWithConfirmation, selectChildResource } from "./confirmation.mjs";
 
 /** 폐기형 HTTPS 사건에서 단서·배정의 원고, 관계, 충돌과 화면 상태를 검증한다. */
 export async function exerciseClueAssignments({
@@ -17,17 +18,17 @@ export async function exerciseClueAssignments({
   /** 자료 종류의 목록 조회 후 키를 선택해 단건 조회가 끝날 때까지 기다린다. */
   async function open(resource, key, active = true) {
     await openSection(page, "child");
-    await page.select("#child-resource", resource);
+    await selectChildResource(page, resource);
     await page.select("#child-filter", String(active));
     await page.waitForSelector(`[data-child-key="${key}"]`);
-    await page.click(`[data-child-key="${key}"]`);
+    await clickWithConfirmation(page, `[data-child-key="${key}"]`);
     await page.waitForFunction(
       () => !document.getElementById("child-resource").disabled,
     );
   }
   async function active() {
     await openSection(page, "child");
-    await page.click("#child-active");
+    await clickWithConfirmation(page, "#child-active");
     await notice(page, "최신 원고를 조회했습니다");
   }
   async function revision() {
@@ -41,8 +42,8 @@ export async function exerciseClueAssignments({
     "단서 변경 중 보존할 다른 영역 입력",
   );
   await openSection(page, "child");
-  await page.select("#child-resource", "clues");
-  await page.click("#child-new");
+  await selectChildResource(page, "clues");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "A");
   await edit(page, "child", "title", "합성 단서 A");
   await edit(
@@ -55,7 +56,7 @@ export async function exerciseClueAssignments({
     input.value = "가".repeat(12001);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "12000자를 넘을 수 없습니다");
   await edit(
     page,
@@ -68,7 +69,7 @@ export async function exerciseClueAssignments({
     input.value = "가".repeat(401);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "400자를 넘을 수 없습니다");
   await edit(page, "child", "sourceText", "제작자 출처만 표시");
   await save(page, "child");
@@ -97,14 +98,14 @@ export async function exerciseClueAssignments({
   );
   await layout(page, "child-clue-record");
 
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "b");
   await edit(page, "child", "title", "합성 단서 B");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "코드는 영문 대문자");
   await edit(page, "child", "code", "B");
   await page.select("#child-scope-mode", "value");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력을 확인하세요");
   assert.equal((await api(page, `${apiPath}/clues/B`)).status, 404);
   await page.select("#child-scope", "ROLE");
@@ -119,8 +120,8 @@ export async function exerciseClueAssignments({
     ).status,
     422,
   );
-  await page.select("#child-resource", "clue-roles");
-  await page.click("#child-new");
+  await selectChildResource(page, "clue-roles");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "clueCode", "B");
   await edit(page, "child", "roleCode", "B");
   assert.match(
@@ -137,7 +138,7 @@ export async function exerciseClueAssignments({
   };
   page.on("request", count);
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/clue-roles`);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(posts, 1);
   assert.match(await page.$eval("#latest-values", (e) => e.textContent), /B~B/);
@@ -148,7 +149,7 @@ export async function exerciseClueAssignments({
   );
   await lost.detach();
   page.off("request", count);
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(await page.$eval("#child-save", (e) => e.hidden), true);
   assert.equal(
     (await api(page, `${apiPath}/clue-roles/B~B`)).body.item.roleCode,
@@ -224,19 +225,19 @@ export async function exerciseClueAssignments({
   assert.equal((await api(page, `${apiPath}/clues/A`)).body.item.scope, "ROLE");
 
   // 직접 조회·비교를 수락하기 전에는 외부 수정번호를 로컬 폼에 섞지 않는다.
-  await page.click("#child-list");
+  await clickWithConfirmation(page, "#child-list");
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await open("clues", "A");
   await page.select("#child-scope-mode", "value");
   await page.select("#child-scope", "COMMON");
   assert.equal(await page.$eval("#child-scope", (e) => e.value), "COMMON");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(await page.$eval("#child-scope", (e) => e.value), "COMMON");
   assert.equal((await api(page, `${apiPath}/clues/A`)).body.item.scope, "ROLE");
   await layout(page, "child-clue-conflict");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(await page.$eval("#child-scope", (e) => e.value), "COMMON");
   await open("clue-roles", "A~A");
   await active();
@@ -249,7 +250,7 @@ export async function exerciseClueAssignments({
     "COMMON",
   );
   await open("clue-roles", "A~A", false);
-  await page.click("#child-active");
+  await clickWithConfirmation(page, "#child-active");
   await page.waitForFunction(() =>
     document.getElementById("notice").classList.contains("error"),
   );
@@ -312,13 +313,13 @@ export async function exerciseClueAssignments({
   assert.equal(second.body.nextAfterKey, null);
 
   // 다른 자원의 늦은 목록이 새 자료의 입력이나 커서를 덮지 못한다.
-  await page.click("#child-list");
+  await clickWithConfirmation(page, "#child-list");
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
-  await page.select("#child-resource", "clues");
+  await clickWithConfirmation(page, "#accept-latest");
+  await selectChildResource(page, "clues");
   await page.waitForSelector('[data-child-key="QA_17"]');
   assert.equal(await page.$eval("#child-next", (e) => e.hidden), false);
-  await page.click("#child-next");
+  await clickWithConfirmation(page, "#child-next");
   await page.waitForSelector('[data-child-key="QA_18"]');
   const heldUrl = `${baseUrl}${apiPath}/clues?size=20&activeYn=true`;
   await page.evaluate((url) => {
@@ -341,10 +342,10 @@ export async function exerciseClueAssignments({
     };
   }, heldUrl);
   const held = await holdResponse(page, heldUrl);
-  await page.click("#child-list");
+  await clickWithConfirmation(page, "#child-list");
   await held.ready;
-  await page.select("#child-resource", "clue-roles");
-  await page.click("#child-new");
+  await selectChildResource(page, "clue-roles");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "clueCode", "A");
   await edit(page, "child", "roleCode", "B");
   const before = await page.evaluate(() => ({

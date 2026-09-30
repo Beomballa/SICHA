@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import {
+  installConfirmationDriver,
+  clickWithConfirmation,
+  selectChildResource,
+} from "./confirmation.mjs";
 
 /**
  * 공개 가능한 합성 원고를 폐기형 HTTPS 시험 사건에 입력해 보고서 레이아웃을 검증한다.
@@ -56,9 +61,10 @@ export async function captureReportPreview({
   const page = await browser.newPage();
   const peer = await browser.newPage();
   const errors = [];
+  const confirmations = [];
   for (const tab of [page, peer]) {
     tab.setDefaultTimeout(15000);
-    tab.on("dialog", (dialog) => dialog.accept());
+    confirmations.push(await installConfirmationDriver(tab));
     tab.on("pageerror", (error) => errors.push(error.message));
   }
 
@@ -109,7 +115,7 @@ export async function captureReportPreview({
     );
     for (const child of persons) {
       await openSection(page, "child");
-      await page.click("#child-new");
+      await clickWithConfirmation(page, "#child-new");
       await page.waitForFunction(
         () => document.getElementById("child-code")?.value === "",
       );
@@ -135,10 +141,10 @@ export async function captureReportPreview({
     await edit(page, "reveal", "revealText", answer.evidence);
     await save(page, "reveal");
     await openSection(page, "child");
-    await page.select("#child-resource", "roles");
+    await selectChildResource(page, "roles");
     for (const { code, name } of roles) {
       await openSection(page, "child");
-      await page.click("#child-new");
+      await clickWithConfirmation(page, "#child-new");
       for (const [field, value] of Object.entries({
         code,
         name,
@@ -150,18 +156,18 @@ export async function captureReportPreview({
     await openSection(page, "child");
     await layout(page, "child-role-report");
     await openSection(page, "child");
-    await page.select("#child-resource", "pairs");
-    await page.click("#child-new");
+    await selectChildResource(page, "pairs");
+    await clickWithConfirmation(page, "#child-new");
     await edit(page, "child", "roleA", roles[1].code);
     await edit(page, "child", "roleB", roles[0].code);
     await save(page, "child");
     await openSection(page, "child");
     await layout(page, "child-pair-report");
     await openSection(page, "child");
-    await page.select("#child-resource", "clues");
+    await selectChildResource(page, "clues");
     for (const { code, roleCode, title: clueTitle, body } of clues) {
       await openSection(page, "child");
-      await page.click("#child-new");
+      await clickWithConfirmation(page, "#child-new");
       for (const [field, value] of Object.entries({
         code,
         title: clueTitle,
@@ -176,8 +182,8 @@ export async function captureReportPreview({
       await openSection(page, "child");
       await layout(page, `child-clue-${code}-report`);
       await openSection(page, "child");
-      await page.select("#child-resource", "clue-roles");
-      await page.click("#child-new");
+      await selectChildResource(page, "clue-roles");
+      await clickWithConfirmation(page, "#child-new");
       await edit(page, "child", "clueCode", code);
       await edit(page, "child", "roleCode", roleCode);
       await save(page, "child");
@@ -188,10 +194,10 @@ export async function captureReportPreview({
       await openSection(page, "child");
       await layout(page, `child-clue-${code}-assignment-report`);
       await openSection(page, "child");
-      await page.select("#child-resource", "clues");
+      await selectChildResource(page, "clues");
     }
     await openSection(page, "child");
-    await page.select("#child-resource", "persons");
+    await selectChildResource(page, "persons");
     await page.click("#child-list");
     await page.waitForSelector('[data-child-key="P01"]');
     assert.equal(await page.$eval("#basic-intro", (e) => e.hidden), true);
@@ -207,7 +213,7 @@ export async function captureReportPreview({
     await layout(page, "report-editor");
 
     await openSection(page, "child");
-    await page.click('[data-child-key="P01"]');
+    await clickWithConfirmation(page, '[data-child-key="P01"]');
     await page.waitForFunction(
       (name) =>
         document.getElementById("child-name-record")?.textContent === name,
@@ -309,5 +315,7 @@ export async function captureReportPreview({
       await page.close();
       await peer.close();
     }
+    for (const confirmation of confirmations)
+      assert.deepEqual(confirmation.errors, []);
   }
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clickWithConfirmation, selectChildResource } from "./confirmation.mjs";
 
 /**
  * 폐기형 HTTPS 편집기에서 소항목·단서 연결·규칙 원문과 수동 복구를 확인한다.
@@ -40,9 +41,9 @@ export async function exerciseRubrics({
    */
   async function open(resource, key) {
     await openSection(page, "child");
-    await page.select("#child-resource", resource);
+    await selectChildResource(page, resource);
     await page.waitForSelector(`[data-child-key="${key}"]`);
-    await page.click(`[data-child-key="${key}"]`);
+    await clickWithConfirmation(page, `[data-child-key="${key}"]`);
     await page.waitForFunction(
       () => !document.getElementById("child-resource").disabled,
     );
@@ -66,12 +67,12 @@ export async function exerciseRubrics({
   };
 
   await openSection(page, "child");
-  await page.select("#child-resource", "rubrics");
-  await page.click("#child-new");
+  await selectChildResource(page, "rubrics");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "UI_RUBRIC");
   await page.select("#child-category", "METHOD");
   await page.select("#child-category", "");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력을 확인하세요");
   assert.equal((await api(page, `${apiPath}/rubrics/UI_RUBRIC`)).status, 404);
   await page.select("#child-category", "METHOD");
@@ -105,16 +106,16 @@ export async function exerciseRubrics({
   };
   page.on("request", countDetail);
   await openSection(page, "child");
-  await page.select("#child-resource", "facts");
+  await selectChildResource(page, "facts");
   await openSection(page, "child");
-  await page.select("#child-resource", "rubrics");
+  await selectChildResource(page, "rubrics");
   await page.waitForSelector('[data-child-key="UI_RUBRIC"]');
   assert.equal(detailReads, 0);
   assert.deepEqual(
     Object.keys((await api(page, `${apiPath}/rubrics`)).body.items[0]).sort(),
     ["activeYn", "code", "updatedAt"],
   );
-  await page.click('[data-child-key="UI_RUBRIC"]');
+  await clickWithConfirmation(page, '[data-child-key="UI_RUBRIC"]');
   await page.waitForFunction(
     () => !document.getElementById("child-resource").disabled,
   );
@@ -125,13 +126,13 @@ export async function exerciseRubrics({
   await page.$eval("#child-maxScore", (e) => {
     e.value = "-1";
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력을 확인하세요");
   await edit(page, "child", "maxScore", 0);
   await save(page, "child");
   assert.equal((await api(page, root)).body.item.maxScore, 0);
   await edit(page, "child", "passScore", 1);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "통과 점수는 필수 여부");
   await page.select("#child-requiredYn-mode", "value");
   await page.select("#child-requiredYn", "true");
@@ -142,7 +143,7 @@ export async function exerciseRubrics({
   assert.equal(item.requiredYn, true);
   await page.select("#child-requiredYn-mode", "value");
   await page.select("#child-requiredYn", "false");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "통과 점수는 필수 여부");
   await page.select("#child-requiredYn", "true");
   await page.select("#child-requiredYn-mode", "keep");
@@ -151,7 +152,7 @@ export async function exerciseRubrics({
     e.value = "가".repeat(8001);
     e.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "8000자를 넘을 수 없습니다");
   await page.select("#child-rejectText-mode", "clear");
   await edit(
@@ -187,8 +188,8 @@ export async function exerciseRubrics({
   );
   await latest();
   await openSection(page, "child");
-  await page.select("#child-resource", "rubric-clues");
-  await page.click("#child-new");
+  await selectChildResource(page, "rubric-clues");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "rubricCode", "UI_RUBRIC");
   await edit(page, "child", "clueCode", "RUBRIC_CLUE");
   await edit(page, "child", "linkText", "<script>비실행</script> 근거 연결");
@@ -209,12 +210,12 @@ export async function exerciseRubrics({
   };
   page.on("request", countLink);
   await openSection(page, "child");
-  await page.select("#child-resource", "rubrics");
+  await selectChildResource(page, "rubrics");
   await openSection(page, "child");
-  await page.select("#child-resource", "rubric-clues");
+  await selectChildResource(page, "rubric-clues");
   await page.waitForSelector('[data-child-key="UI_RUBRIC~RUBRIC_CLUE"]');
   assert.equal(linkReads, 0);
-  await page.click('[data-child-key="UI_RUBRIC~RUBRIC_CLUE"]');
+  await clickWithConfirmation(page, '[data-child-key="UI_RUBRIC~RUBRIC_CLUE"]');
   await page.waitForFunction(
     () => !document.getElementById("child-resource").disabled,
   );
@@ -289,19 +290,19 @@ export async function exerciseRubrics({
     contradictions: [],
   };
   await json("{");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "올바른 JSON 객체");
   await json("[]");
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "JSON 객체");
   await json(JSON.stringify({ oversized: "가".repeat(44000) }));
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "128 KiB");
   await json('{"formatNo":1,"unknown":true}');
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력 형식이나 크기");
   await json('{"formatNo":1,"formatNo":1}');
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력 형식이나 크기");
   assert.equal((await api(page, root)).body.item.ruleData, null);
   await json(JSON.stringify(rule, null, 2));
@@ -354,7 +355,7 @@ export async function exerciseRubrics({
     (await change("rubrics/UI_RUBRIC", { partialText: "원격 변경" })).status,
     200,
   );
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(
     await page.$eval("#child-acceptedText", (e) => e.value),
@@ -366,7 +367,7 @@ export async function exerciseRubrics({
   );
   await layout(page, "rubric-conflict");
   const failedRead = await loseResponse(page, `${baseUrl}${root}`);
-  await page.click("#refresh-latest");
+  await clickWithConfirmation(page, "#refresh-latest");
   await notice(page, "불확실");
   assert.equal(await page.$eval("#accept-latest", (e) => e.disabled), true);
   assert.equal(
@@ -374,9 +375,9 @@ export async function exerciseRubrics({
     "충돌에도 보존할 정답 안내",
   );
   await failedRead.detach();
-  await page.click("#refresh-latest");
+  await clickWithConfirmation(page, "#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   await save(page, "child");
   assert.equal(
     (await api(page, root)).body.item.acceptedText,
@@ -384,7 +385,7 @@ export async function exerciseRubrics({
   );
 
   await openSection(page, "child");
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "RUBRIC_CULPRIT");
   await page.select("#child-category", "CULPRIT");
   assert.equal(
@@ -412,7 +413,7 @@ export async function exerciseRubrics({
     await page.$eval("#child-ruleData-mode", (e) => e.disabled),
     false,
   );
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "규칙 교체 또는 비우기");
   await page.select("#child-ruleData-mode", "clear");
   await save(page, "child");
@@ -426,7 +427,7 @@ export async function exerciseRubrics({
   );
 
   await openSection(page, "child");
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "RUBRIC_LOST");
   await page.select("#child-category", "EVIDENCE");
   let posts = 0;
@@ -439,11 +440,11 @@ export async function exerciseRubrics({
   };
   page.on("request", count);
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/rubrics`);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(posts, 1);
   await lost.detach();
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(posts, 1);
   page.off("request", count);
   assert.equal(

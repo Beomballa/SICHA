@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clickWithConfirmation, selectChildResource } from "./confirmation.mjs";
 
 /**
  * 폐기형 HTTPS에서 구조화 예시의 보호 조회·수정·복구를 확인한다.
@@ -19,8 +20,8 @@ export async function exerciseGradeSamples({
   const root = `${apiPath}/grade-samples/UI_SAMPLE`;
   const rev = async () => (await api(page, apiPath)).body.editRev;
   await openSection(page, "child");
-  await page.select("#child-resource", "grade-samples");
-  await page.click("#child-new");
+  await selectChildResource(page, "grade-samples");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "UI_SAMPLE");
   await save(page, "child");
   assert.deepEqual(
@@ -34,7 +35,7 @@ export async function exerciseGradeSamples({
   await layout(page, "grade-sample-draft");
 
   await edit(page, "child", "inputData", '{"formatNo":1,"report":{');
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "올바른 JSON 객체");
   await edit(
     page,
@@ -75,12 +76,12 @@ export async function exerciseGradeSamples({
   };
   page.on("request", countDetail);
   await openSection(page, "child");
-  await page.select("#child-resource", "facts");
+  await selectChildResource(page, "facts");
   await openSection(page, "child");
-  await page.select("#child-resource", "grade-samples");
+  await selectChildResource(page, "grade-samples");
   await page.waitForSelector('[data-child-key="UI_SAMPLE"]');
   assert.equal(detailReads, 0);
-  await page.click('[data-child-key="UI_SAMPLE"]');
+  await clickWithConfirmation(page, '[data-child-key="UI_SAMPLE"]');
   await page.waitForFunction(
     () => !document.getElementById("child-resource").disabled,
   );
@@ -91,7 +92,7 @@ export async function exerciseGradeSamples({
   await page.$eval("#child-expectedScore", (node) => {
     node.value = "101";
   });
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "입력을 확인하세요");
   await page.select("#child-expectedScore-mode", "keep");
   const body =
@@ -125,14 +126,14 @@ export async function exerciseGradeSamples({
   };
   page.on("request", count);
   await openSection(page, "child");
-  await page.click("#child-new");
+  await clickWithConfirmation(page, "#child-new");
   await edit(page, "child", "code", "SAMPLE_LOST");
   const lost = await loseResponse(page, `${baseUrl}${apiPath}/grade-samples`);
-  await page.click("#child-save");
+  await clickWithConfirmation(page, "#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(posts, 1);
   await lost.detach();
-  await page.click("#accept-latest");
+  await clickWithConfirmation(page, "#accept-latest");
   assert.equal(posts, 1);
   page.off("request", count);
   assert.equal(
