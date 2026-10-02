@@ -62,7 +62,7 @@ class SecurityIT extends DatabaseContextTest {
     @Test
     @DisplayName(
             "AUTH-UI-01: public HTML and assets work while protected HTML redirects without"
-                + " credentials")
+                    + " credentials")
     void publicPagesAndProtectedRedirect() throws Exception {
         mvc.perform(get("/admin/login").secure(true))
                 .andExpect(status().isOk())
@@ -79,7 +79,7 @@ class SecurityIT extends DatabaseContextTest {
     @Test
     @DisplayName(
             "UI-SYSTEM-01: only shared UI assets are public; neighboring administrator resources"
-                + " stay protected")
+                    + " stay protected")
     void sharedAssetsKeepAdministratorBoundary() throws Exception {
         mvc.perform(get("/admin/ui.css").secure(true))
                 .andExpect(status().isOk())
@@ -122,13 +122,13 @@ class SecurityIT extends DatabaseContextTest {
         assertThat(
                         jdbc.queryForObject(
                                 "select count(*) from access_history where kind='SERVER' and"
-                                    + " route='/admin/api/auth/csrf' and http_status=200",
+                                        + " route='/admin/api/auth/csrf' and http_status=200",
                                 Integer.class))
                 .isGreaterThanOrEqualTo(1);
         assertThat(
                         jdbc.query(
                                 "select route || ':' || coalesce(http_status::text, 'null') from"
-                                    + " access_history where kind='SERVER'",
+                                        + " access_history where kind='SERVER'",
                                 (rs, row) -> rs.getString(1)))
                 .contains("/admin/api/auth/me:401");
     }
@@ -146,5 +146,75 @@ class SecurityIT extends DatabaseContextTest {
                                 .secure(true)
                                 .header("Origin", "https://localhost"))
                 .andExpect(status().isForbidden());
+    }
+
+    /** 보안 필터가 차단한 응답의 서버 요청 UUID를 실제 SERVER 접근 이력과 결속한다. */
+    @Test
+    void deniedSecurityResponseSharesActualAccessHistoryRequestId() throws Exception {
+        for (var request :
+                java.util.List.of(
+                        get("/admin/api/auth/me").secure(true),
+                        post("/admin/api/auth/login")
+                                .secure(true)
+                                .header("Origin", "https://foreign.example"),
+                        post("/admin/api/auth/login")
+                                .secure(true)
+                                .header("Origin", "https://localhost"),
+                        post("/admin/api/auth/login")
+                                .secure(false)
+                                .header("Origin", "http://localhost"))) {
+            var result = mvc.perform(request).andReturn();
+            int status = result.getResponse().getStatus();
+            assertThat(status).isIn(401, 403);
+            var body =
+                    new com.fasterxml.jackson.databind.ObjectMapper()
+                            .readTree(result.getResponse().getContentAsByteArray());
+            java.util.UUID id = java.util.UUID.fromString(body.get("requestId").textValue());
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM access_history WHERE request_id=? AND"
+                                        + " kind='SERVER' AND http_status=? AND route=?",
+                                    Integer.class,
+                                    id,
+                                    status,
+                                    result.getRequest().getRequestURI()))
+                    .isEqualTo(1);
+        }
+    }
+
+    /** 승인된 검수 경로만 고정 틀로 저장하고 실제 사건·버전·사본·query를 이력에 복제하지 않는다. */
+    @Test
+    void reviewRoutesAreNormalizedWithoutSourceIdentifiersOrQuery() throws Exception {
+        String base = "/admin/api/stories/SYNTHETIC_SECRET_PATH/versions/4242/";
+        String template = "/admin/api/stories/{storyCode}/versions/{versionNo}/";
+        for (var entry :
+                java.util.Map.of(
+                                "review-precheck", "review-precheck",
+                                "review-requests", "review-requests",
+                                "preview", "preview",
+                                "grade-samples/check", "grade-samples/check",
+                                "review-snapshots", "review-snapshots",
+                                "review-snapshots/987654", "review-snapshots/{snapshotId}")
+                        .entrySet()) {
+            var result =
+                    mvc.perform(
+                                    get(base + entry.getKey())
+                                            .secure(true)
+                                            .param("ignored", "SYNTHETIC_QUERY_SECRET"))
+                            .andExpect(status().isUnauthorized())
+                            .andReturn();
+            Object id =
+                    result.getRequest()
+                            .getAttribute(
+                                    com.reasoning.admin.auth.audit.AccessHistoryFilter
+                                            .REQUEST_ID_ATTRIBUTE);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT route FROM access_history WHERE request_id=? AND"
+                                        + " kind='SERVER'",
+                                    String.class,
+                                    id))
+                    .isEqualTo(template + entry.getValue());
+        }
     }
 }

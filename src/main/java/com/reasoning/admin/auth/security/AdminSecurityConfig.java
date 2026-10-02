@@ -180,6 +180,7 @@ public class AdminSecurityConfig {
                                                     } else {
                                                         error(
                                                                 mapper,
+                                                                request,
                                                                 response,
                                                                 401,
                                                                 "AUTH_REQUIRED");
@@ -189,6 +190,7 @@ public class AdminSecurityConfig {
                                                 (request, response, failure) ->
                                                         error(
                                                                 mapper,
+                                                                request,
                                                                 response,
                                                                 403,
                                                                 failure instanceof CsrfException
@@ -201,9 +203,26 @@ public class AdminSecurityConfig {
         return http.build();
     }
 
+    /**
+     * 보안 필터의 거절 응답을 접근 이력이 생성한 같은 서버 UUID로 연결한다.
+     *
+     * @param mapper 고정 오류 응답 직렬화기
+     * @param request 접근 이력 필터를 통과하여 UUID 속성이 설정된 요청
+     * @param response 실제 거절 상태와 no-store를 기록할 응답
+     * @param status 실제 HTTP 오류 코드
+     * @param code 원문 없는 서버 고정 오류 식별자
+     * @throws IOException 오류 응답을 전송할 수 없는 경우
+     * @throws IllegalStateException 서버 요청 UUID가 없어 이력과 연결할 수 없는 경우
+     */
     private static void error(
-            ObjectMapper mapper, HttpServletResponse response, int status, String code)
+            ObjectMapper mapper,
+            HttpServletRequest request,
+            HttpServletResponse response,
+            int status,
+            String code)
             throws IOException {
+        Object requestId = request.getAttribute(AccessHistoryFilter.REQUEST_ID_ATTRIBUTE);
+        if (!(requestId instanceof UUID)) throw new IllegalStateException("REQUEST_ID_UNAVAILABLE");
         response.setStatus(status);
         response.setContentType("application/json;charset=UTF-8");
         response.setHeader("Cache-Control", "no-store");
@@ -219,7 +238,7 @@ public class AdminSecurityConfig {
                             default -> "접근할 수 없습니다.";
                         },
                         "requestId",
-                        UUID.randomUUID().toString()));
+                        requestId.toString()));
     }
 
     private static final class ActiveSessionFilter extends OncePerRequestFilter {
@@ -282,7 +301,7 @@ public class AdminSecurityConfig {
                 source = request.getHeader("Referer");
             }
             if (!request.isSecure() || !sameOrigin(source, request)) {
-                error(mapper, response, 403, "CSRF_INVALID");
+                error(mapper, request, response, 403, "CSRF_INVALID");
                 return;
             }
             chain.doFilter(request, response);
