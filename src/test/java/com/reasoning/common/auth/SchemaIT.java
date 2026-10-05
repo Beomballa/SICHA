@@ -3,6 +3,8 @@ package com.reasoning.common.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.reasoning.common.migration.EmbeddedSqlResourceProvider;
+
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,10 +23,9 @@ import java.util.Set;
 import java.util.UUID;
 
 class SchemaIT {
+    /** 승인된 최신 물리 구조의 전체 테이블·컬럼·인덱스·FK와 기존 인증/사건 제약을 대조한다. */
     @Test
-    @DisplayName(
-            "AUTH-V01/ADMIN-V11/STORY-AUDIT: Flyway V1-V11 match approved schema on disposable"
-                + " PostgreSQL")
+    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V17 구조와 회귀 저장 제약 검증")
     void appliesH0Schema() throws Exception {
         DockerImageName image =
                 DockerImageName.parse(
@@ -34,13 +35,14 @@ class SchemaIT {
             postgres.start();
             Flyway flyway =
                     Flyway.configure()
+                            .resourceProvider(new EmbeddedSqlResourceProvider())
                             .dataSource(
                                     postgres.getJdbcUrl(),
                                     postgres.getUsername(),
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(11);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(17);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -69,6 +71,7 @@ class SchemaIT {
                                 "story_version",
                                 "story_person",
                                 "review_snapshot",
+                                "review_record",
                                 "story_audit",
                                 "story_role",
                                 "story_pair",
@@ -81,7 +84,16 @@ class SchemaIT {
                                 "rubric_clue",
                                 "grade_sample",
                                 "story_action",
-                                "story_transfer");
+                                "story_transfer",
+                                "grade_term",
+                                "grade_runtime",
+                                "grade_batch",
+                                "grade_job",
+                                "grade_attempt",
+                                "grade_event",
+                                "test_action",
+                                "test_audit",
+                                "execution_issue");
                 Map<String, Set<String>> expectedColumns =
                         new HashMap<>(
                                 Map.of(
@@ -277,6 +289,89 @@ class SchemaIT {
                                 "created_at",
                                 "updated_at"));
                 expectedColumns.put(
+                        "grade_term",
+                        Set.of(
+                                "dictionary_code",
+                                "concept_code",
+                                "canonical_text",
+                                "alias_text",
+                                "active_yn"));
+                expectedColumns.put(
+                        "grade_runtime",
+                        Set.of(
+                                "id",
+                                "code",
+                                "config_hash",
+                                "config_data",
+                                "state",
+                                "epoch",
+                                "created_at",
+                                "updated_at"));
+                expectedColumns.put(
+                        "grade_batch",
+                        Set.of(
+                                "id",
+                                "batch_key",
+                                "snapshot_id",
+                                "runtime_id",
+                                "purpose",
+                                "dataset_hash",
+                                "rubric_hash",
+                                "payload_hash",
+                                "config_hash",
+                                "runtime_epoch",
+                                "state",
+                                "repeat_count",
+                                "expected_count",
+                                "passed_yn",
+                                "valid_until",
+                                "created_by",
+                                "created_at",
+                                "ended_at"));
+                expectedColumns.put(
+                        "grade_job",
+                        Set.of(
+                                "id",
+                                "job_key",
+                                "snapshot_id",
+                                "runtime_id",
+                                "batch_id",
+                                "sample_code",
+                                "repeat_no",
+                                "state",
+                                "accepted_at",
+                                "deadline_at",
+                                "call_count",
+                                "lease_gen",
+                                "lease_until",
+                                "worker_key",
+                                "next_run_at",
+                                "input_hash",
+                                "config_hash",
+                                "rubric_hash",
+                                "result_cipher",
+                                "result_data",
+                                "result_hash",
+                                "error_code",
+                                "created_at",
+                                "updated_at"));
+                expectedColumns.put(
+                        "grade_attempt",
+                        Set.of(
+                                "job_id",
+                                "attempt_no",
+                                "lease_gen",
+                                "worker_key",
+                                "started_at",
+                                "ended_at",
+                                "state",
+                                "provider_ref",
+                                "error_code",
+                                "output_hash",
+                                "output_cipher",
+                                "observed_version",
+                                "completion_data"));
+                expectedColumns.put(
                         "story_action",
                         Set.of(
                                 "id",
@@ -308,6 +403,101 @@ class SchemaIT {
                                 "expires_at",
                                 "closed_at",
                                 "closed_by"));
+                expectedColumns.put(
+                        "access_history",
+                        Set.of(
+                                "id",
+                                "kind",
+                                "request_id",
+                                "event_key",
+                                "actor_kind",
+                                "actor_key",
+                                "route",
+                                "method",
+                                "started_at",
+                                "ended_at",
+                                "duration_ms",
+                                "http_status",
+                                "error_code",
+                                "target_kind",
+                                "target_key",
+                                "screen_code",
+                                "from_screen_code",
+                                "client_at",
+                                "created_at",
+                                "worker_key"));
+                expectedColumns.put(
+                        "grade_event",
+                        Set.of(
+                                "id",
+                                "job_id",
+                                "attempt_no",
+                                "actor_kind",
+                                "actor_key",
+                                "event_kind",
+                                "command_key",
+                                "request_id",
+                                "command_hash",
+                                "detail",
+                                "created_at"));
+                expectedColumns.put(
+                        "review_record",
+                        Set.of(
+                                "id",
+                                "snapshot_id",
+                                "kind",
+                                "request_key",
+                                "evidence_data",
+                                "result",
+                                "reviewer_id",
+                                "model_id",
+                                "effort",
+                                "evidence",
+                                "self_review_yn",
+                                "created_at"));
+                expectedColumns.put(
+                        "test_action",
+                        Set.of(
+                                "id",
+                                "request_key",
+                                "admin_id",
+                                "action",
+                                "scope_key",
+                                "request_hash",
+                                "result_data",
+                                "created_at"));
+                expectedColumns.put(
+                        "test_audit",
+                        Set.of(
+                                "id",
+                                "event_key",
+                                "actor_kind",
+                                "actor_ref",
+                                "action",
+                                "scope_kind",
+                                "scope_key",
+                                "request_id",
+                                "phase",
+                                "business_result",
+                                "detail",
+                                "created_at"));
+                expectedColumns.put(
+                        "execution_issue",
+                        Set.of(
+                                "id",
+                                "issue_key",
+                                "snapshot_id",
+                                "runtime_id",
+                                "batch_id",
+                                "kind",
+                                "severity",
+                                "state",
+                                "reason_code",
+                                "resolved_batch_id",
+                                "resolved_by",
+                                "resolved_at",
+                                "resolution_data",
+                                "created_at"));
                 for (var entry : expectedColumns.entrySet()) {
                     Set<String> columns = new HashSet<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", entry.getKey(), "%")) {
@@ -353,6 +543,26 @@ class SchemaIT {
                 approvedIndexes.put("story_rubric", Set.of("pk_story_rubric"));
                 approvedIndexes.put("rubric_clue", Set.of("pk_rubric_clue"));
                 approvedIndexes.put("grade_sample", Set.of("pk_grade_sample"));
+                approvedIndexes.put("grade_term", Set.of("pk_grade_term"));
+                approvedIndexes.put(
+                        "grade_runtime", Set.of("pk_grade_runtime", "uk_grade_runtime_code"));
+                approvedIndexes.put(
+                        "grade_batch",
+                        Set.of(
+                                "pk_grade_batch",
+                                "uk_grade_batch_key",
+                                "uk_grade_batch_snapshot",
+                                "uk_grade_batch_source"));
+                approvedIndexes.put(
+                        "grade_job",
+                        Set.of(
+                                "pk_grade_job",
+                                "uk_grade_job_key",
+                                "uk_grade_job_sample",
+                                "uk_gj_worker"));
+                approvedIndexes.put("grade_attempt", Set.of("pk_grade_attempt", "uk_ga_lease"));
+                approvedIndexes.put(
+                        "grade_event", Set.of("pk_grade_event", "uk_grade_event_command"));
                 approvedIndexes.put(
                         "story_action", Set.of("pk_story_action", "uq_story_action_request"));
                 approvedIndexes.put(
@@ -362,6 +572,17 @@ class SchemaIT {
                                 "uk_stf_key",
                                 "uk_stf_pending",
                                 "ix_stf_expiry"));
+                approvedIndexes.put(
+                        "review_record", Set.of("pk_review_record", "uq_review_record_request"));
+                approvedIndexes.put(
+                        "test_action", Set.of("pk_test_action", "uk_test_action_request"));
+                approvedIndexes.put("test_audit", Set.of("pk_test_audit", "uk_test_audit_event"));
+                approvedIndexes.put(
+                        "execution_issue",
+                        Set.of(
+                                "pk_execution_issue",
+                                "uk_execution_issue_key",
+                                "uk_eissue_batch_kind"));
                 for (var entry : approvedIndexes.entrySet()) {
                     Set<String> indexes = new HashSet<>();
                     try (ResultSet rs =
@@ -420,6 +641,15 @@ class SchemaIT {
                 approvedForeignKeys.put(
                         "grade_sample",
                         Set.of("fk_grade_sample_version", "fk_grade_sample_checker"));
+                approvedForeignKeys.put("grade_term", Set.of());
+                approvedForeignKeys.put("grade_runtime", Set.of());
+                approvedForeignKeys.put(
+                        "grade_batch", Set.of("fk_gb_snapshot", "fk_gb_runtime", "fk_gb_admin"));
+                approvedForeignKeys.put(
+                        "grade_job", Set.of("fk_gj_snapshot", "fk_gj_runtime", "fk_gj_batch"));
+                approvedForeignKeys.put("grade_attempt", Set.of("fk_ga_job"));
+                approvedForeignKeys.put(
+                        "grade_event", Set.of("fk_grade_event_job", "fk_grade_event_attempt"));
                 approvedForeignKeys.put(
                         "story_action", Set.of("fk_story_action_story", "fk_story_action_actor"));
                 approvedForeignKeys.put(
@@ -431,6 +661,19 @@ class SchemaIT {
                                 "fk_stf_actor_id",
                                 "fk_stf_closed_by"));
                 int fkCount = 0;
+                approvedForeignKeys.put(
+                        "review_record",
+                        Set.of("fk_review_record_snapshot", "fk_review_record_reviewer"));
+                approvedForeignKeys.put("test_action", Set.of("fk_ta_admin"));
+                approvedForeignKeys.put("test_audit", Set.of());
+                approvedForeignKeys.put(
+                        "execution_issue",
+                        Set.of(
+                                "fk_eissue_snapshot",
+                                "fk_eissue_runtime",
+                                "fk_eissue_batch",
+                                "fk_eissue_res_batch",
+                                "fk_eissue_admin"));
                 for (var entry : approvedForeignKeys.entrySet()) {
                     Set<String> foreignKeys = new HashSet<>();
                     try (ResultSet rs = metadata.getImportedKeys(null, "public", entry.getKey())) {
@@ -441,7 +684,8 @@ class SchemaIT {
                             .containsExactlyInAnyOrderElementsOf(entry.getValue());
                     fkCount += foreignKeys.size();
                 }
-                assertThat(fkCount).isEqualTo(40);
+                assertThat(fkCount).isEqualTo(57);
+                // 12열의 타입·기본값·8개 제약·실제 부모·비소유자 경계는 ReviewRecordSchemaIT에서 추가 검사한다.
                 // 복합 참조의 열 순서와 삭제·갱신 차단 정책까지 검사한다.
                 Map<String, List<String>> rolePairFks = new HashMap<>();
                 for (String table : List.of("story_role", "story_pair")) {
@@ -803,9 +1047,9 @@ class SchemaIT {
                         ResultSet rs =
                                 statement.executeQuery(
                                         "SELECT conname,pg_get_constraintdef(oid) FROM"
-                                            + " pg_constraint WHERE"
-                                            + " conrelid='public.story_fact'::regclass AND"
-                                            + " contype='c'")) {
+                                                + " pg_constraint WHERE"
+                                                + " conrelid='public.story_fact'::regclass AND"
+                                                + " contype='c'")) {
                     while (rs.next()) factChecks.put(rs.getString(1), rs.getString(2));
                 }
                 assertThat(factChecks.keySet())
@@ -821,9 +1065,9 @@ class SchemaIT {
                         ResultSet rs =
                                 statement.executeQuery(
                                         "SELECT conname,pg_get_constraintdef(oid) FROM"
-                                            + " pg_constraint WHERE"
-                                            + " conrelid='public.story_event'::regclass AND"
-                                            + " contype='c'")) {
+                                                + " pg_constraint WHERE"
+                                                + " conrelid='public.story_event'::regclass AND"
+                                                + " contype='c'")) {
                     while (rs.next()) eventChecks.put(rs.getString(1), rs.getString(2));
                 }
                 assertThat(eventChecks.keySet())
@@ -861,9 +1105,9 @@ class SchemaIT {
                         ResultSet rs =
                                 statement.executeQuery(
                                         "SELECT conname,pg_get_constraintdef(oid) FROM"
-                                            + " pg_constraint WHERE"
-                                            + " conrelid='public.story_hint'::regclass AND"
-                                            + " contype='c'")) {
+                                                + " pg_constraint WHERE"
+                                                + " conrelid='public.story_hint'::regclass AND"
+                                                + " contype='c'")) {
                     while (rs.next()) hintChecks.put(rs.getString(1), rs.getString(2));
                 }
                 assertThat(hintChecks.keySet())
@@ -875,8 +1119,8 @@ class SchemaIT {
                         ResultSet rs =
                                 statement.executeQuery(
                                         "SELECT indexdef FROM pg_indexes WHERE schemaname='public'"
-                                            + " AND tablename='clue_role' AND"
-                                            + " indexname='ix_clue_role_role'")) {
+                                                + " AND tablename='clue_role' AND"
+                                                + " indexname='ix_clue_role_role'")) {
                     assertThat(rs.next()).isTrue();
                     assertThat(rs.getString(1))
                             .contains("(version_id, role_code, clue_code)", "WHERE active_yn");
@@ -963,9 +1207,9 @@ class SchemaIT {
                         ResultSet rs =
                                 statement.executeQuery(
                                         "SELECT conname,pg_get_constraintdef(oid) FROM"
-                                            + " pg_constraint WHERE"
-                                            + " conrelid='public.story_audit'::regclass AND"
-                                            + " contype='c'")) {
+                                                + " pg_constraint WHERE"
+                                                + " conrelid='public.story_audit'::regclass AND"
+                                                + " contype='c'")) {
                     while (rs.next()) auditChecks.put(rs.getString(1), rs.getString(2));
                 }
                 assertThat(auditChecks.keySet())
@@ -987,8 +1231,8 @@ class SchemaIT {
                         ResultSet rs =
                                 statement.executeQuery(
                                         "SELECT indexname,indexdef FROM pg_indexes WHERE"
-                                            + " schemaname='public' AND tablename IN"
-                                            + " ('story','story_access','story_version')")) {
+                                                + " schemaname='public' AND tablename IN"
+                                                + " ('story','story_access','story_version')")) {
                     while (rs.next()) indexDefinitions.put(rs.getString(1), rs.getString(2));
                 }
                 assertThat(indexDefinitions.get("ix_story_owner"))
@@ -1059,7 +1303,7 @@ class SchemaIT {
                 try (var brokenAccess =
                         connection.prepareStatement(
                                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by)"
-                                    + " VALUES (?,?,'EDIT',?)")) {
+                                        + " VALUES (?,?,'EDIT',?)")) {
                     brokenAccess.setLong(1, story);
                     brokenAccess.setLong(2, owner + 1000);
                     brokenAccess.setLong(3, owner);
@@ -1189,7 +1433,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_audit(story_id,action,detail) VALUES"
-                                                + " ("
+                                                    + " ("
                                                     + story
                                                     + ",'OWNER_EXPIRED','{\"actorKind\":\"SYSTEM\"}')"))
                             .isEqualTo(1);
@@ -1197,7 +1441,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_role(version_id,code,name,brief)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + ownVersion
                                                     + ",'A','역할',NULL),("
                                                     + ownVersion
@@ -1207,7 +1451,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'lower','역할')"))
                             .hasMessageContaining("ck_story_role_code");
@@ -1215,7 +1459,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'EMPTY','   ')"))
                             .hasMessageContaining("ck_story_role_text");
@@ -1232,7 +1476,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'"
                                                             + "X".repeat(33)
@@ -1242,7 +1486,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'LONG_NAME',repeat('가',81))"))
                             .hasMessageContaining("value too long");
@@ -1250,23 +1494,23 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + otherVersion
                                                             + ",'A',NULL)"))
                             .hasMessageContaining("null value");
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_pair(version_id,role_a,role_b)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + ownVersion
                                                     + ",'A','Z')"))
                             .isEqualTo(1);
                     try (ResultSet rs =
                             statement.executeQuery(
                                     "SELECT r.active_yn,p.active_yn,r.brief IS NULL,r.created_at IS"
-                                        + " NOT NULL,p.updated_at IS NOT NULL FROM story_role r"
-                                        + " JOIN story_pair p ON p.version_id=r.version_id AND"
-                                        + " p.role_a=r.code WHERE r.version_id="
+                                            + " NOT NULL,p.updated_at IS NOT NULL FROM story_role r"
+                                            + " JOIN story_pair p ON p.version_id=r.version_id AND"
+                                            + " p.role_a=r.code WHERE r.version_id="
                                             + ownVersion
                                             + " AND r.code='A'")) {
                         assertThat(rs.next()).isTrue();
@@ -1329,14 +1573,14 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + (otherVersion + 100000)
                                                             + ",'NEW','역할')"))
                             .hasMessageContaining("fk_story_role_version");
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE story_role SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND code='A'"))
                             .isEqualTo(1);
@@ -1344,14 +1588,14 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_role(version_id,code,name)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'A','다시 생성')"))
                             .hasMessageContaining("pk_story_role");
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE story_pair SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND role_a='A' AND role_b='Z'"))
                             .isEqualTo(1);
@@ -1367,7 +1611,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_person(version_id,code,name) VALUES"
-                                                + " ("
+                                                    + " ("
                                                     + ownVersion
                                                     + ",'P','인물'),("
                                                     + otherVersion
@@ -1384,7 +1628,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO clue_role(version_id,clue_code,role_code)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + ownVersion
                                                     + ",'A','A')"))
                             .isEqualTo(1);
@@ -1392,7 +1636,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_clue(version_id,code,title)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'lower','제목')"))
                             .hasMessageContaining("ck_story_clue_code");
@@ -1409,7 +1653,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_clue(version_id,code,title)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'BLANK','   ')"))
                             .hasMessageContaining("ck_story_clue_text");
@@ -1417,7 +1661,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_clue(version_id,code,title)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'LONG_TITLE',repeat('가',161))"))
                             .hasMessageContaining("value too long");
@@ -1425,7 +1669,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_clue(version_id,code,title)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'"
                                                             + "X".repeat(33)
@@ -1485,14 +1729,14 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_hint(version_id,code,level,body)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + ownVersion
                                                     + ",'A',1,repeat('가',4000))"))
                             .isEqualTo(1);
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE story_hint SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND code='A'"))
                             .isEqualTo(1);
@@ -1500,7 +1744,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_hint(version_id,code,level)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'A',2)"))
                             .hasMessageContaining("pk_story_hint");
@@ -1508,7 +1752,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_hint(version_id,code,level)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'B',1)"))
                             .hasMessageContaining("uq_story_hint_level");
@@ -1516,7 +1760,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_hint(version_id,code,level)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'lower',2)"))
                             .hasMessageContaining("ck_story_hint_code");
@@ -1524,7 +1768,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_hint(version_id,code,level)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'BAD_ZERO',0)"))
                             .hasMessageContaining("ck_story_hint_content");
@@ -1541,14 +1785,14 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_hint(version_id,code,level)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + (otherVersion + 100000)
                                                             + ",'MISSING',1)"))
                             .hasMessageContaining("fk_story_hint_version");
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_hint(version_id,code,level,body)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + otherVersion
                                                     + ",'A',1,NULL)"))
                             .isEqualTo(1);
@@ -1616,7 +1860,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_event(version_id,code)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'lower')"))
                             .hasMessageContaining("ck_story_event_code");
@@ -1624,7 +1868,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_event(version_id,code)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ", '"
                                                             + "X".repeat(33)
@@ -1634,14 +1878,14 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_event(version_id,code)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + (otherVersion + 100000)
                                                             + ",'MISSING')"))
                             .hasMessageContaining("fk_story_event_version");
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE story_event SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND code='EMPTY'"))
                             .isEqualTo(1);
@@ -1649,14 +1893,14 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_event(version_id,code)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'EMPTY')"))
                             .hasMessageContaining("pk_story_event");
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_event(version_id,code,start_min)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + otherVersion
                                                     + ",'EMPTY',0)"))
                             .isEqualTo(1);
@@ -1691,7 +1935,7 @@ class SchemaIT {
                         assertThat(
                                         statement.executeUpdate(
                                                 "INSERT INTO story_fact(version_id,code,truth)"
-                                                    + " VALUES ("
+                                                        + " VALUES ("
                                                         + ownVersion
                                                         + ",'"
                                                         + truth
@@ -1704,7 +1948,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_fact(version_id,code,truth)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'BAD_TRUTH','UNKNOWN')"))
                             .hasMessageContaining("ck_story_fact_truth");
@@ -1721,7 +1965,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_fact(version_id,code,basis)"
-                                                        + " VALUES ("
+                                                            + " VALUES ("
                                                             + ownVersion
                                                             + ",'LONG',repeat('𐐀',8001))"))
                             .hasMessageContaining("ck_story_fact_text");
@@ -1729,7 +1973,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_fact(version_id,code) VALUES"
-                                                        + " ("
+                                                            + " ("
                                                             + ownVersion
                                                             + ",'lower')"))
                             .hasMessageContaining("ck_story_fact_code");
@@ -1737,7 +1981,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_fact(version_id,code) VALUES"
-                                                        + " ("
+                                                            + " ("
                                                             + ownVersion
                                                             + ", '"
                                                             + "X".repeat(33)
@@ -1747,14 +1991,14 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_fact(version_id,code) VALUES"
-                                                        + " ("
+                                                            + " ("
                                                             + (otherVersion + 100000)
                                                             + ",'MISSING')"))
                             .hasMessageContaining("fk_story_fact_version");
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE story_fact SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND code='EMPTY'"))
                             .isEqualTo(1);
@@ -1762,7 +2006,7 @@ class SchemaIT {
                                     () ->
                                             statement.executeUpdate(
                                                     "INSERT INTO story_fact(version_id,code) VALUES"
-                                                        + " ("
+                                                            + " ("
                                                             + ownVersion
                                                             + ",'EMPTY')"))
                             .hasMessageContaining("pk_story_fact");
@@ -1775,7 +2019,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "INSERT INTO story_rubric(version_id,code,category)"
-                                                + " VALUES ("
+                                                    + " VALUES ("
                                                     + ownVersion
                                                     + ",'A','METHOD'),("
                                                     + otherVersion
@@ -1938,7 +2182,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE rubric_clue SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND rubric_code='A' AND clue_code='A'"))
                             .isEqualTo(1);
@@ -1954,7 +2198,7 @@ class SchemaIT {
                     assertThat(
                                     statement.executeUpdate(
                                             "UPDATE story_rubric SET active_yn=false WHERE"
-                                                + " version_id="
+                                                    + " version_id="
                                                     + ownVersion
                                                     + " AND code='A'"))
                             .isEqualTo(1);
@@ -1968,7 +2212,138 @@ class SchemaIT {
                                                             + ",'A','METHOD')"))
                             .hasMessageContaining("pk_story_rubric");
                 }
+                verifyGradeTerms(connection);
             }
+        }
+    }
+
+    /**
+     * 사전의 복합 키·NULL·코드·본문 제약을 실제 PostgreSQL에서 확인한다. 같은 별칭의 여러 개념과 같은 개념의 다른 표준어는 물리 구조가 허용하며, 후자는
+     * 애플리케이션이 거절한다.
+     *
+     * @param connection null이 아닌 자동 커밋 상태의 격리 테스트 DB 연결
+     * @throws java.sql.SQLException 카탈로그 조회나 정상 시험 행 생성에 실패할 때
+     */
+    private static void verifyGradeTerms(Connection connection) throws java.sql.SQLException {
+        Map<Short, String> primaryColumns = new java.util.TreeMap<>();
+        try (ResultSet keys =
+                connection.getMetaData().getPrimaryKeys(null, "public", "grade_term")) {
+            while (keys.next()) {
+                assertThat(keys.getString("PK_NAME")).isEqualTo("pk_grade_term");
+                primaryColumns.put(keys.getShort("KEY_SEQ"), keys.getString("COLUMN_NAME"));
+            }
+        }
+        assertThat(primaryColumns.values())
+                .containsExactly("dictionary_code", "concept_code", "alias_text");
+
+        try (var statement = connection.createStatement()) {
+            try (ResultSet columns =
+                    statement.executeQuery(
+                            "SELECT"
+                                + " column_name,data_type,character_maximum_length,is_nullable,column_default"
+                                + " FROM information_schema.columns WHERE table_schema='public' AND"
+                                + " table_name='grade_term'")) {
+                Map<String, Integer> widths =
+                        Map.of(
+                                "dictionary_code",
+                                80,
+                                "concept_code",
+                                32,
+                                "canonical_text",
+                                200,
+                                "alias_text",
+                                200);
+                int count = 0;
+                while (columns.next()) {
+                    count++;
+                    String name = columns.getString("column_name");
+                    assertThat(columns.getString("is_nullable")).isEqualTo("NO");
+                    if (name.equals("active_yn")) {
+                        assertThat(columns.getString("data_type")).isEqualTo("boolean");
+                        assertThat(columns.getString("column_default")).isEqualTo("true");
+                    } else {
+                        assertThat(columns.getString("data_type")).isEqualTo("character varying");
+                        assertThat(columns.getInt("character_maximum_length"))
+                                .isEqualTo(widths.get(name));
+                        assertThat(columns.getString("column_default")).isNull();
+                    }
+                }
+                assertThat(count).isEqualTo(5);
+            }
+
+            assertThat(
+                            statement.executeUpdate(
+                                    "INSERT INTO"
+                                        + " public.grade_term(dictionary_code,concept_code,canonical_text,alias_text)"
+                                        + " VALUES ('BOUND','ONE','표준','공유'),('BOUND','TWO','다른"
+                                        + " 표준','공유'), ('BOUND','ONE','일관되지 않은 표준','다른 별칭')"))
+                    .isEqualTo(3);
+            try (ResultSet active =
+                    statement.executeQuery(
+                            "SELECT count(*) FROM public.grade_term WHERE dictionary_code='BOUND'"
+                                    + " AND active_yn")) {
+                active.next();
+                assertThat(active.getInt(1)).isEqualTo(3);
+            }
+            assertThatThrownBy(
+                            () ->
+                                    statement.executeUpdate(
+                                            "INSERT INTO public.grade_term VALUES"
+                                                    + " ('BOUND','ONE','표준','공유',true)"))
+                    .hasMessageContaining("pk_grade_term");
+            for (String values :
+                    List.of(
+                            "'lower','ONE','표준','별칭',true",
+                            "'BOUND','lower','표준','별칭',true",
+                            "'BOUND','ONE','','별칭',true",
+                            "'BOUND','ONE','표준',E' \\t\\n',true")) {
+                assertThatThrownBy(
+                                () ->
+                                        statement.executeUpdate(
+                                                "INSERT INTO public.grade_term VALUES ("
+                                                        + values
+                                                        + ")"))
+                        .isInstanceOf(java.sql.SQLException.class)
+                        .extracting(error -> ((java.sql.SQLException) error).getSQLState())
+                        .isEqualTo("23514");
+            }
+            for (int nullColumn = 0; nullColumn < 5; nullColumn++) {
+                List<String> values =
+                        new ArrayList<>(List.of("'NULL_TEST'", "'ONE'", "'표준'", "'별칭'", "true"));
+                values.set(nullColumn, "NULL");
+                String sql =
+                        "INSERT INTO public.grade_term VALUES (" + String.join(",", values) + ")";
+                assertThatThrownBy(() -> statement.executeUpdate(sql))
+                        .isInstanceOf(java.sql.SQLException.class)
+                        .extracting(error -> ((java.sql.SQLException) error).getSQLState())
+                        .isEqualTo("23502");
+            }
+            assertThat(
+                            statement.executeUpdate(
+                                    "INSERT INTO public.grade_term VALUES"
+                                            + " (repeat('A',80),repeat('B',32),"
+                                            + "repeat('𐐀',200),repeat('𐐀',200),true)"))
+                    .isEqualTo(1);
+            assertThatThrownBy(
+                            () ->
+                                    statement.executeUpdate(
+                                            "INSERT INTO public.grade_term VALUES"
+                                                    + " ('LONG','ONE',repeat('𐐀',201),'별칭',true)"))
+                    .isInstanceOf(java.sql.SQLException.class)
+                    .extracting(error -> ((java.sql.SQLException) error).getSQLState())
+                    .isEqualTo("22001");
+            assertThat(
+                            statement.executeUpdate(
+                                    "UPDATE public.grade_term SET active_yn=false WHERE"
+                                            + " dictionary_code='BOUND' AND concept_code='ONE' AND"
+                                            + " alias_text='공유'"))
+                    .isEqualTo(1);
+            assertThatThrownBy(
+                            () ->
+                                    statement.executeUpdate(
+                                            "INSERT INTO public.grade_term VALUES"
+                                                    + " ('BOUND','ONE','표준','공유',true)"))
+                    .hasMessageContaining("pk_grade_term");
         }
     }
 }

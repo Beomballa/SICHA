@@ -19,6 +19,16 @@ configurations {
     }
 }
 
+tasks.named('processResources') {
+    // 독립 로컬 SQL은 보존하되 공개 Java 원본만으로 실행·검증하며 빌드 산출물에는 넣지 않는다.
+    exclude 'db/migration/**'
+}
+
+tasks.withType(Jar).configureEach {
+    // 기존 빌드 디렉터리에 남은 독립 SQL도 일반·실행 아카이브 모두에 포함하지 않는다.
+    exclude '**/db/migration/**'
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
