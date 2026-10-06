@@ -173,7 +173,7 @@ class SecurityIT extends DatabaseContextTest {
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM access_history WHERE request_id=? AND"
-                                        + " kind='SERVER' AND http_status=? AND route=?",
+                                            + " kind='SERVER' AND http_status=? AND route=?",
                                     Integer.class,
                                     id,
                                     status,
@@ -191,10 +191,13 @@ class SecurityIT extends DatabaseContextTest {
                 java.util.Map.of(
                                 "review-precheck", "review-precheck",
                                 "review-requests", "review-requests",
+                                "return-to-draft", "return-to-draft",
                                 "preview", "preview",
                                 "grade-samples/check", "grade-samples/check",
                                 "review-snapshots", "review-snapshots",
-                                "review-snapshots/987654", "review-snapshots/{snapshotId}")
+                                "review-snapshots/987654", "review-snapshots/{snapshotId}",
+                                "review-snapshots/987654/records",
+                                        "review-snapshots/{snapshotId}/records")
                         .entrySet()) {
             var result =
                     mvc.perform(
@@ -206,12 +209,12 @@ class SecurityIT extends DatabaseContextTest {
             Object id =
                     result.getRequest()
                             .getAttribute(
-                                    com.reasoning.admin.auth.audit.AccessHistoryFilter
+                                    com.reasoning.common.auth.audit.RequestAuditKernel
                                             .REQUEST_ID_ATTRIBUTE);
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT route FROM access_history WHERE request_id=? AND"
-                                        + " kind='SERVER'",
+                                            + " kind='SERVER'",
                                     String.class,
                                     id))
                     .isEqualTo(template + entry.getValue());

@@ -378,6 +378,7 @@ export async function exerciseRubrics({
   await clickWithConfirmation(page, "#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "child");
   assert.equal(
     (await api(page, root)).body.item.acceptedText,
@@ -445,6 +446,7 @@ export async function exerciseRubrics({
   assert.equal(posts, 1);
   await lost.detach();
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(posts, 1);
   page.off("request", count);
   assert.equal(

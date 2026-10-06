@@ -134,6 +134,7 @@ export async function exerciseGradeSamples({
   assert.equal(posts, 1);
   await lost.detach();
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(posts, 1);
   page.off("request", count);
   assert.equal(

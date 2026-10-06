@@ -43,8 +43,8 @@ test("first-party confirmations use shared UI with ordered deferred loading and 
     if (name !== "ui.js")
       assert.equal(
         [...source.matchAll(/\bAdminUI\.confirm\s*\(/g)].length,
-        name === "auth.js" ? 2 : 12,
-        `${name} 기존 확인 전체 교체`,
+        name === "auth.js" ? 2 : 20,
+        `${name} 기존 확인 전체와 저장 예시 사람 확인·검수 전환·수동 기록 기준 수락·추가·폐기·공개 사본 복제·BATCH 해소/의도 폐기 확인`,
       );
   }
   for (const [name, screen] of [

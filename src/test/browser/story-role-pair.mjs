@@ -191,6 +191,7 @@ export async function exerciseRolePairs({
   await lost.detach();
   page.off("request", count);
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(await page.$eval("#child-save", (e) => e.hidden), true);
   assert.equal(
     await page.$eval("#child-roleA-record", (e) => e.textContent),
@@ -213,6 +214,7 @@ export async function exerciseRolePairs({
     true,
   );
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await open("pairs", "A~B");
   await changeActive();
   assert.equal(
@@ -268,6 +270,7 @@ export async function exerciseRolePairs({
   );
   await layout(page, "child-role-conflict");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "child");
   assert.equal(
     (await api(page, `${apiPath}/roles/A`)).body.item.brief,

@@ -5,9 +5,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.reasoning.admin.auth.audit.AccessHistoryFilter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.CurrentSession;
+import com.reasoning.common.auth.audit.RequestAuditKernel;
 import com.reasoning.common.auth.service.AuthException;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -53,14 +53,14 @@ public final class StoryHttpSupport {
     }
 
     /**
-     * 접근 이력 필터의 요청 ID를 사용하며 속성이 없으면 새 UUID를 발급한다.
+     * 접근 이력 생산자의 실제 UUID만 사용하며 누락을 별도 ID로 대체하지 않는다.
      *
      * @param request 서버 요청 ID 속성을 조회할 요청
-     * @return 기존 요청 ID 또는 새 UUID
+     * @return 현재 서버 요청 UUID
+     * @throws IllegalStateException 속성이 없거나 UUID 타입이 아니면 REQUEST_ID_UNAVAILABLE
      */
     public static UUID requestId(HttpServletRequest request) {
-        Object value = request.getAttribute(AccessHistoryFilter.REQUEST_ID_ATTRIBUTE);
-        return value instanceof UUID id ? id : UUID.randomUUID();
+        return RequestAuditKernel.requestId(request);
     }
 
     /**

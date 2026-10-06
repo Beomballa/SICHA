@@ -178,7 +178,7 @@ class StoryBrowserIT extends DatabaseContextTest {
                         UUID.randomUUID());
         db.update(
                 "UPDATE admin_session SET state='REVOKED',revoked_at=clock_timestamp() WHERE"
-                    + " session_key=?",
+                        + " session_key=?",
                 fixtureSession);
         var receiverGrant =
                 enrollment.exchange(
@@ -195,7 +195,7 @@ class StoryBrowserIT extends DatabaseContextTest {
         UUID receiverKey =
                 db.queryForObject(
                         "SELECT a.account_key FROM admin_account a JOIN admin_enrollment e ON"
-                            + " e.account_id=a.id WHERE e.registration_key=?",
+                                + " e.account_id=a.id WHERE e.registration_key=?",
                         UUID.class,
                         receiverRegistration);
 
@@ -229,7 +229,42 @@ class StoryBrowserIT extends DatabaseContextTest {
         if (!completed) browser.destroyForcibly();
         assertThat(completed).as("브라우저 시험 제한 시간").isTrue();
         assertThat(browser.exitValue()).as("실제 HTTPS 브라우저 회귀").isZero();
-        assertThat(db.queryForObject("SELECT count(*) FROM story", Integer.class)).isEqualTo(3);
+        // PT-A12 화면의 합성 가로채기는 실제 해소·terminal 실행 자료를 DB에 만들지 않는다.
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_action WHERE action='ISSUE_RESOLVE'",
+                                Integer.class))
+                .as("합성 PT-A12 UI 전송은 실제 해소 API 검증이 아님")
+                .isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM execution_issue WHERE issue_key=?",
+                                Integer.class,
+                                UUID.fromString("a1212121-1212-4212-8212-121212121212")))
+                .as("화면용 합성 지적을 실제 PG 행으로 삽입하지 않음")
+                .isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM grade_batch WHERE batch_key=?",
+                                Integer.class,
+                                UUID.fromString("b1212121-1212-4212-8212-121212121212")))
+                .as("화면용 후속 BATCH는 실제 terminal 실행 근거가 아님")
+                .isZero();
+        assertThat(db.queryForObject("SELECT count(*) FROM story", Integer.class)).isEqualTo(4);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_version WHERE title = ?",
+                                Integer.class,
+                                "저장 초안 확인 합성 회귀"))
+                .isEqualTo(1);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM grade_sample s JOIN story_version v"
+                                        + " ON v.id = s.version_id WHERE v.title = ?"
+                                        + " AND s.active_yn AND s.checked_by IS NOT NULL",
+                                Integer.class,
+                                "저장 초안 확인 합성 회귀"))
+                .isEqualTo(4);
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE action IN "
@@ -241,7 +276,15 @@ class StoryBrowserIT extends DatabaseContextTest {
                                 "SELECT count(*) FROM story_audit WHERE action IN "
                                         + "('ACCESS_GRANTED','ACCESS_REVOKED')",
                                 Integer.class))
-                .isEqualTo(3);
+                .isEqualTo(4);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM story_audit WHERE action='ACCESS_GRANTED' AND"
+                                    + " detail->>'verificationRef'='synthetic_lifecycle_review' AND"
+                                    + " detail->'after'->>'permission'='REVIEW' AND"
+                                    + " detail->'after'->>'activeYn'='true'",
+                                Integer.class))
+                .isEqualTo(1);
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE action IN "
@@ -258,25 +301,25 @@ class StoryBrowserIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE detail::text LIKE"
-                                    + " '%local-answer%'",
+                                        + " '%local-answer%'",
                                 Integer.class))
                 .isZero();
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE action='ITEM_CREATED' AND"
-                                    + " detail->>'itemKey'='UI_PERSON'",
+                                        + " detail->>'itemKey'='UI_PERSON'",
                                 Integer.class))
                 .isEqualTo(1);
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE detail::text LIKE '%인물 UI"
-                                    + " 전용 비밀%'",
+                                        + " 전용 비밀%'",
                                 Integer.class))
                 .isZero();
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE detail::text LIKE '%합성 인물"
-                                    + " 비밀%'",
+                                        + " 비밀%'",
                                 Integer.class))
                 .isZero();
     }

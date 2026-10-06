@@ -15,6 +15,37 @@ const shared = readFileSync(new URL("ui.css", assetRoot), "utf8");
 const stories = readFileSync(new URL("stories.css", assetRoot), "utf8");
 const auth = readFileSync(new URL("auth.css", assetRoot), "utf8");
 
+/** 복제 한 곳과 BATCH 해소/폐기 두 곳은 공통 확인을 재사용하며 화면별 모달을 만들지 않는다. */
+test("SP05 and PT-A12 reuse shared panels and exactly twenty first-party confirmations", () => {
+  const script = readFileSync(new URL("stories.js", assetRoot), "utf8");
+  const authScript = readFileSync(new URL("auth.js", assetRoot), "utf8");
+  const editor = readFileSync(
+    new URL(
+      "../../main/resources/templates/admin/story-editor.html",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.equal([...script.matchAll(/\bAdminUI\.confirm\s*\(/g)].length, 20);
+  assert.match(script, /title: replay \? "원래 해소 요청 재확인" : "현재 BATCH 지적 해소"/);
+  assert.match(script, /title: "해소 입력·원래 의도 폐기"/);
+  assert.equal([...authScript.matchAll(/\bAdminUI\.confirm\s*\(/g)].length, 2);
+  assert.equal([...editor.matchAll(/src="\/admin\/ui\.js"/g)].length, 1);
+  assert.ok(
+    editor.indexOf("/admin/ui.js") < editor.indexOf("/admin/stories.js"),
+  );
+  const panel = editor.match(
+    /<section\s+id="clone-panel"[\s\S]*?<\/section>/,
+  )?.[0];
+  assert.ok(panel);
+  assert.match(panel, /class="version-panel"/);
+  assert.match(panel, /class="reading"/);
+  assert.match(panel, /class="state-action"/);
+  assert.match(panel, /aria-labelledby="clone-heading"/);
+  assert.match(panel, /id="clone-status" role="status" aria-live="polite"/);
+  assert.doesNotMatch(panel, /<style|style=|<dialog|onclick=/);
+});
+
 /** 모든 화면 CSS의 공통 원본 사용을 검사해 신규 화면의 토큰 복제를 차단한다. */
 test("all first-party admin stylesheets import shared UI exactly once without root token copies", () => {
   const primitives = new Set(

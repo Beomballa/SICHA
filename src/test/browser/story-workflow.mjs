@@ -11,6 +11,7 @@ import { exerciseEvents } from "./story-events.mjs";
 import { exerciseFacts } from "./story-facts.mjs";
 import { exerciseRubrics } from "./story-rubrics.mjs";
 import { exerciseGradeSamples } from "./story-grade-samples.mjs";
+import { exerciseReviewChecks } from "./story-review-check.mjs";
 import { exerciseStoryAccess } from "./story-access.mjs";
 import { exerciseStoryOwnership } from "./story-ownership.mjs";
 import {
@@ -693,6 +694,7 @@ try {
   await openSection(page, "reveal");
   assert.equal(await page.$eval("#comparison", (node) => node.hidden), false);
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(
     await page.$eval('#editor-nav a[href="#reveal-heading"]', (node) =>
       node.getAttribute("aria-current"),
@@ -738,6 +740,7 @@ try {
   await layout(page, "uncertain-save");
   await lostPatch.detach();
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "reveal");
   assert.match(await text(page, "#notice"), /변화가 없습니다/);
 
@@ -827,6 +830,7 @@ try {
   await page.click("#child-list");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await page.select("#child-filter", "false");
   await page.waitForFunction(() =>
     document
@@ -905,6 +909,9 @@ try {
   await page.waitForSelector("#ui-confirm-dialog[open]");
   await page.click("#ui-confirm-accept");
   await waitForConfirmation(page);
+  await page.waitForFunction(
+    () => document.getElementById("child-resource").value === "roles",
+  );
   const acceptedDraft = await childDraftState();
   assert.equal(acceptedDraft.resource, "roles");
   assert.equal(acceptedDraft.key, "");
@@ -960,6 +967,7 @@ try {
   await lostChild.detach();
   page.off("request", countChildPosts);
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "child");
   assert.match(await text(page, "#notice"), /변화가 없습니다/);
   await clickWithConfirmation(page, "#child-active");
@@ -1001,6 +1009,7 @@ try {
   await page.click("#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "child");
   assert.equal(
     (await childApi(page, `${childPath}/UI_PERSON`)).body.item.name,
@@ -1055,6 +1064,7 @@ try {
   await page.click("#refresh-latest");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(
     await page.$eval("#child-name", (e) => e.value),
     "부모 조회 직후 변경",
@@ -1090,6 +1100,7 @@ try {
   await delayedA.release();
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_01"]');
   const selectedResponse = await holdResponse(
@@ -1161,6 +1172,7 @@ try {
   await pendingWrite.release();
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "basic");
   assert.equal(
     (await childApi(page, apiPath)).body.sections.basic.intro,
@@ -1256,6 +1268,18 @@ try {
     save,
     notice,
     layout,
+    loseResponse,
+  });
+  await exerciseReviewChecks({
+    page,
+    baseUrl: fixture.url,
+    api: childApi,
+    edit,
+    openSection,
+    notice,
+    layout,
+    confirmation,
+    holdResponse,
     loseResponse,
   });
 

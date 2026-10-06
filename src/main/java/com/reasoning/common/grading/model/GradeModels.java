@@ -112,7 +112,7 @@ public final class GradeModels {
      * @param maxScore 1~100의 양수 최대 배점
      * @param required 필수 해결 조건 여부
      * @param passScore 필수 항목이면 등록된 양수 단계이며 선택 항목이면 null
-     * @param requiredNotice 필수 항목이면 1~200 코드포인트 안내이며 선택 항목이면 null
+     * @param requiredNotice 필수 항목이면 null 또는 1~200 코드포인트 안내이며 선택 항목이면 null; 범인 항목은 고정 안내
      * @param claims null이 아닌 1~20개 명제
      * @param levels null이 아닌 2~6개 유한 단계이며 0점·만점을 포함한다
      * @param contradictions null이 아닌 0~10개 모순
@@ -133,7 +133,8 @@ public final class GradeModels {
             code = GradeModels.code(code);
             if (category == null || maxScore <= 0 || maxScore > 100) invalid();
             if (required) {
-                requiredNotice = CommonUtil.normalizeText(requiredNotice, 200, false);
+                if (requiredNotice != null)
+                    requiredNotice = CommonUtil.normalizeText(requiredNotice, 200, false);
                 if (passScore == null || passScore <= 0 || passScore > maxScore) invalid();
             } else if (passScore != null || requiredNotice != null) {
                 invalid();
@@ -187,7 +188,7 @@ public final class GradeModels {
                                 new ContradictionRule(
                                         "UNSUPPORTED_ACCOMPLICE",
                                         "고정 사실과 타당한 증거 연결로 뒷받침되지 않거나 단독범행 사실과 양립하지 않는 공범을 최종"
-                                            + " 단정한다."));
+                                                + " 단정한다."));
                 if (maxScore != 25
                         || !required
                         || !Integer.valueOf(25).equals(passScore)

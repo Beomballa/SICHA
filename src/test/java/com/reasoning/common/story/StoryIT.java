@@ -166,7 +166,7 @@ class StoryIT extends DatabaseContextTest {
                 .contains("basic.estMin");
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(code),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -286,7 +286,7 @@ class StoryIT extends DatabaseContextTest {
                 reviewer.principal().accountId());
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'REVIEW',?)",
+                        + " (?,?,'REVIEW',?)",
                 storyId(code),
                 reviewer.principal().accountId(),
                 owner.principal().accountId());
@@ -403,7 +403,7 @@ class StoryIT extends DatabaseContextTest {
         String code = create(owner, "Concurrent");
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(code),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -466,8 +466,8 @@ class StoryIT extends DatabaseContextTest {
                         "0",
                         mapper.readTree(
                                 "{\"code\":\"A\",\"name\":\"합성 인물\",\"publicText\":\"공개\\r"
-                                    + "\\n"
-                                    + "소개\",\"secretText\":\"비밀 원고\"}"),
+                                        + "\\n"
+                                        + "소개\",\"secretText\":\"비밀 원고\"}"),
                         UUID.randomUUID());
         assertThat(first.editRev()).isEqualTo("1");
         assertThat(first.itemKey()).isEqualTo("A");
@@ -594,7 +594,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND detail::text"
-                                    + " LIKE '%비밀 원고%'",
+                                        + " LIKE '%비밀 원고%'",
                                 Long.class, storyId(code)))
                 .isZero();
         assertThat(
@@ -747,7 +747,7 @@ class StoryIT extends DatabaseContextTest {
                     + " IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_person_audit BEFORE INSERT ON story_audit FOR EACH ROW EXECUTE"
-                    + " FUNCTION fail_person_audit()");
+                        + " FUNCTION fail_person_audit()");
         try {
             denied(
                     "STORY_UNAVAILABLE",
@@ -884,7 +884,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM access_history WHERE actor_key=? AND route"
-                                    + " LIKE ?",
+                                        + " LIKE ?",
                                 Long.class,
                                 owner.principal().accountKey(),
                                 "%" + code + "%"))
@@ -899,7 +899,7 @@ class StoryIT extends DatabaseContextTest {
         String code = create(owner, "Cross resource");
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(code),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -990,8 +990,8 @@ class StoryIT extends DatabaseContextTest {
         var times =
                 db.queryForMap(
                         "SELECT r.updated_at AS role_time,v.updated_at AS version_time FROM"
-                            + " story_role r JOIN story_version v ON v.id=r.version_id WHERE"
-                            + " v.story_id=? AND r.code='A'",
+                                + " story_role r JOIN story_version v ON v.id=r.version_id WHERE"
+                                + " v.story_id=? AND r.code='A'",
                         storyId(story));
         assertThat(
                         roles.updateRole(
@@ -1008,8 +1008,8 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForMap(
                                 "SELECT r.updated_at AS role_time,v.updated_at AS version_time FROM"
-                                    + " story_role r JOIN story_version v ON v.id=r.version_id"
-                                    + " WHERE v.story_id=? AND r.code='A'",
+                                        + " story_role r JOIN story_version v ON v.id=r.version_id"
+                                        + " WHERE v.story_id=? AND r.code='A'",
                                 storyId(story)))
                 .isEqualTo(times);
         assertThat(auditCount(story, "ITEM_UPDATED")).isEqualTo(before);
@@ -1228,7 +1228,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " action='CONTENT_READ' AND detail->>'resource'='pairs'",
+                                        + " action='CONTENT_READ' AND detail->>'resource'='pairs'",
                                 Long.class,
                                 storyId(story)))
                 .isEqualTo(1);
@@ -1309,7 +1309,7 @@ class StoryIT extends DatabaseContextTest {
                 reader.principal().accountId());
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'REVIEW',?)",
+                        + " (?,?,'REVIEW',?)",
                 storyId(story),
                 reader.principal().accountId(),
                 owner.principal().accountId());
@@ -1376,7 +1376,7 @@ class StoryIT extends DatabaseContextTest {
                                 UUID.randomUUID()));
         db.update(
                 "UPDATE admin_session SET state='REVOKED',revoked_at=clock_timestamp() WHERE"
-                    + " session_key=?",
+                        + " session_key=?",
                 owner.principal().sessionKey());
         denied(
                 "AUTH_REQUIRED",
@@ -1453,7 +1453,7 @@ class StoryIT extends DatabaseContextTest {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM story_role WHERE version_id=(SELECT id"
-                                        + " FROM story_version WHERE story_id=?) AND code='C'",
+                                            + " FROM story_version WHERE story_id=?) AND code='C'",
                                     Long.class,
                                     storyId(story)))
                     .isZero();
@@ -1495,7 +1495,7 @@ class StoryIT extends DatabaseContextTest {
         role(owner, story, "B", "둘째", null, 1);
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(story),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -1839,7 +1839,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM access_history WHERE actor_key=? AND route=?"
-                                    + " AND http_status=201",
+                                        + " AND http_status=201",
                                 Long.class,
                                 owner.principal().accountKey(),
                                 "/admin/api/stories/{storyCode}/versions/{versionNo}/pairs"))
@@ -1847,7 +1847,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM access_history WHERE actor_key=? AND route=?"
-                                    + " AND http_status=201",
+                                        + " AND http_status=201",
                                 Long.class,
                                 owner.principal().accountKey(),
                                 "/admin/api/stories/{storyCode}/versions/{versionNo}/roles"))
@@ -1855,7 +1855,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM access_history WHERE actor_key=? AND route=?"
-                                    + " AND http_status=200",
+                                        + " AND http_status=200",
                                 Long.class,
                                 owner.principal().accountKey(),
                                 "/admin/api/stories/{storyCode}/versions/{versionNo}/pairs/{itemKey}"))
@@ -1863,7 +1863,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM access_history WHERE actor_key=? AND route=?"
-                                    + " AND http_status=400",
+                                        + " AND http_status=400",
                                 Long.class,
                                 owner.principal().accountKey(),
                                 "/admin/api/stories/{storyCode}/versions/{versionNo}/pairs/{itemKey}"))
@@ -1871,7 +1871,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM access_history WHERE actor_key=? AND"
-                                    + " route='UNMATCHED' AND http_status=400",
+                                        + " route='UNMATCHED' AND http_status=400",
                                 Long.class,
                                 owner.principal().accountKey()))
                 .isGreaterThanOrEqualTo(1);
@@ -2094,7 +2094,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " action='CONTENT_READ' AND detail->>'resource'='clues'",
+                                        + " action='CONTENT_READ' AND detail->>'resource'='clues'",
                                 Long.class,
                                 storyId(story)))
                 .isEqualTo(2);
@@ -2186,8 +2186,8 @@ class StoryIT extends DatabaseContextTest {
         var before =
                 db.queryForMap(
                         "SELECT v.edit_rev,v.updated_at,c.updated_at AS clue_time FROM"
-                            + " story_version v JOIN story_clue c ON c.version_id=v.id WHERE"
-                            + " v.story_id=? AND c.code='A'",
+                                + " story_version v JOIN story_clue c ON c.version_id=v.id WHERE"
+                                + " v.story_id=? AND c.code='A'",
                         storyId(story));
         long audited = auditCount(story, "ITEM_UPDATED");
         assertThat(
@@ -2205,8 +2205,8 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForMap(
                                 "SELECT v.edit_rev,v.updated_at,c.updated_at AS clue_time FROM"
-                                    + " story_version v JOIN story_clue c ON c.version_id=v.id"
-                                    + " WHERE v.story_id=? AND c.code='A'",
+                                        + " story_version v JOIN story_clue c ON c.version_id=v.id"
+                                        + " WHERE v.story_id=? AND c.code='A'",
                                 storyId(story)))
                 .isEqualTo(before);
         assertThat(auditCount(story, "ITEM_UPDATED")).isEqualTo(audited);
@@ -2318,7 +2318,7 @@ class StoryIT extends DatabaseContextTest {
                 .isFalse();
         db.update(
                 "INSERT INTO story_person(version_id,code,name) SELECT id,'P','인물' FROM"
-                    + " story_version WHERE story_id=?",
+                        + " story_version WHERE story_id=?",
                 storyId(story));
         clues.updateClue(
                 owner.sid(),
@@ -2377,7 +2377,7 @@ class StoryIT extends DatabaseContextTest {
                 reader.principal().accountId());
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'REVIEW',?)",
+                        + " (?,?,'REVIEW',?)",
                 storyId(story),
                 reader.principal().accountId(),
                 owner.principal().accountId());
@@ -2410,8 +2410,8 @@ class StoryIT extends DatabaseContextTest {
                                 hidden.sid(), hidden.principal(), story, 1, null, null, true));
         db.execute(
                 "CREATE FUNCTION fail_clue_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF"
-                    + " NEW.detail->>'resource' IN ('clues','clue-roles') THEN RAISE EXCEPTION"
-                    + " 'injected'; END IF; RETURN NEW; END $$");
+                        + " NEW.detail->>'resource' IN ('clues','clue-roles') THEN RAISE EXCEPTION"
+                        + " 'injected'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_clue_audit BEFORE INSERT ON story_audit FOR EACH ROW "
                         + "EXECUTE FUNCTION fail_clue_audit()");
@@ -2537,11 +2537,11 @@ class StoryIT extends DatabaseContextTest {
         clue(owner, story, "A", 1);
         db.update(
                 "INSERT INTO story_person(version_id,code,name) SELECT id,'P','인물' FROM"
-                    + " story_version WHERE story_id=?",
+                        + " story_version WHERE story_id=?",
                 storyId(story));
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(story),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -2881,7 +2881,7 @@ class StoryIT extends DatabaseContextTest {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM access_history WHERE actor_key=? AND"
-                                        + " route=?",
+                                            + " route=?",
                                     Long.class,
                                     owner.principal().accountKey(),
                                     "/admin/api/stories/{storyCode}/versions/{versionNo}/"
@@ -3118,7 +3118,7 @@ class StoryIT extends DatabaseContextTest {
         String story = create(owner, "힌트 감사");
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(story),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -3325,7 +3325,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_hint h JOIN story_version v ON"
-                                    + " v.id=h.version_id WHERE v.story_id=? AND h.code='B'",
+                                        + " v.id=h.version_id WHERE v.story_id=? AND h.code='B'",
                                 Long.class,
                                 storyId(story)))
                 .isZero();
@@ -3356,7 +3356,7 @@ class StoryIT extends DatabaseContextTest {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM access_history WHERE actor_key=? AND"
-                                        + " route=?",
+                                            + " route=?",
                                     Long.class,
                                     owner.principal().accountKey(),
                                     "/admin/api/stories/{storyCode}/versions/{versionNo}/"
@@ -3534,14 +3534,14 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT detail::text FROM story_audit WHERE story_id=? AND"
-                                    + " action='ITEM_UPDATED' ORDER BY id DESC LIMIT 1",
+                                        + " action='ITEM_UPDATED' ORDER BY id DESC LIMIT 1",
                                 String.class,
                                 storyId(story)))
                 .doesNotContain("첫째", "😀");
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " (detail::text LIKE '%첫째%' OR detail::text LIKE '%둘째%')",
+                                        + " (detail::text LIKE '%첫째%' OR detail::text LIKE '%둘째%')",
                                 Long.class, storyId(story)))
                 .isZero();
     }
@@ -3786,7 +3786,7 @@ class StoryIT extends DatabaseContextTest {
                         java.util.Map.entry(publisher, "PUBLISH"))) {
             db.update(
                     "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                        + " (?,?,?,?)",
+                            + " (?,?,?,?)",
                     storyId(story),
                     relation.getKey().principal().accountId(),
                     relation.getValue(),
@@ -3927,7 +3927,7 @@ class StoryIT extends DatabaseContextTest {
                         owner.principal().accountId());
         db.update(
                 "UPDATE story_version SET active_yn=true,status='REVIEW',current_snapshot_id=?"
-                    + " WHERE id=?",
+                        + " WHERE id=?",
                 snapshot,
                 version);
         denied(
@@ -3994,8 +3994,8 @@ class StoryIT extends DatabaseContextTest {
         Instant original = eventUpdatedAt(story, "A");
         db.execute(
                 "CREATE FUNCTION fail_event_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF"
-                    + " NEW.detail->>'resource'='events' THEN RAISE EXCEPTION 'synthetic event"
-                    + " audit outage'; END IF; RETURN NEW; END $$");
+                        + " NEW.detail->>'resource'='events' THEN RAISE EXCEPTION 'synthetic event"
+                        + " audit outage'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_event_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
                         + "EXECUTE FUNCTION fail_event_audit()");
@@ -4233,7 +4233,7 @@ class StoryIT extends DatabaseContextTest {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM access_history WHERE actor_key=? AND"
-                                        + " route=?",
+                                            + " route=?",
                                     Long.class,
                                     owner.principal().accountKey(),
                                     "/admin/api/stories/{storyCode}/versions/{versionNo}/"
@@ -4728,7 +4728,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT basis FROM story_fact f JOIN story_version v ON"
-                                    + " v.id=f.version_id WHERE v.story_id=? AND f.code='F'",
+                                        + " v.id=f.version_id WHERE v.story_id=? AND f.code='F'",
                                 String.class,
                                 storyId(story)))
                 .isEqualTo(basis);
@@ -4764,7 +4764,7 @@ class StoryIT extends DatabaseContextTest {
                         java.util.Map.entry(publisher, "PUBLISH"))) {
             db.update(
                     "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                        + " (?,?,?,?)",
+                            + " (?,?,?,?)",
                     storyId(story),
                     relation.getKey().principal().accountId(),
                     relation.getValue(),
@@ -4901,7 +4901,7 @@ class StoryIT extends DatabaseContextTest {
         for (String state : java.util.List.of("REVIEW", "READY", "PUBLISHED")) {
             db.update(
                     "UPDATE story_version SET active_yn=true,status=?,current_snapshot_id=? WHERE"
-                        + " id=?",
+                            + " id=?",
                     state,
                     snapshot,
                     version);
@@ -5231,7 +5231,7 @@ class StoryIT extends DatabaseContextTest {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM access_history WHERE actor_key=? AND"
-                                        + " route=?",
+                                            + " route=?",
                                     Long.class,
                                     owner.principal().accountKey(),
                                     "/admin/api/stories/{storyCode}/versions/{versionNo}/"
@@ -5739,11 +5739,11 @@ class StoryIT extends DatabaseContextTest {
         var before =
                 db.queryForMap(
                         "SELECT v.edit_rev,v.updated_at,r.updated_at AS rubric_time,rc.updated_at"
-                            + " AS link_time,(SELECT count(*) FROM story_audit a WHERE"
-                            + " a.version_id=v.id AND a.action LIKE 'ITEM_%') AS audits FROM"
-                            + " story_version v JOIN story_rubric r ON r.version_id=v.id JOIN"
-                            + " rubric_clue rc ON rc.version_id=v.id AND rc.rubric_code=r.code"
-                            + " WHERE v.story_id=?",
+                                + " AS link_time,(SELECT count(*) FROM story_audit a WHERE"
+                                + " a.version_id=v.id AND a.action LIKE 'ITEM_%') AS audits FROM"
+                                + " story_version v JOIN story_rubric r ON r.version_id=v.id JOIN"
+                                + " rubric_clue rc ON rc.version_id=v.id AND rc.rubric_code=r.code"
+                                + " WHERE v.story_id=?",
                         storyId(story));
         assertThat(
                         rubrics.updateRubric(
@@ -5848,8 +5848,8 @@ class StoryIT extends DatabaseContextTest {
                 UUID.randomUUID());
         db.execute(
                 "CREATE FUNCTION fail_rubric_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN"
-                    + " IF NEW.detail->>'resource' IN ('rubrics','rubric-clues') THEN RAISE"
-                    + " EXCEPTION 'synthetic rubric audit outage'; END IF; RETURN NEW; END $$");
+                        + " IF NEW.detail->>'resource' IN ('rubrics','rubric-clues') THEN RAISE"
+                        + " EXCEPTION 'synthetic rubric audit outage'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_rubric_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
                         + "EXECUTE FUNCTION fail_rubric_audit()");
@@ -5919,7 +5919,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_rubric r JOIN story_version v ON"
-                                    + " v.id=r.version_id WHERE v.story_id=? AND r.code='NEW'",
+                                        + " v.id=r.version_id WHERE v.story_id=? AND r.code='NEW'",
                                 Long.class,
                                 storyId(story)))
                 .isZero();
@@ -5979,7 +5979,7 @@ class StoryIT extends DatabaseContextTest {
                         java.util.Map.entry(publisher, "PUBLISH"))) {
             db.update(
                     "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                        + " (?,?,?,?)",
+                            + " (?,?,?,?)",
                     storyId(story),
                     relation.getKey().principal().accountId(),
                     relation.getValue(),
@@ -6109,7 +6109,7 @@ class StoryIT extends DatabaseContextTest {
         for (String state : java.util.List.of("REVIEW", "READY", "PUBLISHED")) {
             db.update(
                     "UPDATE story_version SET active_yn=true,status=?,current_snapshot_id=? WHERE"
-                        + " id=?",
+                            + " id=?",
                     state,
                     snapshot,
                     version);
@@ -6529,7 +6529,7 @@ class StoryIT extends DatabaseContextTest {
                     + " outage'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_grade_sample_audit_insert BEFORE INSERT ON story_audit FOR"
-                    + " EACH ROW EXECUTE FUNCTION fail_grade_sample_audit()");
+                        + " EACH ROW EXECUTE FUNCTION fail_grade_sample_audit()");
         try {
             denied(
                     "STORY_UNAVAILABLE",
@@ -6671,7 +6671,7 @@ class StoryIT extends DatabaseContextTest {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM access_history WHERE actor_key=? AND"
-                                        + " route=?",
+                                            + " route=?",
                                     Long.class,
                                     owner.principal().accountKey(),
                                     "/admin/api/stories/{storyCode}/versions/{versionNo}/"
@@ -6881,7 +6881,7 @@ class StoryIT extends DatabaseContextTest {
         long id = storyId(story);
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 id,
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -7024,7 +7024,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_access WHERE story_id=? AND admin_id=?"
-                                    + " AND active_yn",
+                                        + " AND active_yn",
                                 Integer.class,
                                 id,
                                 editor.principal().accountId()))
@@ -7063,8 +7063,8 @@ class StoryIT extends DatabaseContextTest {
         long id = storyId(story);
         db.update(
                 "UPDATE admin_session SET started_at=started_at-interval '6"
-                    + " minutes',expires_at=expires_at-interval '6"
-                    + " minutes',reauth_at=reauth_at-interval '6 minutes' WHERE session_key=?",
+                        + " minutes',expires_at=expires_at-interval '6"
+                        + " minutes',reauth_at=reauth_at-interval '6 minutes' WHERE session_key=?",
                 owner.principal().sessionKey());
         denied(
                 "REAUTH_REQUIRED",
@@ -7084,8 +7084,8 @@ class StoryIT extends DatabaseContextTest {
                 owner.principal().sessionKey());
         db.execute(
                 "CREATE FUNCTION fail_story_state_audit() RETURNS trigger LANGUAGE plpgsql AS $$"
-                    + " BEGIN IF NEW.action='STORY_DEACTIVATED' THEN RAISE EXCEPTION 'synthetic"
-                    + " state audit outage'; END IF; RETURN NEW; END $$");
+                        + " BEGIN IF NEW.action='STORY_DEACTIVATED' THEN RAISE EXCEPTION 'synthetic"
+                        + " state audit outage'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_story_state BEFORE INSERT ON story_audit FOR EACH ROW "
                         + "EXECUTE FUNCTION fail_story_state_audit()");
@@ -7522,7 +7522,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT active_yn FROM story_access WHERE story_id=? AND"
-                                    + " admin_id=?",
+                                        + " admin_id=?",
                                 Boolean.class,
                                 id,
                                 target.principal().accountId()))
@@ -7532,7 +7532,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " action='ACCESS_REVOKED'",
+                                        + " action='ACCESS_REVOKED'",
                                 Long.class,
                                 id))
                 .isZero();
@@ -7563,16 +7563,16 @@ class StoryIT extends DatabaseContextTest {
         db.execute("CREATE SEQUENCE fail_access_block_seq");
         db.execute(
                 "CREATE FUNCTION fail_access_revoke_audit() RETURNS trigger LANGUAGE plpgsql AS $$"
-                    + " BEGIN IF NEW.action='ACCESS_REVOKED' THEN PERFORM"
-                    + " nextval('fail_access_block_seq'); RAISE EXCEPTION 'synthetic audit"
-                    + " failure'; END IF; RETURN NEW; END $$");
+                        + " BEGIN IF NEW.action='ACCESS_REVOKED' THEN PERFORM"
+                        + " nextval('fail_access_block_seq'); RAISE EXCEPTION 'synthetic audit"
+                        + " failure'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE FUNCTION fail_second_story_update() RETURNS trigger LANGUAGE plpgsql AS $$"
                     + " BEGIN IF (SELECT is_called FROM fail_access_block_seq) THEN RAISE EXCEPTION"
                     + " 'synthetic block failure'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_access_revoke_audit_insert BEFORE INSERT ON story_audit FOR"
-                    + " EACH ROW EXECUTE FUNCTION fail_access_revoke_audit()");
+                        + " EACH ROW EXECUTE FUNCTION fail_access_revoke_audit()");
         db.execute(
                 "CREATE TRIGGER fail_access_block BEFORE UPDATE ON story FOR EACH ROW "
                         + "EXECUTE FUNCTION fail_second_story_update()");
@@ -7600,7 +7600,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT active_yn FROM story_access WHERE story_id=? AND"
-                                    + " admin_id=?",
+                                        + " admin_id=?",
                                 Boolean.class,
                                 id,
                                 target.principal().accountId()))
@@ -7661,8 +7661,8 @@ class StoryIT extends DatabaseContextTest {
                                         .doesNotContain("접근 정보에서 감출 원고", "CHECK_0013"));
         db.update(
                 "UPDATE admin_session SET started_at=started_at-interval '6"
-                    + " minutes',expires_at=expires_at-interval '6"
-                    + " minutes',reauth_at=reauth_at-interval '6 minutes' WHERE session_key=?",
+                        + " minutes',expires_at=expires_at-interval '6"
+                        + " minutes',reauth_at=reauth_at-interval '6 minutes' WHERE session_key=?",
                 owner.principal().sessionKey());
         mvc.perform(get(route).secure(true).cookie(session))
                 .andExpect(status().isForbidden())
@@ -7863,7 +7863,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND action LIKE"
-                                    + " 'OWNER_%'",
+                                        + " 'OWNER_%'",
                                 Integer.class, storyId(code)))
                 .isEqualTo(2);
         assertThat(
@@ -7950,8 +7950,8 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " action='OWNER_EXPIRED' AND actor_id IS NULL AND"
-                                    + " detail->>'actorKind'='SYSTEM'",
+                                        + " action='OWNER_EXPIRED' AND actor_id IS NULL AND"
+                                        + " detail->>'actorKind'='SYSTEM'",
                                 Integer.class,
                                 storyId(code)))
                 .isEqualTo(1);
@@ -8201,8 +8201,8 @@ class StoryIT extends DatabaseContextTest {
         UUID requestKey = UUID.randomUUID();
         db.execute(
                 "CREATE FUNCTION fail_owner_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF"
-                    + " NEW.action IN ('OWNER_REQUESTED','OWNER_ACCEPTED') THEN RAISE EXCEPTION"
-                    + " 'synthetic owner audit outage'; END IF; RETURN NEW; END $$");
+                        + " NEW.action IN ('OWNER_REQUESTED','OWNER_ACCEPTED') THEN RAISE EXCEPTION"
+                        + " 'synthetic owner audit outage'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_owner_audit_insert BEFORE INSERT ON story_audit FOR EACH ROW "
                         + "EXECUTE FUNCTION fail_owner_audit()");
@@ -8474,8 +8474,8 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story WHERE code=? AND owner_id=? AND"
-                                    + " active_yn AND NOT view_yn AND published_id IS NULL AND"
-                                    + " edit_rev=0",
+                                        + " active_yn AND NOT view_yn AND published_id IS NULL AND"
+                                        + " edit_rev=0",
                                 Integer.class,
                                 code,
                                 owner.principal().accountId()))
@@ -8483,7 +8483,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT title FROM story_version WHERE story_id=(SELECT id FROM"
-                                    + " story WHERE code=?)",
+                                        + " story WHERE code=?)",
                                 String.class,
                                 code))
                 .isEqualTo("  시작 제목  ");
@@ -8501,14 +8501,14 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_access WHERE story_id=(SELECT id FROM"
-                                    + " story WHERE code=?)",
+                                        + " story WHERE code=?)",
                                 Integer.class,
                                 code))
                 .isZero();
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=(SELECT id FROM"
-                                    + " story WHERE code=?) AND action='STORY_CREATED'",
+                                        + " story WHERE code=?) AND action='STORY_CREATED'",
                                 Integer.class,
                                 code))
                 .isEqualTo(1);
@@ -8538,7 +8538,7 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT title FROM story_version WHERE story_id=(SELECT id FROM"
-                                    + " story WHERE code=?)",
+                                        + " story WHERE code=?)",
                                 String.class,
                                 code))
                 .isEqualTo("  시작 제목  ");
@@ -8556,13 +8556,13 @@ class StoryIT extends DatabaseContextTest {
         long lastId = storyId(last);
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 firstId,
                 editor.principal().accountId(),
                 owner.principal().accountId());
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 lastId,
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -8623,14 +8623,14 @@ class StoryIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " action='CONTENT_READ'",
+                                        + " action='CONTENT_READ'",
                                 Integer.class,
                                 firstId))
                 .isEqualTo(2);
         assertThat(
                         db.queryForObject(
                                 "SELECT count(*) FROM story_audit WHERE story_id=? AND"
-                                    + " action='CONTENT_READ' AND detail->>'requestId'=?",
+                                        + " action='CONTENT_READ' AND detail->>'requestId'=?",
                                 Integer.class,
                                 firstId,
                                 readRequest.toString()))
@@ -8661,7 +8661,7 @@ class StoryIT extends DatabaseContextTest {
         String code = create(owner, "Original");
         db.update(
                 "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
-                    + " (?,?,'EDIT',?)",
+                        + " (?,?,'EDIT',?)",
                 storyId(code),
                 editor.principal().accountId(),
                 owner.principal().accountId());
@@ -8735,7 +8735,566 @@ class StoryIT extends DatabaseContextTest {
         assertThat(auditCount(code, "SECTION_UPDATED")).isEqualTo(audited + 1);
     }
 
+    /** 실제 격리 PG에서 전역 네 조합과 관계 열 조합을 소유자·EDIT·비협업자별로 검사한다. */
+    @Test
+    void versionPermissionsRequireIndependentCurrentGlobalAndSameStoryActivePairs() {
+        Fixture owner = permissionAccount(true, false, (byte) 101);
+        Fixture editor = permissionAccount(false, false, (byte) 102);
+        Fixture outsider = permissionAccount(false, true, (byte) 103);
+        String code = create(owner, "권한 행렬");
+        String other = create(owner, "다른 사건 관계");
+        permissionRelation(code, owner, editor, "EDIT", true);
+
+        for (Fixture actor : java.util.List.of(owner, editor, outsider)) {
+            boolean edit = actor != outsider;
+            for (int globals = 0; globals < 4; globals++) {
+                permissionGlobals(
+                        actor, false, actor == outsider, (globals & 1) != 0, (globals & 2) != 0);
+                // 0: 없음, 1~3: 같은 사건 활성, 4~6: 비활성, 7~9: 다른 사건 활성.
+                for (int relations = 0; relations < 10; relations++) {
+                    db.update(
+                            "UPDATE story_access SET active_yn=false WHERE admin_id=? AND"
+                                    + " story_id IN (?,?) AND permission IN ('REVIEW','PUBLISH')",
+                            actor.principal().accountId(),
+                            storyId(code),
+                            storyId(other));
+                    int pair = relations == 0 ? 0 : (relations - 1) % 3 + 1;
+                    String target = relations >= 7 ? other : code;
+                    boolean active = relations > 0 && (relations <= 3 || relations >= 7);
+                    if ((pair & 1) != 0) permissionRelation(target, owner, actor, "REVIEW", active);
+                    if ((pair & 2) != 0)
+                        permissionRelation(target, owner, actor, "PUBLISH", active);
+
+                    boolean review =
+                            relations >= 1
+                                    && relations <= 3
+                                    && (globals & 1) != 0
+                                    && (pair & 1) != 0;
+                    boolean publish =
+                            relations >= 1
+                                    && relations <= 3
+                                    && (globals & 2) != 0
+                                    && (pair & 2) != 0;
+                    if (edit || review || publish) {
+                        assertVersionPermissions(actor, code, edit, review, publish);
+                    } else {
+                        denied(
+                                "NOT_FOUND",
+                                () ->
+                                        stories.getStoryDetail(
+                                                actor.sid(),
+                                                actor.principal(),
+                                                code,
+                                                1,
+                                                UUID.randomUUID()));
+                    }
+                }
+            }
+        }
+
+        // MANAGE와 CREATE가 모두 있어도 제작 조회나 REVIEW/PUBLISH를 상속하지 않는다.
+        permissionGlobals(outsider, true, true, false, false);
+        denied(
+                "NOT_FOUND",
+                () ->
+                        stories.getStoryDetail(
+                                outsider.sid(), outsider.principal(), code, 1, UUID.randomUUID()));
+        permissionRelation(code, owner, outsider, "EDIT", true);
+        assertVersionPermissions(outsider, code, true, false, false);
+        permissionRelation(code, owner, outsider, "EDIT", false);
+        denied(
+                "NOT_FOUND",
+                () ->
+                        stories.getStoryDetail(
+                                outsider.sid(), outsider.principal(), code, 1, UUID.randomUUID()));
+    }
+
+    /** 두 부모 각각의 비활성은 소유자 관리 조회만 남기고 모든 행동 권한을 닫는다. */
+    @Test
+    void inactiveParentsReturnNoActionPermissionsOnlyToTheOwner() throws Exception {
+        Fixture owner = permissionAccount(true, false, (byte) 104);
+        Fixture collaborator = permissionAccount(false, false, (byte) 105);
+        String code = create(owner, "비활성 부모");
+        for (Fixture actor : java.util.List.of(owner, collaborator)) {
+            permissionGlobals(actor, false, false, true, true);
+            for (String permission : java.util.List.of("EDIT", "REVIEW", "PUBLISH"))
+                permissionRelation(code, owner, actor, permission, true);
+        }
+        assertVersionPermissions(owner, code, true, true, true);
+        assertVersionPermissions(collaborator, code, true, true, true);
+
+        for (String table : java.util.List.of("story", "story_version")) {
+            String predicate = table.equals("story") ? "id=?" : "story_id=?";
+            db.update("UPDATE " + table + " SET active_yn=false WHERE " + predicate, storyId(code));
+            try {
+                assertVersionPermissions(owner, code, false, false, false);
+                assertPermissionHttp(owner, code, 200, false, false, false);
+                assertPermissionHttp(collaborator, code, 404, false, false, false);
+                denied(
+                        "NOT_FOUND",
+                        () ->
+                                stories.getStoryDetail(
+                                        collaborator.sid(),
+                                        collaborator.principal(),
+                                        code,
+                                        1,
+                                        UUID.randomUUID()));
+            } finally {
+                db.update(
+                        "UPDATE " + table + " SET active_yn=true WHERE " + predicate,
+                        storyId(code));
+            }
+        }
+    }
+
+    /** 실제 소속 사본을 가진 네 상태에서 같은 권한은 유지되며 READY·공개 품질 승인을 주장하지 않는다. */
+    @Test
+    void versionPermissionsDoNotDependOnDraftReviewReadyOrPublishedStatus() {
+        Fixture owner = permissionAccount(true, false, (byte) 106);
+        Fixture reviewerPublisher = permissionAccount(false, false, (byte) 107);
+        Fixture editor = permissionAccount(false, false, (byte) 108);
+        String code = create(owner, "상태와 권한 분리");
+        patch(owner, code, "basic", "0", "{\"difficulty\":3,\"limitSec\":900}");
+        permissionGlobals(owner, false, true, false, false);
+        permissionGlobals(reviewerPublisher, false, false, true, true);
+        permissionGlobals(editor, false, false, false, false);
+        permissionRelation(code, owner, reviewerPublisher, "REVIEW", true);
+        permissionRelation(code, owner, reviewerPublisher, "PUBLISH", true);
+        permissionRelation(code, owner, editor, "EDIT", true);
+        long version =
+                db.queryForObject(
+                        "SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(code));
+        long snapshot = permissionSnapshot(owner, code);
+
+        for (String state : java.util.List.of("DRAFT", "REVIEW", "READY", "PUBLISHED")) {
+            db.update(
+                    "UPDATE story_version SET status=?,current_snapshot_id=? WHERE id=?",
+                    state,
+                    state.equals("DRAFT") ? null : snapshot,
+                    version);
+            db.update(
+                    "UPDATE story SET published_id=? WHERE id=?",
+                    state.equals("PUBLISHED") ? version : null,
+                    storyId(code));
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT status FROM story_version WHERE id=?",
+                                    String.class,
+                                    version))
+                    .isEqualTo(state);
+            assertVersionPermissions(owner, code, true, false, false);
+            assertVersionPermissions(reviewerPublisher, code, false, true, true);
+            assertVersionPermissions(editor, code, true, false, false);
+        }
+    }
+
+    /** 동일한 서버 행위자·쿠키에서 현재 DB 역할과 관계 변화를 읽고 HTTP 허용 필드만 반환한다. */
+    @Test
+    void permissionHttpUsesCurrentDatabaseFactsWithoutReplacingTheHeldActor() throws Exception {
+        Fixture owner = permissionAccount(true, false, (byte) 109);
+        Fixture actor = permissionAccount(false, false, (byte) 110);
+        String code = create(owner, "현재 DB 권한");
+        permissionGlobals(owner, false, false, false, false);
+        permissionGlobals(actor, false, false, false, false);
+        permissionRelation(code, owner, actor, "EDIT", true);
+        permissionRelation(code, owner, actor, "REVIEW", true);
+        permissionRelation(code, owner, actor, "PUBLISH", true);
+        assertPermissionHttp(actor, code, 200, true, false, false);
+        permissionGlobals(actor, false, false, true, false);
+        assertPermissionHttp(actor, code, 200, true, true, false);
+        permissionGlobals(actor, false, false, false, true);
+        assertPermissionHttp(actor, code, 200, true, false, true);
+        permissionGlobals(actor, false, false, true, true);
+        assertPermissionHttp(actor, code, 200, true, true, true);
+        permissionRelation(code, owner, actor, "REVIEW", false);
+        assertPermissionHttp(actor, code, 200, true, false, true);
+        permissionRelation(code, owner, actor, "PUBLISH", false);
+        assertPermissionHttp(actor, code, 200, true, false, false);
+        permissionRelation(code, owner, actor, "EDIT", false);
+        assertPermissionHttp(actor, code, 404, false, false, false);
+        permissionRelation(code, owner, actor, "REVIEW", true);
+        assertPermissionHttp(actor, code, 200, false, true, false);
+        permissionGlobals(actor, false, false, false, true);
+        assertPermissionHttp(actor, code, 404, false, false, false);
+        assertThat(versionRev(code)).isZero();
+    }
+
+    /** 조회는 원고·수정번호·사본·검수 이력을 바꾸지 않고 CONTENT_READ 한 건만 요구하며 감사 실패는 거절한다. */
+    @Test
+    void permissionProjectionOnlyAddsTheRequiredReadAuditAndFailsClosedOnAuditOutage()
+            throws Exception {
+        Fixture owner = permissionAccount(true, false, (byte) 111);
+        String code = create(owner, "권한 투영 읽기 불변성");
+        patch(owner, code, "basic", "0", "{\"difficulty\":3,\"limitSec\":900}");
+        permissionGlobals(owner, false, false, true, true);
+        permissionRelation(code, owner, owner, "REVIEW", true);
+        permissionRelation(code, owner, owner, "PUBLISH", true);
+        long snapshot = permissionSnapshot(owner, code);
+        db.update(
+                "UPDATE story_version SET status='REVIEW',current_snapshot_id=? WHERE story_id=?",
+                snapshot,
+                storyId(code));
+        db.update(
+                "INSERT INTO"
+                    + " review_record(snapshot_id,kind,request_key,evidence_data,result,reviewer_id,evidence,self_review_yn)"
+                    + " VALUES"
+                    + " (?,'STRUCTURE',?,'{\"fixture\":\"permissions-only\"}'::jsonb,'INCOMPLETE',?,?,true)",
+                snapshot,
+                UUID.randomUUID(),
+                owner.principal().accountId(),
+                "합성 미완성 기록; 품질 승인 아님");
+        var before = permissionBusinessRows(code);
+        long reads = auditCount(code, "CONTENT_READ");
+        assertPermissionHttp(owner, code, 200, true, true, true);
+        assertThat(permissionBusinessRows(code)).isEqualTo(before);
+        assertThat(auditCount(code, "CONTENT_READ")).isEqualTo(reads + 1);
+        db.execute(
+                "CREATE FUNCTION fail_permission_read_audit() RETURNS trigger LANGUAGE plpgsql"
+                        + " AS $$ BEGIN IF NEW.action='CONTENT_READ' THEN RAISE EXCEPTION"
+                        + " 'synthetic permission read audit outage'; END IF; RETURN NEW; END $$");
+        db.execute(
+                "CREATE TRIGGER fail_permission_read BEFORE INSERT ON story_audit FOR EACH ROW"
+                        + " EXECUTE FUNCTION fail_permission_read_audit()");
+        try {
+            assertPermissionHttp(owner, code, 503, false, false, false);
+        } finally {
+            db.execute("DROP TRIGGER fail_permission_read ON story_audit");
+            db.execute("DROP FUNCTION fail_permission_read_audit()");
+        }
+        assertThat(permissionBusinessRows(code)).isEqualTo(before);
+        assertThat(auditCount(code, "CONTENT_READ")).isEqualTo(reads + 1);
+    }
+
+    /** 보유 행위자의 인증 회수·만료·미준비는 false 상세가 아니라 실제 HTTP 401로 거절한다. */
+    @Test
+    void heldPermissionActorCannotReadAfterAuthenticationRevocationOrExpiry() throws Exception {
+        Fixture owner = permissionAccount(true, false, (byte) 112);
+        String code = create(owner, "인증 거절");
+        permissionGlobals(owner, false, false, false, false);
+        byte seed = 113;
+        for (String invalid :
+                java.util.List.of(
+                        "authRev",
+                        "revoked",
+                        "expired",
+                        "idle",
+                        "inactive",
+                        "pending",
+                        "recovery",
+                        "identity")) {
+            Fixture actor = permissionAccount(false, false, seed++);
+            permissionGlobals(actor, false, false, true, true);
+            permissionRelation(code, owner, actor, "REVIEW", true);
+            permissionRelation(code, owner, actor, "PUBLISH", true);
+            assertPermissionHttp(actor, code, 200, false, true, true);
+            switch (invalid) {
+                case "authRev" ->
+                        db.update(
+                                "UPDATE admin_credential SET auth_rev=auth_rev+1 WHERE"
+                                        + " account_id=?",
+                                actor.principal().accountId());
+                case "revoked" ->
+                        db.update(
+                                "UPDATE admin_session SET"
+                                        + " state='REVOKED',revoked_at=clock_timestamp() WHERE"
+                                        + " session_key=?",
+                                actor.principal().sessionKey());
+                case "expired" ->
+                        db.update(
+                                "UPDATE admin_session SET expires_at=statement_timestamp()-interval"
+                                    + " '1 second', started_at=statement_timestamp()-interval '8"
+                                    + " hours 1 second' WHERE session_key=?",
+                                actor.principal().sessionKey());
+                case "idle" ->
+                        db.update(
+                                "UPDATE admin_session SET"
+                                    + " last_action_at=statement_timestamp()-interval '31 minutes',"
+                                    + " started_at=statement_timestamp()-interval '1 hour',"
+                                    + " expires_at=statement_timestamp()+interval '7 hours' WHERE"
+                                    + " session_key=?",
+                                actor.principal().sessionKey());
+                case "inactive" ->
+                        db.update(
+                                "UPDATE admin_account SET active_yn=false WHERE id=?",
+                                actor.principal().accountId());
+                case "pending" ->
+                        db.update(
+                                "UPDATE admin_credential SET enrolled_at=null,mfa_state='PENDING'"
+                                        + " WHERE account_id=?",
+                                actor.principal().accountId());
+                case "recovery" ->
+                        db.update(
+                                "UPDATE admin_credential SET mfa_state='RECOVERY' WHERE"
+                                        + " account_id=?",
+                                actor.principal().accountId());
+                case "identity" ->
+                        db.update(
+                                "UPDATE admin_account SET account_key=? WHERE id=?",
+                                UUID.randomUUID(),
+                                actor.principal().accountId());
+                default -> throw new AssertionError(invalid);
+            }
+            assertPermissionHttp(actor, code, 401, false, false, false);
+            denied(
+                    "AUTH_REQUIRED",
+                    () ->
+                            stories.getStoryDetail(
+                                    actor.sid(), actor.principal(), code, 1, UUID.randomUUID()));
+        }
+    }
+
+    /**
+     * 실제 저장 원고·정책과 빈 활성 자원 집합을 codec으로 고정해 같은 버전의 사본 행을 저장한다. 완성도·검수 통과·READY·공개 승인은 주장하지 않는다.
+     *
+     * @param owner null이 아닌 저장 소유자이며 조회와 사본 생성자로 사용한다
+     * @param code null이 아닌 저장 사건 코드이며 모든 자원은 실제로 비어 있어야 한다
+     * @return 같은 실제 버전과 원래 수정번호에 결속된 양의 사본 ID
+     */
+    private long permissionSnapshot(Fixture owner, String code) {
+        long version =
+                db.queryForObject(
+                        "SELECT id FROM story_version WHERE story_id=?", Long.class, storyId(code));
+        JsonNode sections =
+                json(stories.getStoryDetail(
+                                owner.sid(), owner.principal(), code, 1, UUID.randomUUID()))
+                        .get("sections");
+        var resources = mapper.createObjectNode();
+        for (String name :
+                java.util.List.of(
+                        "persons",
+                        "roles",
+                        "pairs",
+                        "clues",
+                        "clueRoles",
+                        "hints",
+                        "events",
+                        "facts",
+                        "rubrics",
+                        "rubricClues",
+                        "gradeSamples")) resources.putArray(name);
+        String policy =
+                db.queryForObject(
+                        "SELECT policy_code FROM story_version WHERE id=?", String.class, version);
+        var frozen =
+                com.reasoning.common.story.model.StoryFrozenSnapshotProducer.freeze(
+                        code, 1, versionRev(code), policy, sections, resources);
+        return db.queryForObject(
+                "INSERT INTO"
+                    + " review_snapshot(version_id,edit_rev,format_no,payload,request_key,created_by)"
+                    + " VALUES (?,?,1,?::jsonb,?,?) RETURNING id",
+                Long.class,
+                version,
+                versionRev(code),
+                frozen.payload().toString(),
+                UUID.randomUUID(),
+                owner.principal().accountId());
+    }
+
+    /**
+     * 새 권한 정의용 계정의 전역 플래그를 기본값에 의존하지 않고 실제 DB에 고정한다.
+     *
+     * @param actor null이 아닌 합성 저장 계정
+     * @param create 명시적인 CREATE 값
+     * @param manage 명시적인 MANAGE 값
+     * @param review 명시적인 REVIEW 값
+     * @param publish 명시적인 PUBLISH 값
+     */
+    private void permissionGlobals(
+            Fixture actor, boolean create, boolean manage, boolean review, boolean publish) {
+        db.update(
+                "UPDATE admin_account SET can_create=?,can_manage=?,can_review=?,can_publish=?"
+                        + " WHERE id=?",
+                create,
+                manage,
+                review,
+                publish,
+                actor.principal().accountId());
+    }
+
+    /**
+     * 실제 소속 관계를 명시적으로 저장하며 기존 비활성 행을 재사용한다.
+     *
+     * @param code null이 아닌 저장 사건 코드
+     * @param owner null이 아닌 저장 허가자
+     * @param actor null이 아닌 관계 대상 저장 계정
+     * @param permission 이 테스트가 고정한 EDIT/REVIEW/PUBLISH이며 null이 아니다
+     * @param active 명시적인 활성 관계 값
+     */
+    private void permissionRelation(
+            String code, Fixture owner, Fixture actor, String permission, boolean active) {
+        db.update(
+                "INSERT INTO story_access(story_id,admin_id,permission,active_yn,granted_by)"
+                        + " VALUES (?,?,?,?,?) ON CONFLICT (story_id,admin_id,permission)"
+                        + " DO UPDATE SET active_yn=EXCLUDED.active_yn",
+                storyId(code),
+                actor.principal().accountId(),
+                permission,
+                active,
+                owner.principal().accountId());
+    }
+
+    /**
+     * 실제 서비스 상세의 세 권한과 정확한 불리언 필드를 검사한다.
+     *
+     * @param actor null이 아닌 보유 서버 행위자
+     * @param code null이 아닌 저장 사건 코드
+     * @param edit 기대 EDIT 권한
+     * @param review 기대 REVIEW 권한
+     * @param publish 기대 PUBLISH 권한
+     */
+    private void assertVersionPermissions(
+            Fixture actor, String code, boolean edit, boolean review, boolean publish) {
+        JsonNode detail =
+                json(
+                        stories.getStoryDetail(
+                                actor.sid(), actor.principal(), code, 1, UUID.randomUUID()));
+        assertThat(detail.get("permissions"))
+                .isEqualTo(
+                        mapper.createObjectNode()
+                                .put("edit", edit)
+                                .put("review", review)
+                                .put("publish", publish));
+    }
+
+    /**
+     * 실제 서블릿 응답의 상태·no-store·정확한 공개 필드와 항상 존재하는 불리언을 검사한다.
+     *
+     * @param actor null이 아닌 보유 인증 계정
+     * @param code null이 아닌 저장 사건 코드
+     * @param expectedStatus 기대 HTTP 상태이며 실패이면 상세 본문을 허용하지 않는다
+     * @param edit 성공 시 기대 EDIT
+     * @param review 성공 시 기대 REVIEW
+     * @param publish 성공 시 기대 PUBLISH
+     * @throws Exception MockMvc 또는 JSON 해석 실패 시
+     */
+    private void assertPermissionHttp(
+            Fixture actor,
+            String code,
+            int expectedStatus,
+            boolean edit,
+            boolean review,
+            boolean publish)
+            throws Exception {
+        var result =
+                mvc.perform(
+                                get("/admin/api/stories/" + code + "/versions/1")
+                                        .secure(true)
+                                        .cookie(cookie(actor)))
+                        .andExpect(status().is(expectedStatus))
+                        .andReturn();
+        assertThat(result.getResponse().getHeader("Cache-Control")).contains("no-store");
+        JsonNode detail = mapper.readTree(result.getResponse().getContentAsString());
+        if (expectedStatus != 200) {
+            assertThat(detail.has("permissions")).isFalse();
+            assertThat(detail.has("sections")).isFalse();
+            return;
+        }
+
+        var fields = new java.util.ArrayList<String>();
+        detail.fieldNames().forEachRemaining(fields::add);
+        assertThat(fields)
+                .containsExactlyInAnyOrder(
+                        "storyCode",
+                        "storyRev",
+                        "storyActiveYn",
+                        "ownerAccountKey",
+                        "versionNo",
+                        "editRev",
+                        "status",
+                        "activeYn",
+                        "currentSnapshotId",
+                        "permissions",
+                        "sections",
+                        "policy",
+                        "warnings",
+                        "updatedAt");
+        var permissionFields = new java.util.ArrayList<String>();
+        detail.get("permissions").fieldNames().forEachRemaining(permissionFields::add);
+        assertThat(permissionFields).containsExactlyInAnyOrder("edit", "review", "publish");
+        for (String field : permissionFields)
+            assertThat(detail.get("permissions").get(field).isBoolean()).isTrue();
+        assertThat(detail.get("permissions"))
+                .isEqualTo(
+                        mapper.createObjectNode()
+                                .put("edit", edit)
+                                .put("review", review)
+                                .put("publish", publish));
+    }
+
+    /**
+     * 권한 조회 전후 실제 부모·사본·검수 이력·비조회 감사의 불변성을 비교한다.
+     *
+     * @param code null이 아닌 저장 사건 코드
+     * @return 내부 행 비교용 값이며 HTTP로 노출하지 않는다
+     */
+    private java.util.Map<String, Object> permissionBusinessRows(String code) {
+        long id = storyId(code);
+        return java.util.Map.of(
+                "story", db.queryForMap("SELECT * FROM story WHERE id=?", id),
+                "versions",
+                        db.queryForList(
+                                "SELECT * FROM story_version WHERE story_id=? ORDER BY id", id),
+                "snapshots",
+                        db.queryForList(
+                                "SELECT * FROM review_snapshot WHERE version_id IN (SELECT id FROM"
+                                        + " story_version WHERE story_id=?) ORDER BY id",
+                                id),
+                "records",
+                        db.queryForList(
+                                "SELECT * FROM review_record WHERE snapshot_id IN (SELECT s.id FROM"
+                                    + " review_snapshot s JOIN story_version v ON v.id=s.version_id"
+                                    + " WHERE v.story_id=?) ORDER BY id",
+                                id),
+                "audits",
+                        db.queryForList(
+                                "SELECT * FROM story_audit WHERE story_id=?"
+                                        + " AND action<>'CONTENT_READ' ORDER BY id",
+                                id));
+    }
+
+    /**
+     * 권한 정의 계정의 합성 로그인 해시를 기존 균일 바이트 fixture와 구조적으로 분리한다. 비밀번호 로그인 증명이 아니라 실제 저장 자격·세션을 만드는 테스트 전용
+     * 네임스페이스다.
+     *
+     * @param create 명시적인 CREATE 값
+     * @param manage 명시적인 MANAGE 값
+     * @param seed 새 권한 정의들 안에서 중복되지 않는 계정 구분 바이트
+     * @return 비균일 32바이트 해시를 가진 저장 계정·세션
+     */
+    private Fixture permissionAccount(boolean create, boolean manage, byte seed) {
+        byte[] loginHash = new byte[32];
+        loginHash[0] = 0x50;
+        loginHash[1] = 0x45;
+        loginHash[2] = 0x52;
+        loginHash[3] = 0x4D;
+        loginHash[31] = seed;
+        return account(create, manage, loginHash);
+    }
+
+    /**
+     * 기존 계정 fixture의 균일 32바이트 로그인 해시 의미를 그대로 보존한다.
+     *
+     * @param create 명시적인 CREATE 값
+     * @param manage 명시적인 MANAGE 값
+     * @param seed 기존 정의에서 사용하는 32개 동일 바이트 값
+     * @return 기존과 같은 합성 저장 계정·세션
+     */
     private Fixture account(boolean create, boolean manage, byte seed) {
+        byte[] loginHash = new byte[32];
+        Arrays.fill(loginHash, seed);
+        return account(create, manage, loginHash);
+    }
+
+    /**
+     * 명시적인 합성 로그인 해시로 실제 계정·준비 자격·저장 세션을 같은 기존 절차로 조립한다.
+     *
+     * @param create 명시적인 CREATE 값
+     * @param manage 명시적인 MANAGE 값
+     * @param loginHash null이 아닌 정확히 32바이트의 합성 해시이며 다른 fixture와 중복되지 않는다
+     * @return 실제 저장 계정과 현재 준비 세션
+     * @throws org.springframework.dao.DataAccessException 저장 제약 위반 또는 DB 장애 시
+     */
+    private Fixture account(boolean create, boolean manage, byte[] loginHash) {
         UUID key = UUID.randomUUID();
         long id =
                 db.queryForObject(
@@ -8745,8 +9304,6 @@ class StoryIT extends DatabaseContextTest {
                         key,
                         create,
                         manage);
-        byte[] loginHash = new byte[32];
-        Arrays.fill(loginHash, seed);
         Instant now =
                 db.queryForObject(
                         "SELECT clock_timestamp()", (rs, row) -> rs.getTimestamp(1).toInstant());

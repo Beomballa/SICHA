@@ -8,9 +8,12 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.reasoning.common.grading.model.FrozenModelProjection;
+import com.reasoning.common.grading.model.FrozenModelProjection.RubricCoordinates;
+import com.reasoning.common.grading.model.FrozenModelProjection.SemanticInput;
 import com.reasoning.common.grading.model.GradeModels;
 import com.reasoning.common.grading.model.SnapshotJson;
 import com.reasoning.common.grading.service.FrozenDatasetValidator;
+import com.reasoning.common.grading.service.GradeResultValidator;
 import com.reasoning.common.story.model.FrozenSnapshotCodec;
 import com.reasoning.common.story.model.FrozenSnapshotCodec.FrozenSnapshot;
 
@@ -19,10 +22,11 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /** 순수 전체 codec→집합→선택→모델 경계를 검사한다. 영속 시작·인가·실제 모델 품질을 증명하지 않는다. */
-class FrozenSnapshotContractTest {
+public class FrozenSnapshotContractTest {
     private static final String CHECKER = "11111111-1111-4111-8111-111111111111";
     private static final List<String> RESOURCES =
             List.of(
@@ -45,6 +49,480 @@ class FrozenSnapshotContractTest {
              "contradictions":[{"code":"CONTRADICT_CULPRIT","meaning":"선택한 범인과 본문에서 최종 단정한 범인이 서로 충돌한다."},
               {"code":"UNSUPPORTED_ACCOMPLICE","meaning":"고정 사실과 타당한 증거 연결로 뒷받침되지 않거나 단독범행 사실과 양립하지 않는 공범을 최종 단정한다."}]}
             """;
+
+    /** 실제 공장의 좌표·보고서·정규 바이트가 서버 소유 값과 분리되고 동일한 원고 표기에 안정적인지 검사한다. */
+    @Test
+    void semanticInputOwnsExactReportCoordinatesAndEquivalentCanonicalBytes() {
+        ObjectNode source = complete();
+        input(source, "FULL").set("report", report("😀\n원문"));
+        var frozen = FrozenSnapshotCodec.freeze(source);
+        var dataset = new FrozenDatasetValidator().validate(frozen);
+        SemanticInput semantic = FrozenModelProjection.project(dataset, dataset.select("FULL"));
+        assertThat(semantic.report()).isEqualTo(dataset.select("FULL").report());
+        assertThat(SnapshotJson.encode(semantic.payload().get("report")))
+                .isEqualTo(
+                        "{\"culpritCode\":\"P1\",\"evidence\":\"\",\"method\":\"\\uD83D\\uDE00\\n원문\",\"motive\":\"\",\"time\":\"\"}"
+                                .getBytes(StandardCharsets.UTF_8));
+        assertThat(semantic.orderedRubricCoordinates())
+                .containsExactly(
+                        new RubricCoordinates(
+                                "CULPRIT",
+                                List.of(),
+                                List.of("CONTRADICT_CULPRIT", "UNSUPPORTED_ACCOMPLICE")),
+                        new RubricCoordinates("EVIDENCE", List.of("CLAIM"), List.of()),
+                        new RubricCoordinates("METHOD", List.of("CLAIM"), List.of()),
+                        new RubricCoordinates("MOTIVE", List.of("CLAIM"), List.of()),
+                        new RubricCoordinates("TIME", List.of("CLAIM"), List.of()));
+        assertThat(semantic.orderedRubricCoordinates())
+                .isEqualTo(GradeResultValidator.coordinates(dataset.gradingSnapshot()));
+        String equivalent =
+                new String(frozen.payloadBytes(), StandardCharsets.UTF_8)
+                        .replace("\"formatNo\":1", "\"formatNo\":1e0")
+                        .replace("\"maxScore\":20", "\"maxScore\":20.00");
+        var equivalentDataset =
+                new FrozenDatasetValidator()
+                        .validate(
+                                FrozenSnapshotCodec.decode(
+                                        equivalent.getBytes(StandardCharsets.UTF_8)));
+        assertThat(
+                        FrozenModelProjection.project(
+                                        equivalentDataset, equivalentDataset.select("FULL"))
+                                .payloadBytes())
+                .isEqualTo(semantic.payloadBytes());
+        byte[] original = semantic.payloadBytes();
+        source.removeAll();
+        semantic.payloadBytes()[0] = 0;
+        ((ObjectNode) semantic.payload()).removeAll();
+        assertThat(semantic.payloadBytes()).isEqualTo(original);
+        assertThat(semantic.report().method()).isEqualTo("😀\n원문");
+        assertThatThrownBy(() -> semantic.orderedRubricCoordinates().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(
+                        () ->
+                                semantic.orderedRubricCoordinates()
+                                        .getFirst()
+                                        .contradictionCodes()
+                                        .clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(semantic.toString()).isEqualTo("SemanticInput[structuralData=true]");
+        List<String> mutable = new java.util.ArrayList<>(List.of("SECOND", "FIRST"));
+        var coordinate = new RubricCoordinates("R", mutable, List.of("CONTRADICTION"));
+        mutable.clear();
+        assertThat(coordinate.claimCodes()).containsExactly("SECOND", "FIRST");
+        for (List<String> bad :
+                List.of(List.of("A", "A"), List.of("bad"), List.of("A".repeat(33)))) {
+            assertThatThrownBy(() -> new RubricCoordinates("R", bad, List.of()))
+                    .hasMessage("INVALID_MODEL_PROJECTION")
+                    .hasNoCause();
+        }
+        assertThatThrownBy(() -> new RubricCoordinates("R", List.of("A"), List.of("A")))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+    }
+
+    /** 독립 JSON literal로 모델 투영 전체 바이트를 고정하여 허용 필드·null·규칙 배열 순서의 변화를 검출한다. */
+    @Test
+    void literalCanonicalModelBytesPinTheExistingAnswerFreeWire() {
+        var dataset = new FrozenDatasetValidator().validate(FrozenSnapshotCodec.freeze(complete()));
+        String culprit =
+                "{\"acceptedText\":null,\"category\":\"CULPRIT\",\"code\":\"CULPRIT\",\"maxScore\":25,\"partialText\":null,\"passScore\":25,\"rejectText\":null,\"requiredYn\":true,\"ruleData\":{\"claims\":[],\"contradictions\":[{\"code\":\"CONTRADICT_CULPRIT\",\"meaning\":\"선택한"
+                    + " 범인과 본문에서 최종 단정한 범인이 서로"
+                    + " 충돌한다.\"},{\"code\":\"UNSUPPORTED_ACCOMPLICE\",\"meaning\":\"고정 사실과 타당한 증거"
+                    + " 연결로 뒷받침되지 않거나 단독범행 사실과 양립하지 않는 공범을 최종"
+                    + " 단정한다.\"}],\"formatNo\":1,\"levels\":[{\"code\":\"ZERO\",\"routes\":[],\"score\":0},{\"code\":\"FULL\",\"routes\":[],\"score\":25}],\"requiredNotice\":\"선택한"
+                    + " 범인을 근거로 입증하세요.\"}}";
+        String expected =
+                "{\"formatNo\":1,\"gradingContext\":{\"clues\":[{\"body\":\"단서\",\"code\":\"C1\",\"personCode\":\"P1\",\"scope\":\"ROLE\",\"sourceText\":\"출처\",\"title\":\"C1\"},{\"body\":\"단서\",\"code\":\"C2\",\"personCode\":\"P1\",\"scope\":\"ROLE\",\"sourceText\":\"출처\",\"title\":\"C2\"}],\"facts\":[{\"basis\":\"근거\",\"code\":\"F1\",\"statement\":\"사실\",\"truth\":\"TRUE\"},{\"basis\":null,\"code\":\"F2\",\"statement\":null,\"truth\":\"MISREAD\"}],\"persons\":[{\"code\":\"P1\",\"name\":\"P1\",\"publicText\":null,\"secretText\":\"비밀\"},{\"code\":\"P2\",\"name\":\"P2\",\"publicText\":null,\"secretText\":\"비밀\"}],\"rubricClues\":[{\"clueCode\":\"C1\",\"linkText\":\"연결\",\"rubricCode\":\"EVIDENCE\"},{\"clueCode\":\"C1\",\"linkText\":\"연결\",\"rubricCode\":\"METHOD\"},{\"clueCode\":\"C1\",\"linkText\":\"연결\",\"rubricCode\":\"MOTIVE\"},{\"clueCode\":\"C1\",\"linkText\":\"연결\",\"rubricCode\":\"TIME\"}],\"rubrics\":["
+                        + culprit
+                        + ","
+                        + literalSemanticRubric("EVIDENCE", 30, true)
+                        + ","
+                        + literalSemanticRubric("METHOD", 20, true)
+                        + ","
+                        + literalSemanticRubric("MOTIVE", 10, false)
+                        + ","
+                        + literalSemanticRubric("TIME", 15, false)
+                        + "]},\"report\":{\"culpritCode\":\"P1\",\"evidence\":\"\",\"method\":\"SELECTED_REPORT\",\"motive\":\"\",\"time\":\"\"}}";
+        assertThat(FrozenModelProjection.project(dataset, dataset.select("FULL")).payloadBytes())
+                .isEqualTo(expected.getBytes(StandardCharsets.UTF_8));
+        SemanticInput decoded =
+                FrozenModelProjection.decodeCanonical(expected.getBytes(StandardCharsets.UTF_8));
+        assertThat(decoded.payloadBytes()).isEqualTo(expected.getBytes(StandardCharsets.UTF_8));
+        assertThat(decoded.report()).isEqualTo(dataset.select("FULL").report());
+        assertThat(decoded.orderedRubricCoordinates())
+                .isEqualTo(
+                        FrozenModelProjection.project(dataset, dataset.select("FULL"))
+                                .orderedRubricCoordinates());
+        String emoji = expected.replace("SELECTED_REPORT", "  \\uD83D\\uDE00\\n원문  ");
+        assertThat(
+                        FrozenModelProjection.decodeCanonical(
+                                        emoji.getBytes(StandardCharsets.UTF_8))
+                                .payloadBytes())
+                .isEqualTo(emoji.getBytes(StandardCharsets.UTF_8));
+        assertThat(
+                        FrozenModelProjection.decodeCanonical(
+                                        emoji.getBytes(StandardCharsets.UTF_8))
+                                .report()
+                                .method())
+                .isEqualTo("  😀\n원문  ");
+    }
+
+    /**
+     * serializer나 구현 투영을 호출하지 않는 독립 literal의 반복 소항목 부분이다.
+     *
+     * @param category 합성 fixture에 고정된 비범인 분류 코드
+     * @param max 해당 합성 소항목의 고정 최대 배점
+     * @param required 합성 fixture에 고정된 필수 여부
+     * @return 정확한 키·배열 순서를 가진 독립 JSON literal
+     */
+    private static String literalSemanticRubric(String category, int max, boolean required) {
+        return "{\"acceptedText\":null,\"category\":\""
+                + category
+                + "\",\"code\":\""
+                + category
+                + "\",\"maxScore\":"
+                + max
+                + ",\"partialText\":null,\"passScore\":"
+                + (required ? max : "null")
+                + ",\"rejectText\":null,\"requiredYn\":"
+                + required
+                + ",\"ruleData\":{\"claims\":[{\"code\":\"CLAIM\",\"exampleClueRoutes\":[[\"C1\"]],\"factCodes\":[\"F1\"],\"meaning\":\"정의한"
+                + " 의미\"}],\"contradictions\":[],\"formatNo\":1,\"levels\":[{\"code\":\"ZERO\",\"routes\":[],\"score\":0},{\"code\":\"FULL\",\"routes\":[[\"CLAIM\"]],\"score\":"
+                + max
+                + "}],\"requiredNotice\":"
+                + (required ? "\"입증하세요\"" : "null")
+                + "}}";
+    }
+
+    /** 공개 decoder는 자료만 검증하고 실제 서버 공장은 여전히 같은 집합 선택을 요구한다. */
+    @Test
+    void semanticInputRejectsMalformedProjectionWithoutExposingReportOrCause() {
+        var dataset = new FrozenDatasetValidator().validate(FrozenSnapshotCodec.freeze(complete()));
+        ObjectNode valid =
+                (ObjectNode)
+                        FrozenModelProjection.project(dataset, dataset.select("FULL")).payload();
+        SemanticInput rebuilt = FrozenModelProjection.decodeCanonical(SnapshotJson.encode(valid));
+        assertThat(rebuilt.payloadBytes()).isEqualTo(SnapshotJson.encode(valid));
+        assertThat(rebuilt.report()).isNotSameAs(dataset.select("FULL").report());
+        valid.put("formatNo", new BigDecimal("1.0"));
+        assertThat(FrozenModelProjection.decodeCanonical(SnapshotJson.encode(valid)).payloadBytes())
+                .isEqualTo(rebuilt.payloadBytes());
+        List<Consumer<ObjectNode>> mutations =
+                List.of(
+                        root -> root.put("fault", "PRIVATE_FAULT_CANARY"),
+                        root -> root.remove("report"),
+                        root ->
+                                ((ObjectNode) root.get("report"))
+                                        .put("method", "PRIVATE_REPORT_CANARY\r\n"),
+                        root -> ((ObjectNode) root.get("report")).put("culpritCode", "UNKNOWN"),
+                        root -> ((ObjectNode) root.get("gradingContext")).putArray("persons"),
+                        root ->
+                                ((ObjectNode) root.get("gradingContext").get("persons").get(0))
+                                        .remove("publicText"),
+                        root ->
+                                ((ObjectNode) root.get("gradingContext").get("clues").get(0))
+                                        .put("personCode", "UNKNOWN"),
+                        root ->
+                                ((ObjectNode) root.get("gradingContext").get("rubricClues").get(0))
+                                        .put("clueCode", "UNKNOWN"),
+                        root ->
+                                ((ObjectNode)
+                                                root.get("gradingContext")
+                                                        .get("rubrics")
+                                                        .get(1)
+                                                        .get("ruleData")
+                                                        .get("claims")
+                                                        .get(0))
+                                        .putArray("factCodes")
+                                        .add("UNKNOWN"),
+                        root ->
+                                ((ObjectNode)
+                                                root.get("gradingContext")
+                                                        .get("rubrics")
+                                                        .get(0)
+                                                        .get("ruleData"))
+                                        .putArray("claims")
+                                        .addObject()
+                                        .put("code", "PRIVATE_CULPRIT"),
+                        root -> ((ArrayNode) root.get("gradingContext").get("rubrics")).remove(1),
+                        root ->
+                                ((ObjectNode) root.get("gradingContext").get("rubrics").get(1))
+                                        .put("code", "CULPRIT"),
+                        root ->
+                                ((ArrayNode)
+                                                root.get("gradingContext")
+                                                        .get("rubrics")
+                                                        .get(1)
+                                                        .get("ruleData")
+                                                        .get("claims"))
+                                        .add(
+                                                root.get("gradingContext")
+                                                        .get("rubrics")
+                                                        .get(1)
+                                                        .get("ruleData")
+                                                        .get("claims")
+                                                        .get(0)
+                                                        .deepCopy()));
+        for (Consumer<ObjectNode> mutation : mutations) {
+            ObjectNode malformed = valid.deepCopy();
+            mutation.accept(malformed);
+            assertThatThrownBy(
+                            () ->
+                                    FrozenModelProjection.decodeCanonical(
+                                            SnapshotJson.encode(malformed)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("INVALID_MODEL_PROJECTION")
+                    .hasNoCause();
+        }
+        for (JsonNode number :
+                List.of(parse("20.01"), parse("2147483648"), parse("\"20\""), parse("null"))) {
+            ObjectNode malformed = valid.deepCopy();
+            ((ObjectNode) malformed.get("gradingContext").get("rubrics").get(2))
+                    .set("maxScore", number);
+            assertThatThrownBy(
+                            () ->
+                                    FrozenModelProjection.decodeCanonical(
+                                            SnapshotJson.encode(malformed)))
+                    .hasMessage("INVALID_MODEL_PROJECTION")
+                    .hasNoCause();
+        }
+        var foreign = new FrozenDatasetValidator().validate(FrozenSnapshotCodec.freeze(complete()));
+        assertThatThrownBy(() -> FrozenModelProjection.project(dataset, foreign.select("FULL")))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+        assertThatThrownBy(() -> FrozenModelProjection.project(dataset, null))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+        ObjectNode differentReport = valid.deepCopy();
+        ((ObjectNode) differentReport.get("report")).put("method", "DIFFERENT_VALID_REPORT");
+        assertThat(
+                        FrozenModelProjection.decodeCanonical(SnapshotJson.encode(differentReport))
+                                .report()
+                                .method())
+                .isEqualTo("DIFFERENT_VALID_REPORT");
+        assertThat(FrozenModelProjection.project(dataset, dataset.select("ZERO")).report())
+                .isEqualTo(dataset.select("ZERO").report());
+        ((ObjectNode) valid.get("report")).put("method", "CALLER_MUTATION");
+        ((ObjectNode) valid.get("gradingContext")).removeAll();
+        assertThat(rebuilt.report().method()).isEqualTo("SELECTED_REPORT");
+        assertThat(rebuilt.payload().get("gradingContext").size()).isEqualTo(5);
+    }
+
+    /** 정규 수신 바이트만 허용하며 Unicode·중복 키·숫자 표기를 보정하지 않는다. */
+    @Test
+    void decoderRejectsMalformedRawGrammarAndNoncanonicalBytes() {
+        var dataset = new FrozenDatasetValidator().validate(FrozenSnapshotCodec.freeze(complete()));
+        byte[] bytes =
+                FrozenModelProjection.project(dataset, dataset.select("FULL")).payloadBytes();
+        SemanticInput decoded = FrozenModelProjection.decodeCanonical(bytes);
+        String wire = new String(bytes, StandardCharsets.UTF_8);
+        assertThat(decoded.payloadBytes()).isEqualTo(bytes);
+        bytes[0] = 0;
+        decoded.payloadBytes()[0] = 0;
+        ((ObjectNode) decoded.payload()).removeAll();
+        assertThat(decoded.payloadBytes()).isEqualTo(wire.getBytes(StandardCharsets.UTF_8));
+        for (String bad :
+                List.of(
+                        " " + wire,
+                        wire + "\n",
+                        wire + "{}",
+                        wire.replace("\"formatNo\":1", "\"formatNo\":1e0"),
+                        wire.replace("\"formatNo\":1", "\"formatNo\":1.0"),
+                        wire.replace("\"formatNo\":1", "\"formatNo\":\"1\""),
+                        wire.replace("\"formatNo\":1", "\"formatNo\":1,\"formatNo\":1"),
+                        wire.replace("\"formatNo\":1", "\"formatNo\":1,\"format\\u004Eo\":1"),
+                        wire.replace("SELECTED_REPORT", "\\u0000"),
+                        wire.replace("SELECTED_REPORT", "\\uD800"),
+                        wire.replace("SELECTED_REPORT", "\\uDC00"),
+                        wire.replace("SELECTED_REPORT", "a\\rb"),
+                        wire.replace("SELECTED_REPORT", "a\\r\\nb"),
+                        wire.replace(
+                                "\"formatNo\":1,\"gradingContext\":", "\"gradingContext\":"))) {
+            assertThatThrownBy(
+                            () ->
+                                    FrozenModelProjection.decodeCanonical(
+                                            bad.getBytes(StandardCharsets.UTF_8)))
+                    .hasMessage("INVALID_MODEL_PROJECTION")
+                    .hasNoCause();
+        }
+        assertThatThrownBy(
+                        () -> FrozenModelProjection.decodeCanonical(new byte[] {(byte) 0xc3, 0x28}))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+        assertThatThrownBy(() -> FrozenModelProjection.decodeCanonical(null))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+        ObjectNode reordered = object();
+        JsonNode valid = decoded.payload();
+        reordered.set("report", valid.get("report"));
+        reordered.set("gradingContext", valid.get("gradingContext"));
+        reordered.put("formatNo", 1);
+        assertThatThrownBy(
+                        () ->
+                                FrozenModelProjection.decodeCanonical(
+                                        reordered.toString().getBytes(StandardCharsets.UTF_8)))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+    }
+
+    /** 모든 객체 깊이를 닫고 다섯 자원 순서·범인 누출·좌표·실재 참조를 독립 변조한다. */
+    @Test
+    void decoderClosesEveryObjectAndPreservesNestedRegistrationAndSourceNulls() {
+        var dataset = new FrozenDatasetValidator().validate(FrozenSnapshotCodec.freeze(complete()));
+        ObjectNode valid =
+                (ObjectNode)
+                        FrozenModelProjection.project(dataset, dataset.select("FULL")).payload();
+        ObjectNode rule = (ObjectNode) valid.at("/gradingContext/rubrics/2/ruleData");
+        ObjectNode second =
+                ((ObjectNode) rule.get("claims").get(0)).deepCopy().put("code", "A_FIRST");
+        ((ArrayNode) rule.get("claims")).add(second);
+        ArrayNode factCodes = (ArrayNode) rule.get("claims").get(0).get("factCodes");
+        factCodes.add("F2");
+        reverse(factCodes);
+        ((ArrayNode) valid.at("/gradingContext/rubricClues"))
+                .insert(
+                        2,
+                        object().put("rubricCode", "METHOD")
+                                .put("clueCode", "C2")
+                                .putNull("linkText"));
+        ((ArrayNode) rule.get("claims").get(0).get("exampleClueRoutes"))
+                .addArray()
+                .add("C2")
+                .add("C1");
+        ((ArrayNode) rule.get("contradictions"))
+                .add(object().put("code", "Z_LAST").put("meaning", "모순"))
+                .add(object().put("code", "A_FIRST_CONTRADICTION").put("meaning", "다른 모순"));
+        ((ArrayNode) rule.get("levels").get(1).get("routes"))
+                .addArray()
+                .add("A_FIRST")
+                .add("CLAIM");
+        reverse((ArrayNode) rule.get("levels"));
+        ((ObjectNode) valid.at("/gradingContext/clues/1"))
+                .putNull("personCode")
+                .putNull("body")
+                .putNull("sourceText");
+        ((ObjectNode) valid.at("/gradingContext/facts/1")).putNull("truth");
+        SemanticInput positive = FrozenModelProjection.decodeCanonical(SnapshotJson.encode(valid));
+        assertThat(positive.payloadBytes()).isEqualTo(SnapshotJson.encode(valid));
+        assertThat(positive.orderedRubricCoordinates().get(2).claimCodes())
+                .containsExactly("CLAIM", "A_FIRST");
+        assertThat(positive.orderedRubricCoordinates().get(2).contradictionCodes())
+                .containsExactly("Z_LAST", "A_FIRST_CONTRADICTION");
+        assertThat(
+                        positive.payload()
+                                .at("/gradingContext/rubrics/2/ruleData/levels/0/code")
+                                .textValue())
+                .isEqualTo("FULL");
+        assertThat(positive.payload().at("/gradingContext/rubrics/2/ruleData/claims/0/factCodes"))
+                .isEqualTo(parse("[\"F2\",\"F1\"]"));
+        assertThat(
+                        positive.payload()
+                                .at(
+                                        "/gradingContext/rubrics/2/ruleData/claims/0/exampleClueRoutes/1"))
+                .isEqualTo(parse("[\"C2\",\"C1\"]"));
+        for (String path :
+                List.of(
+                        "",
+                        "/gradingContext",
+                        "/report",
+                        "/gradingContext/facts/0",
+                        "/gradingContext/persons/0",
+                        "/gradingContext/clues/0",
+                        "/gradingContext/rubricClues/0",
+                        "/gradingContext/rubrics/0",
+                        "/gradingContext/rubrics/2/ruleData",
+                        "/gradingContext/rubrics/2/ruleData/claims/0",
+                        "/gradingContext/rubrics/2/ruleData/levels/0",
+                        "/gradingContext/rubrics/2/ruleData/contradictions/0")) {
+            ObjectNode malformed = valid.deepCopy();
+            ((ObjectNode) malformed.at(path)).put("privateAnswer", "CANARY");
+            rejectsModel(malformed);
+            ObjectNode target = (ObjectNode) valid.at(path);
+            for (String field : target.properties().stream().map(Map.Entry::getKey).toList()) {
+                ObjectNode missing = valid.deepCopy();
+                ((ObjectNode) missing.at(path)).remove(field);
+                rejectsModel(missing);
+                ObjectNode wrongType = valid.deepCopy();
+                if (target.get(field).isBoolean()) {
+                    ((ObjectNode) wrongType.at(path)).put(field, "true");
+                } else {
+                    ((ObjectNode) wrongType.at(path)).put(field, true);
+                }
+                rejectsModel(wrongType);
+            }
+        }
+        for (String resource : List.of("facts", "persons", "clues", "rubrics", "rubricClues")) {
+            ObjectNode reversed = valid.deepCopy();
+            reverse((ArrayNode) reversed.get("gradingContext").get(resource));
+            rejectsModel(reversed);
+            ObjectNode duplicate = valid.deepCopy();
+            ArrayNode rows = (ArrayNode) duplicate.get("gradingContext").get(resource);
+            rows.add(rows.get(0).deepCopy());
+            rejectsModel(duplicate);
+        }
+        for (Consumer<ObjectNode> mutation :
+                List.<Consumer<ObjectNode>>of(
+                        root ->
+                                ((ArrayNode) root.at("/gradingContext/rubrics/0/ruleData/claims"))
+                                        .add(second.deepCopy()),
+                        root ->
+                                ((ArrayNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/0/ruleData/levels/1/routes"))
+                                        .addArray()
+                                        .add("SELECTED_CULPRIT"),
+                        root ->
+                                ((ObjectNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/2/ruleData/contradictions/0"))
+                                        .put("code", "CLAIM"),
+                        root ->
+                                ((ObjectNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/2/ruleData/claims/1"))
+                                        .put("code", "CLAIM"),
+                        root ->
+                                ((ArrayNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/2/ruleData/claims/0/factCodes"))
+                                        .add("UNKNOWN"),
+                        root ->
+                                ((ArrayNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/1/ruleData/claims/0/exampleClueRoutes/0"))
+                                        .add("C2"),
+                        root ->
+                                ((ArrayNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/2/ruleData/levels/0/routes/0"))
+                                        .add("UNKNOWN"),
+                        root ->
+                                ((ObjectNode) root.at("/gradingContext/rubricClues/0"))
+                                        .put("rubricCode", "UNKNOWN"),
+                        root ->
+                                ((ArrayNode)
+                                                root.at(
+                                                        "/gradingContext/rubrics/2/ruleData/levels/0/routes"))
+                                        .set(0, object().put("privateRoute", true)),
+                        root ->
+                                ((ObjectNode) root.at("/gradingContext/persons/0"))
+                                        .put("name", "a".repeat(81)),
+                        root ->
+                                ((ObjectNode) root.at("/report"))
+                                        .put("method", "a".repeat(5001)))) {
+            ObjectNode malformed = valid.deepCopy();
+            mutation.accept(malformed);
+            rejectsModel(malformed);
+        }
+    }
+
+    /** null 불가인 변조 노드를 정규 직렬화한 뒤 공개 decoder의 원인 없는 고정 오류를 요구한다. */
+    private static void rejectsModel(ObjectNode malformed) {
+        assertThatThrownBy(
+                        () -> FrozenModelProjection.decodeCanonical(SnapshotJson.encode(malformed)))
+                .hasMessage("INVALID_MODEL_PROJECTION")
+                .hasNoCause();
+    }
 
     @Test
     void fullRoundTripRetainsServerRulesAndProjectsExactlyOneReport() {
@@ -686,7 +1164,7 @@ class FrozenSnapshotContractTest {
     }
 
     /** 모든 종류/등록 단계를 가진 합성 서버 원고이며 실제 의미 승인이나 사람 실행 증거가 아니다. */
-    static ObjectNode complete() {
+    public static ObjectNode complete() {
         ObjectNode root = empty();
         ObjectNode sections = (ObjectNode) root.get("sections");
         ((ObjectNode) sections.get("answer"))

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.CurrentSession;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.story.service.StoryAccessService;
+import com.reasoning.common.story.service.StoryCloneService;
 import com.reasoning.common.story.service.StoryClueService;
 import com.reasoning.common.story.service.StoryEventService;
 import com.reasoning.common.story.service.StoryFactService;
@@ -53,6 +54,7 @@ public final class StoryController {
     private final StoryGradeSampleService gradeSamples;
     private final StoryAccessService access;
     private final StoryOwnershipService ownership;
+    private final StoryCloneService clones;
 
     /** 사건과 남은 원고 자원의 서비스 및 공통 HTTP 경계를 주입한다. */
     public StoryController(
@@ -66,7 +68,8 @@ public final class StoryController {
             StoryRubricClueService rubricClues,
             StoryGradeSampleService gradeSamples,
             StoryAccessService access,
-            StoryOwnershipService ownership) {
+            StoryOwnershipService ownership,
+            StoryCloneService clones) {
         this.stories = stories;
         this.http = http;
         this.clues = clues;
@@ -78,6 +81,43 @@ public final class StoryController {
         this.gradeSamples = gradeSamples;
         this.access = access;
         this.ownership = ownership;
+        this.clones = clones;
+    }
+
+    /**
+     * 현재 공개 사본만 새 초안으로 복제하며 기존 의도는 현재 EDIT 인가 뒤 재생한다.
+     *
+     * @param storyCode 정규 사건 코드
+     * @param request 현재 세션·CSRF와 정확히 네 필드를 가진 최대 8 KiB JSON 요청
+     * @return 원고 없는 복제 결과·현재 최소 상태·정책 차이
+     * @throws AuthException 잘못된 자료형·현재 인가·대상 충돌 또는 필수 저장 실패 시
+     */
+    @PostMapping("/{storyCode}/drafts")
+    public ResponseEntity<?> cloneDraft(
+            @PathVariable String storyCode, HttpServletRequest request) {
+        CurrentSession current = http.currentSession(request);
+        JsonNode body =
+                http.body(
+                        request,
+                        8192,
+                        Set.of(
+                                "expectedStoryRev",
+                                "sourceVersionNo",
+                                "sourceSnapshotId",
+                                "requestKey"));
+        JsonNode number = body.get("sourceVersionNo");
+        if (!number.isIntegralNumber() || !number.canConvertToInt() || number.intValue() <= 0)
+            throw AuthException.badRequest("INVALID_REQUEST");
+        return ok(
+                clones.cloneDraft(
+                        current.id(),
+                        current.principal(),
+                        storyCode,
+                        text(body, "expectedStoryRev"),
+                        number.intValue(),
+                        text(body, "sourceSnapshotId"),
+                        uuid(body, "requestKey", true),
+                        requestId(request)));
     }
 
     /**

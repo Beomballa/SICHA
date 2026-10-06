@@ -93,6 +93,16 @@ export async function exerciseHints({
 
   await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
+  await page.waitForFunction(() => {
+    const action = document.getElementById("child-active");
+    return (
+      action.textContent === "힌트 복원" &&
+      !action.closest("[hidden]") &&
+      !action.disabled &&
+      !document.getElementById("child-resource").disabled &&
+      !document.getElementById("child-list").disabled
+    );
+  });
   assert.equal(
     (await api(page, `${apiPath}/hints/HINT_A`)).body.item.activeYn,
     false,
@@ -111,6 +121,7 @@ export async function exerciseHints({
   assert.equal((await api(page, `${apiPath}/hints/HINT_B`)).status, 404);
   await layout(page, "child-hint-slot-conflict");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(await page.$eval("#child-level", (e) => e.value), "1");
   assert.equal(
     await page.$eval("#child-body", (e) => e.value),
@@ -164,6 +175,7 @@ export async function exerciseHints({
   await lost.detach();
   page.off("request", countWrite);
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(posts, 1);
   assert.equal((await api(page, `${apiPath}/hints/HINT_C`)).body.item.level, 3);
   await layout(page, "child-hint-recovered");

@@ -3,6 +3,7 @@ package com.reasoning.admin.auth.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reasoning.admin.auth.audit.AccessHistoryFilter;
 import com.reasoning.admin.auth.session.AdminSessionAdapter;
+import com.reasoning.common.auth.audit.RequestAuditKernel;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -96,6 +98,7 @@ public class AdminSecurityConfig {
      * @throws Exception 보안 필터 구성을 초기화할 수 없는 경우.
      */
     @Bean
+    @Order(2)
     SecurityFilterChain adminSecurity(
             HttpSecurity http,
             AdminSessionAdapter sessions,
@@ -221,8 +224,7 @@ public class AdminSecurityConfig {
             int status,
             String code)
             throws IOException {
-        Object requestId = request.getAttribute(AccessHistoryFilter.REQUEST_ID_ATTRIBUTE);
-        if (!(requestId instanceof UUID)) throw new IllegalStateException("REQUEST_ID_UNAVAILABLE");
+        UUID requestId = RequestAuditKernel.requestId(request);
         response.setStatus(status);
         response.setContentType("application/json;charset=UTF-8");
         response.setHeader("Cache-Control", "no-store");

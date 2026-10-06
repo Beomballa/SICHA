@@ -132,23 +132,44 @@ export async function waitForConfirmation(page) {
 }
 
 /**
- * 실제 클릭을 완료한 뒤 그 행동에서 열린 확인 창의 종료를 기다린다.
+ * 실제 클릭 후 확인 창 종료를 기다리며, 새 자료 작성은 폼 초기화와 첫 키 입력의 실제 초점까지 기다린다.
  * @param {object} page 운전자가 설치된 Puppeteer 페이지. null은 허용하지 않는다.
- * @param {string} selector 실제 클릭할 비어 있지 않은 CSS 선택자. null은 허용하지 않는다.
- * @returns {Promise<void>} 클릭과 확인 후 처리 대기가 끝나면 완료한다.
- * @throws {Error} 실제 클릭 또는 확인 창 종료 대기가 실패하면 전파한다.
+ * @param {string} selector 실제 클릭할 비어 있지 않은 CSS 선택자. "#child-new"는 새 작성 승인 경로에만 사용하며 null은 허용하지 않는다.
+ * @returns {Promise<void>} "#child-new"는 표시된 편집 영역의 첫 키 입력이 비어 있고 쓰기 가능하며 실제 초점을 받으면 완료한다. 다른 선택자는 확인 창 종료까지만 기다린다.
+ * @throws {Error} 실제 클릭, 확인 창 종료 또는 새 작성 준비 대기가 실패하면 전파한다.
  */
 export async function clickWithConfirmation(page, selector) {
   await page.click(selector);
   await waitForConfirmation(page);
+
+  if (selector === "#child-new") {
+    await page.waitForFunction(() => {
+      const edit = document.getElementById("child-edit");
+      const key = edit?.querySelector(
+        '.field[data-fixed="false"] [data-value]',
+      );
+      return (
+        edit &&
+        !edit.closest("[hidden]") &&
+        edit.getClientRects().length > 0 &&
+        key instanceof HTMLInputElement &&
+        !key.readOnly &&
+        !key.matches(":disabled") &&
+        key.value === "" &&
+        !key.closest("[hidden]") &&
+        key.getClientRects().length > 0 &&
+        document.activeElement === key
+      );
+    });
+  }
 }
 
 /**
- * 실제 자료 종류 선택과 미저장 입력 확인을 완료한다.
+ * 자료 종류 변경을 승인하는 경로에서 미저장 입력 확인 후 요청한 종류의 실제 반영까지 기다린다.
  * @param {object} page 운전자가 설치된 Puppeteer 페이지. null은 허용하지 않는다.
  * @param {"persons"|"roles"|"pairs"|"clues"|"clue-roles"|"hints"|"events"|"facts"|"rubrics"|"rubric-clues"|"grade-samples"} resource 실제 select에 열거된 자료 값만 허용하며 null은 허용하지 않는다.
- * @returns {Promise<void>} 실제 선택과 확인 후 처리 대기가 끝나면 완료한다.
- * @throws {Error} 선택 또는 확인 창 종료 대기가 실패하면 전파한다.
+ * @returns {Promise<void>} 확인 창이 닫히고 실제 자료 종류가 요청한 값으로 반영되며 자식 편집 영역이 숨겨지면 완료한다.
+ * @throws {Error} 열거되지 않은 값, 선택·확인 창 종료 오류 또는 취소·거부 등으로 제한 시간 안에 요청한 종류 반영과 자식 편집 영역 숨김이 완료되지 않으면 실패한다.
  */
 export async function selectChildResource(page, resource) {
   const allowed = await page.$$eval("#child-resource option", (options) =>
@@ -158,4 +179,11 @@ export async function selectChildResource(page, resource) {
     throw new Error(`열거되지 않은 자료 종류: ${resource}`);
   await page.select("#child-resource", resource);
   await waitForConfirmation(page);
+  await page.waitForFunction(
+    (resource) =>
+      document.getElementById("child-resource").value === resource &&
+      document.getElementById("child-edit").hidden,
+    {},
+    resource,
+  );
 }

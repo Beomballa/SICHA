@@ -136,6 +136,18 @@ public class CryptoService {
     }
 
     /**
+     * LOCAL 회원 이메일을 관리자 로그인·요청 제한과 분리한 검색 키로 결속한다.
+     *
+     * @param email ASCII 형식을 검증하고 domain만 소문자화한 이메일. null은 허용하지 않는다.
+     * @return LOCAL/realm/검색 세대에 결속된 32바이트 HMAC-SHA-256
+     */
+    public byte[] memberEmailHash(String email) {
+        return hmac(
+                searchKey,
+                "member-identity:v1:LOCAL:LOCAL:" + java.util.Objects.requireNonNull(email));
+    }
+
+    /**
      * Hashes an opaque flow token for a single allowed purpose.
      *
      * @param purpose non-secret purpose name

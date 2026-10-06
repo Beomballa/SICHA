@@ -37,6 +37,26 @@ class CryptoServiceTest {
         assertThat(crypto.loginHash("example")).isNotEqualTo(crypto.limitHash("LOGIN", "example"));
     }
 
+    /** 회원 검색은 실제 검색 키를 사용하고 LOCAL 이메일의 대소문자를 임의로 합치지 않는다. */
+    @Test
+    void memberLookupBindsSearchKeyPurposeAndExactLocalPart() throws Exception {
+        String email = "User@example.test";
+        var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        byte[] searchKey = new byte[32];
+        java.util.Arrays.fill(searchKey, (byte) 2);
+        mac.init(new javax.crypto.spec.SecretKeySpec(searchKey, "HmacSHA256"));
+        assertThat(crypto.memberEmailHash(email))
+                .isEqualTo(
+                        mac.doFinal(
+                                ("member-identity:v1:LOCAL:LOCAL:" + email)
+                                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .isNotEqualTo(crypto.memberEmailHash("user@example.test"))
+                .isNotEqualTo(crypto.loginHash(email))
+                .isNotEqualTo(crypto.limitHash("member-identity", email));
+        assertThatThrownBy(() -> crypto.memberEmailHash(null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
     @Test
     void rejectsMissingKeyWithoutDefault() {
         AuthProperties properties = new AuthProperties();

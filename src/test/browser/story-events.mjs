@@ -117,6 +117,7 @@ export async function exerciseEvents({
   );
   await layout(page, "child-event-conflict");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "child");
   assert.equal(
     await page.$eval("#answer-methodAnswer", (e) => e.value),
@@ -126,6 +127,16 @@ export async function exerciseEvents({
   await openSection(page, "child");
   await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
+  await page.waitForFunction(() => {
+    const action = document.getElementById("child-active");
+    return (
+      action.textContent === "시간선 복원" &&
+      !action.closest("[hidden]") &&
+      !action.disabled &&
+      !document.getElementById("child-resource").disabled &&
+      !document.getElementById("child-list").disabled
+    );
+  });
   assert.equal(
     (await api(page, `${apiPath}/events/EVENT_A`)).body.item.activeYn,
     false,
@@ -134,6 +145,16 @@ export async function exerciseEvents({
   await openSection(page, "child");
   await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
+  await page.waitForFunction(() => {
+    const action = document.getElementById("child-active");
+    return (
+      action.textContent === "시간선 논리 삭제" &&
+      !action.closest("[hidden]") &&
+      !action.disabled &&
+      !document.getElementById("child-resource").disabled &&
+      !document.getElementById("child-list").disabled
+    );
+  });
   assert.equal(
     (await api(page, `${apiPath}/events/EVENT_A`)).body.item.activeYn,
     true,
@@ -162,6 +183,7 @@ export async function exerciseEvents({
   );
   await lost.detach();
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(posts, 1);
   page.off("request", countWrite);
   assert.equal(

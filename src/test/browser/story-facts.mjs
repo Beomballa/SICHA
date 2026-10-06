@@ -138,6 +138,7 @@ export async function exerciseFacts({
   );
   await layout(page, "child-fact-conflict");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await save(page, "child");
   assert.equal(
     await page.$eval("#answer-timeAnswer", (e) => e.value),
@@ -147,6 +148,16 @@ export async function exerciseFacts({
   await openSection(page, "child");
   await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
+  await page.waitForFunction(() => {
+    const action = document.getElementById("child-active");
+    return (
+      action.textContent === "사실 원장 복원" &&
+      !action.closest("[hidden]") &&
+      !action.disabled &&
+      !document.getElementById("child-resource").disabled &&
+      !document.getElementById("child-list").disabled
+    );
+  });
   assert.equal(
     (await api(page, `${apiPath}/facts/FACT_A`)).body.item.activeYn,
     false,
@@ -155,6 +166,16 @@ export async function exerciseFacts({
   await openSection(page, "child");
   await clickWithConfirmation(page, "#child-active");
   await notice(page, "최신 원고를 조회했습니다");
+  await page.waitForFunction(() => {
+    const action = document.getElementById("child-active");
+    return (
+      action.textContent === "사실 원장 논리 삭제" &&
+      !action.closest("[hidden]") &&
+      !action.disabled &&
+      !document.getElementById("child-resource").disabled &&
+      !document.getElementById("child-list").disabled
+    );
+  });
   assert.equal(
     (await api(page, `${apiPath}/facts/FACT_A`)).body.item.activeYn,
     true,
@@ -183,6 +204,7 @@ export async function exerciseFacts({
   );
   await lost.detach();
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(posts, 1);
   page.off("request", countWrite);
   assert.equal(

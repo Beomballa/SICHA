@@ -70,8 +70,8 @@ class AdminAccountIT extends DatabaseContextTest {
     @Autowired ObjectMapper json;
 
     /**
-     * Exercises live HTTP authorization, revisions, mandatory audit and shrinking fallback on a
-     * disposable DB.
+     * 폐기형 DB에서 실제 HTTP 인가·수정 세대·필수 감사·권한 축소를 검증한다. MFA 등록은 현재 단계, 바로 이어지는 로그인은 허용된 +1 단계 코드를 사용한다.
+     * 두 계정이 오래된 이전 단계 시각을 공유하지 않아 30초 경계에서도 코드가 만료되지 않는다.
      */
     @Test
     void managementLifecycleAndAuditFailure() throws Exception {
@@ -82,10 +82,9 @@ class AdminAccountIT extends DatabaseContextTest {
         var first = enrollment.exchange(bootstrap.code(), null, "manager-test", UUID.randomUUID());
         enrollment.setPassword(first.cookie().value(), password, UUID.randomUUID());
         var setup = enrollment.prepareMfa(first.cookie().value(), UUID.randomUUID());
-        Instant previous = Instant.ofEpochSecond((Instant.now().getEpochSecond() / 30 - 1) * 30);
         enrollment.verifyMfa(
                 first.cookie().value(),
-                totp.code(setup.secret(), previous),
+                totp.code(setup.secret(), Instant.now()),
                 "manager-test",
                 UUID.randomUUID());
         enrollment.complete(first.cookie().value(), UUID.randomUUID());
@@ -94,7 +93,7 @@ class AdminAccountIT extends DatabaseContextTest {
         var active =
                 login.authenticate(
                         loginStart.cookie().value(),
-                        totp.code(setup.secret(), Instant.now()),
+                        totp.code(setup.secret(), Instant.now().plusSeconds(30)),
                         "manager-test",
                         UUID.randomUUID());
         String sid = active.cookie().value();
@@ -150,7 +149,7 @@ class AdminAccountIT extends DatabaseContextTest {
         var staffSetup = enrollment.prepareMfa(limited.cookie().value(), UUID.randomUUID());
         enrollment.verifyMfa(
                 limited.cookie().value(),
-                totp.code(staffSetup.secret(), previous),
+                totp.code(staffSetup.secret(), Instant.now()),
                 "staff-test",
                 UUID.randomUUID());
         enrollment.complete(limited.cookie().value(), UUID.randomUUID());
@@ -171,7 +170,7 @@ class AdminAccountIT extends DatabaseContextTest {
         var staffSession =
                 login.authenticate(
                         staffLogin.cookie().value(),
-                        totp.code(staffSetup.secret(), Instant.now()),
+                        totp.code(staffSetup.secret(), Instant.now().plusSeconds(30)),
                         "staff-test",
                         UUID.randomUUID());
         var staffResponse = new org.springframework.mock.web.MockHttpServletResponse();
@@ -316,11 +315,11 @@ class AdminAccountIT extends DatabaseContextTest {
 
         db.execute(
                 "CREATE FUNCTION fail_grant_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF"
-                    + " NEW.action='ACCOUNT_PERMISSION_GRANTED' THEN RAISE EXCEPTION 'audit"
-                    + " unavailable'; END IF; RETURN NEW; END $$");
+                        + " NEW.action='ACCOUNT_PERMISSION_GRANTED' THEN RAISE EXCEPTION 'audit"
+                        + " unavailable'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_grant BEFORE INSERT ON admin_auth_audit FOR EACH ROW EXECUTE"
-                    + " FUNCTION fail_grant_audit()");
+                        + " FUNCTION fail_grant_audit()");
         mvc.perform(
                         change(
                                 path + "/permissions/grant",
@@ -340,11 +339,11 @@ class AdminAccountIT extends DatabaseContextTest {
 
         db.execute(
                 "CREATE FUNCTION fail_revoke_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN"
-                    + " IF NEW.action='ACCOUNT_PERMISSION_REVOKED' THEN RAISE EXCEPTION 'audit"
-                    + " unavailable'; END IF; RETURN NEW; END $$");
+                        + " IF NEW.action='ACCOUNT_PERMISSION_REVOKED' THEN RAISE EXCEPTION 'audit"
+                        + " unavailable'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_revoke BEFORE INSERT ON admin_auth_audit FOR EACH ROW EXECUTE"
-                    + " FUNCTION fail_revoke_audit()");
+                        + " FUNCTION fail_revoke_audit()");
         JsonNode revoked =
                 body(
                         mvc.perform(
@@ -478,7 +477,7 @@ class AdminAccountIT extends DatabaseContextTest {
                         + "\",\"reasonCode\":\"RETURN_TO_WORK\",\"verificationRef\":\"verified_34567\"}";
         db.update(
                 "UPDATE story_access SET active_yn=true WHERE story_id=? AND admin_id=? AND"
-                    + " permission='EDIT'",
+                        + " permission='EDIT'",
                 lastStory,
                 pendingId);
         JsonNode changedImpact =
@@ -501,7 +500,7 @@ class AdminAccountIT extends DatabaseContextTest {
                 .isEqualTo(2);
         db.update(
                 "UPDATE story_access SET active_yn=false WHERE story_id=? AND admin_id=? AND"
-                    + " permission='EDIT'",
+                        + " permission='EDIT'",
                 lastStory,
                 pendingId);
         JsonNode refreshed =
@@ -529,11 +528,11 @@ class AdminAccountIT extends DatabaseContextTest {
         assertThat(wrongRevision.path("code").asText()).isEqualTo("STATE_CONFLICT");
         db.execute(
                 "CREATE FUNCTION fail_activate_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN"
-                    + " IF NEW.action='ACCOUNT_REACTIVATED' THEN RAISE EXCEPTION 'audit"
-                    + " unavailable'; END IF; RETURN NEW; END $$");
+                        + " IF NEW.action='ACCOUNT_REACTIVATED' THEN RAISE EXCEPTION 'audit"
+                        + " unavailable'; END IF; RETURN NEW; END $$");
         db.execute(
                 "CREATE TRIGGER fail_activate BEFORE INSERT ON admin_auth_audit FOR EACH ROW"
-                    + " EXECUTE FUNCTION fail_activate_audit()");
+                        + " EXECUTE FUNCTION fail_activate_audit()");
         mvc.perform(
                         change(
                                 pendingPath + "/reactivate",
@@ -579,7 +578,7 @@ class AdminAccountIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT code_hash IS NULL AND grant_hash IS NULL FROM"
-                                    + " admin_enrollment WHERE account_id=?",
+                                        + " admin_enrollment WHERE account_id=?",
                                 Boolean.class,
                                 pendingId))
                 .isTrue();

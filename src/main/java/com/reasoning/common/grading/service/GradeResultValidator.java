@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.reasoning.common.grading.model.FrozenModelProjection.RubricCoordinates;
 import com.reasoning.common.grading.model.GradeModels.*;
 
 import java.util.ArrayList;
@@ -65,6 +66,22 @@ public final class GradeResultValidator {
      */
     public SemanticResult validate(String json, Report report, Snapshot snapshot) {
         inputs(report, snapshot);
+        return validate(json, report, coordinates(snapshot));
+    }
+
+    /**
+     * 답안 없는 등록 좌표로 출력 구조·전체 코드·보고서 구간을 검사한다. 점수 계산이나 누락 수선은 하지 않는다.
+     *
+     * @param json 전송 경계에서 크기를 제한한 의미 JSON
+     * @param report null이 아닌 정확한 정규화 REPORT-1
+     * @param coordinates 중복 없는 등록 순서의 전체 소항목 좌표
+     * @return COMPLETE 전체 의미 출력 또는 items=null인 UNRESOLVED
+     * @throws IllegalArgumentException 입력 좌표가 무효이면 INVALID_GRADE_INPUT, 출력 오류면
+     *     INVALID_ENGINE_OUTPUT
+     */
+    public SemanticResult validate(
+            String json, Report report, List<RubricCoordinates> coordinates) {
+        coordinateInputs(report, coordinates);
         try {
             JsonNode root = parse(json);
             object(root, Set.of("formatNo", "status", "items"));
@@ -87,7 +104,7 @@ public final class GradeResultValidator {
                 }
                 result = new SemanticResult(status, items);
             }
-            return validate(report, snapshot, result);
+            return validate(report, coordinates, result);
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("INVALID_ENGINE_OUTPUT");
         }
@@ -105,29 +122,60 @@ public final class GradeResultValidator {
      */
     public SemanticResult validate(Report report, Snapshot snapshot, SemanticResult result) {
         inputs(report, snapshot);
+        return validate(report, coordinates(snapshot), result);
+    }
+
+    /**
+     * 실제 서버 사본에서 답안 없이 동일한 공개 출력 좌표를 추출한다. 서버 사본의 채점 책임은 이동하지 않는다.
+     *
+     * @param snapshot null이 아닌 실제 완성 서버 채점표
+     * @return 수정 불가능한 등록 순서 좌표이며 범인 claims는 빈 목록이다
+     * @throws IllegalArgumentException 사본이 null이면 INVALID_GRADE_INPUT
+     */
+    public static List<RubricCoordinates> coordinates(Snapshot snapshot) {
+        if (snapshot == null) throw new IllegalArgumentException("INVALID_GRADE_INPUT");
+        return snapshot.rubrics().stream()
+                .map(
+                        rubric ->
+                                new RubricCoordinates(
+                                        rubric.code(),
+                                        rubric.category() == Category.CULPRIT
+                                                ? List.of()
+                                                : rubric.claims().stream()
+                                                        .map(ClaimRule::code)
+                                                        .toList(),
+                                        rubric.contradictions().stream()
+                                                .map(ContradictionRule::code)
+                                                .toList()))
+                .toList();
+    }
+
+    /**
+     * 직접 구성한 결과도 같은 좌표·코드포인트 경계로 검사한다. 결과 순서를 변경하거나 점수를 생성하지 않는다.
+     *
+     * @param report null이 아닌 정확한 REPORT-1
+     * @param coordinates 중복 없는 전체 등록 좌표
+     * @param result null이 아닌 불변 의미 결과
+     * @return 대조를 통과한 원래 의미 결과
+     * @throws IllegalArgumentException 입력 또는 의미 출력이 무효인 경우 원문 없는 고정 오류
+     */
+    public SemanticResult validate(
+            Report report, List<RubricCoordinates> coordinates, SemanticResult result) {
+        coordinateInputs(report, coordinates);
         if (result == null) invalid();
         if (result.status() == Status.UNRESOLVED) return result;
 
-        Map<String, Rubric> rubrics =
-                snapshot.rubrics().stream()
-                        .collect(Collectors.toMap(Rubric::code, Function.identity()));
+        Map<String, RubricCoordinates> rubrics =
+                coordinates.stream()
+                        .collect(
+                                Collectors.toMap(
+                                        RubricCoordinates::rubricCode, Function.identity()));
         Set<String> seen = new HashSet<>();
         for (SemanticItem item : result.items()) {
-            Rubric rubric = rubrics.get(item.rubricCode());
+            RubricCoordinates rubric = rubrics.get(item.rubricCode());
             if (rubric == null || !seen.add(item.rubricCode())) invalid();
-            Set<String> claims =
-                    rubric.category() == Category.CULPRIT
-                            ? Set.of()
-                            : rubric.claims().stream()
-                                    .map(ClaimRule::code)
-                                    .collect(Collectors.toSet());
-            check(item.claims(), claims, report);
-            check(
-                    item.contradictions(),
-                    rubric.contradictions().stream()
-                            .map(ContradictionRule::code)
-                            .collect(Collectors.toSet()),
-                    report);
+            check(item.claims(), Set.copyOf(rubric.claimCodes()), report);
+            check(item.contradictions(), Set.copyOf(rubric.contradictionCodes()), report);
         }
         if (!seen.equals(rubrics.keySet())) invalid();
         return result;
@@ -210,6 +258,26 @@ public final class GradeResultValidator {
     private static void inputs(Report report, Snapshot snapshot) {
         if (report == null || snapshot == null)
             throw new IllegalArgumentException("INVALID_GRADE_INPUT");
+    }
+
+    /**
+     * 전체 출력 좌표의 입력 경계를 확인하며 중복이나 누락을 조용히 수선하지 않는다.
+     *
+     * @param report null 불가인 정규화 REPORT-1
+     * @param coordinates null 불가인 5~50개 전체 소항목의 중복 없는 좌표
+     * @throws IllegalArgumentException null·개수·중복 오류이면 INVALID_GRADE_INPUT
+     */
+    private static void coordinateInputs(Report report, List<RubricCoordinates> coordinates) {
+        if (report == null
+                || coordinates == null
+                || coordinates.size() < 5
+                || coordinates.size() > 50)
+            throw new IllegalArgumentException("INVALID_GRADE_INPUT");
+        Set<String> seen = new HashSet<>();
+        for (RubricCoordinates coordinate : coordinates) {
+            if (coordinate == null || !seen.add(coordinate.rubricCode()))
+                throw new IllegalArgumentException("INVALID_GRADE_INPUT");
+        }
     }
 
     private static void invalid() {

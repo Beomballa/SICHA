@@ -150,6 +150,7 @@ export async function exerciseClueAssignments({
   await lost.detach();
   page.off("request", count);
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(await page.$eval("#child-save", (e) => e.hidden), true);
   assert.equal(
     (await api(page, `${apiPath}/clue-roles/B~B`)).body.item.roleCode,
@@ -228,6 +229,7 @@ export async function exerciseClueAssignments({
   await clickWithConfirmation(page, "#child-list");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await open("clues", "A");
   await page.select("#child-scope-mode", "value");
   await page.select("#child-scope", "COMMON");
@@ -238,6 +240,7 @@ export async function exerciseClueAssignments({
   assert.equal((await api(page, `${apiPath}/clues/A`)).body.item.scope, "ROLE");
   await layout(page, "child-clue-conflict");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   assert.equal(await page.$eval("#child-scope", (e) => e.value), "COMMON");
   await open("clue-roles", "A~A");
   await active();
@@ -316,6 +319,7 @@ export async function exerciseClueAssignments({
   await clickWithConfirmation(page, "#child-list");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
+  await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
   await selectChildResource(page, "clues");
   await page.waitForSelector('[data-child-key="QA_17"]');
   assert.equal(await page.$eval("#child-next", (e) => e.hidden), false);

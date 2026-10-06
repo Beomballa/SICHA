@@ -72,7 +72,9 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     "929a5e2f864e61dac27bab3e9a13b2a2cf367d4b8fbdf76962720375d3f92c93",
                     "24c9050424431e6e70f0622c8cc03c9afd638b7f3a8b2c84884793699c25c816",
                     "3e51fefadc803df34939ca740257750b8350a368114914022da09da2bf5c8bcc",
-                    "5e1c1f7649856360b3fa9396456cb50210507841fb0cd2f41df02943cfc8a02a");
+                    "5e1c1f7649856360b3fa9396456cb50210507841fb0cd2f41df02943cfc8a02a",
+                    "b030e65b4f3f6a229d95d17c89dd01fbfe29cea79a13b1637334c58216c195c2",
+                    "5adb2c16378f7dc8fa01a237d431f05a6fc3e12d968b9a0a87a07be28ad34919");
 
     @Container static final PostgreSQLContainer<?> postgres = database();
 
@@ -102,9 +104,9 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     void completeCatalogReadersAndIntegrityFailures() throws Exception {
         var entries = OriginalSqlCatalog.entries();
         var provider = new EmbeddedSqlResourceProvider();
-        assertThat(entries).hasSize(17);
+        assertThat(entries).hasSize(19);
         assertThat(entries.stream().map(OriginalSqlCatalog.Entry::name).distinct().count())
-                .isEqualTo(17);
+                .isEqualTo(19);
         int totalBytes = 0;
         for (int index = 0; index < entries.size(); index++) {
             var entry = entries.get(index);
@@ -127,12 +129,12 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                 assertThat(text(reopened)).isEqualTo(entry.sql());
             }
         }
-        assertThat(totalBytes).isEqualTo(100902);
+        assertThat(totalBytes).isEqualTo(136396);
         assertThat(provider.getResource("missing.sql")).isNull();
         assertThat(provider.getResource(entries.getFirst().name().toLowerCase())).isNull();
         assertThat(provider.getResource("db/migration/" + entries.getFirst().name())).isNull();
         assertThat(provider.getResource(entries.getFirst().name() + ".conf")).isNull();
-        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(17);
+        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(19);
         assertThat(provider.getResources("V1__", new String[] {".txt", ".sql"})).hasSize(1);
         assertThat(provider.getResources("R", new String[] {""})).isEmpty();
         assertThat(provider.getResources("", new String[] {})).isEmpty();
@@ -165,11 +167,11 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     /** 정상 Boot 시작 뒤 실제 Hibernate 조회와 JDBC 세션 왕복 및 원본 SQL 전체 구조를 비교한다. */
     @Test
     void freshBootSqlHistorySchemaAndSessionReadiness() throws Exception {
-        assertThat(readiness.migrations()).isEqualTo(17);
+        assertThat(readiness.migrations()).isEqualTo(19);
         assertThat(bootFlyway.getConfiguration().getResourceProvider())
                 .isInstanceOf(EmbeddedSqlResourceProvider.class);
         var before = history(jdbc);
-        assertThat(before).hasSize(17);
+        assertThat(before).hasSize(19);
         assertThat(bootFlyway.migrate().migrationsExecuted).isZero();
         bootFlyway.validate();
         assertThat(history(jdbc)).isEqualTo(before);
@@ -201,8 +203,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
         }
         try (var legacyDatabase = database()) {
             legacyDatabase.start();
-            var legacy = legacy(legacyDatabase, "17");
-            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(17);
+            var legacy = legacy(legacyDatabase, "19");
+            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(19);
             legacy.validate();
             assertSqlIdentity(bootFlyway, legacy);
             assertThat(schema(jdbc)).isEqualTo(schema(jdbc(legacyDatabase)));
@@ -213,16 +215,16 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                                         + " n.oid=c.connamespace WHERE n.nspname='public' AND"
                                         + " c.contype='f'",
                                 Integer.class))
-                .isEqualTo(68);
+                .isEqualTo(83);
     }
 
-    /** 빈 폐기형 DB에 embedded SQL17을 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
+    /** 빈 폐기형 DB에 embedded SQL19을 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
     @Test
-    void freshEmbeddedSeventeenThenZero() {
+    void freshEmbeddedNineteenThenZero() {
         try (var database = database()) {
             database.start();
             var embedded = embedded(database);
-            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(17);
+            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(19);
             var jdbc = jdbc(database);
             var before = history(jdbc);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
@@ -232,9 +234,9 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
         }
     }
 
-    /** 실제 기본 SQL 탐색으로 V16을 적용한 뒤 embedded V17만 실행하고 이전 이력을 보존한다. */
+    /** 실제 기본 SQL 탐색으로 V16을 적용한 뒤 embedded V17·V18·V19을 실행하고 이전 이력을 보존한다. */
     @Test
-    void originalSqlSixteenToEmbeddedSeventeen() throws Exception {
+    void originalSqlSixteenToEmbeddedNineteen() throws Exception {
         try (var database = database()) {
             database.start();
             var legacy = legacy(database, "16");
@@ -242,27 +244,30 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
             var jdbc = jdbc(database);
             var before = history(jdbc);
             var embedded = embedded(database);
-            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(3);
             assertThat(history(jdbc).subList(0, 16)).isEqualTo(before);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
             embedded.validate();
-            assertSqlIdentity(embedded, legacy(database, "17"));
+            assertSqlIdentity(embedded, legacy(database, "19"));
         }
     }
 
-    /** 이미 정상 SQL V17인 DB는 변경 없이 전환되며 변조된 역사적 텍스트는 정상 검증에서 실패한다. */
+    /** 이미 정상 SQL V18인 DB는 V19 하나로 전환되며 변조된 역사적 텍스트는 정상 검증에서 실패한다. */
     @Test
-    void originalSqlSeventeenSwitchAndChecksumFailure() throws Exception {
+    void originalSqlEighteenSwitchAndChecksumFailure() throws Exception {
         try (var database = database()) {
             database.start();
-            var legacy = legacy(database, "17");
-            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(17);
+            var legacy = legacy(database, "18");
+            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(18);
             var jdbc = jdbc(database);
             var before = history(jdbc);
             var embedded = embedded(database);
+            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(history(jdbc).subList(0, 18)).isEqualTo(before);
+            before = history(jdbc);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
             embedded.validate();
-            assertSqlIdentity(embedded, legacy);
+            assertSqlIdentity(embedded, legacy(database, "19"));
             assertThat(history(jdbc)).isEqualTo(before);
             Path altered = materialize();
             var first = OriginalSqlCatalog.entries().getFirst();
@@ -381,7 +386,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
      * 원본 Java 바이트를 owner 전용 임시 SQL로 물질화한 뒤 정상 SQL discovery를 사용한다.
      *
      * @param database 시작된 폐기형 DB
-     * @param target 정상 SQL 목표 버전 16 또는 17
+     * @param target 정상 SQL 목표 버전 16, 18 또는 19
      * @return 기본 파일 SQL Flyway
      * @throws Exception 임시 파일 쓰기 실패
      */
@@ -451,8 +456,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     private static void assertSqlIdentity(Flyway embedded, Flyway legacy) {
         var actual = embedded.info().all();
         var expected = legacy.info().all();
-        assertThat(actual).hasSize(17);
-        assertThat(expected).hasSize(17);
+        assertThat(actual).hasSize(19);
+        assertThat(expected).hasSize(19);
         for (int index = 0; index < actual.length; index++) {
             assertThat(actual[index].getType()).isEqualTo(CoreMigrationType.SQL);
             assertThat(actual[index].getScript())
@@ -536,7 +541,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadinessConfiguration {
         /**
-         * 정상 초기화 의존 bean 생성 시점에서 SQL17과 세션 테이블 준비를 관측한다.
+         * 정상 초기화 의존 bean 생성 시점에서 SQL18과 세션 테이블 준비를 관측한다.
          *
          * @param jdbc 정상 Boot가 주입한 폐기형 DB 도구
          * @return 생성 시점의 실제 성공 마이그레이션 수
@@ -548,7 +553,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     jdbc.queryForObject(
                             "SELECT count(*) FROM public.flyway_schema_history WHERE success",
                             Integer.class);
-            assertThat(migrations).isEqualTo(17);
+            assertThat(migrations).isEqualTo(19);
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM public.spring_session", Integer.class))

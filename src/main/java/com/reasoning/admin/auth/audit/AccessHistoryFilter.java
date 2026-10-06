@@ -1,32 +1,26 @@
 package com.reasoning.admin.auth.audit;
 
 import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
+import com.reasoning.common.auth.audit.RequestAuditKernel;
+import com.reasoning.common.auth.audit.RequestAuditKernel.Actor;
+import com.reasoning.common.auth.audit.RequestAuditKernel.ActorKind;
+import com.reasoning.common.auth.audit.RequestAuditKernel.Observation;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Install inside the security chain before origin/CSRF checks, not as a servlet filter bean. */
+/** 관리자 인증 체인의 origin/CSRF 검사 앞에 설치하며 servlet filter bean으로 등록하지 않는다. */
 public final class AccessHistoryFilter extends OncePerRequestFilter {
-    public static final String REQUEST_ID_ATTRIBUTE =
-            AccessHistoryFilter.class.getName() + ".requestId";
-    private static final Logger log = LoggerFactory.getLogger(AccessHistoryFilter.class);
     private static final String UNMATCHED = "UNMATCHED";
     private static final Pattern INVITATION =
             Pattern.compile("/admin/api/auth/invitations/[A-Za-z0-9_-]+");
@@ -38,7 +32,7 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
                     "/admin/api/accounts/[A-Za-z0-9_-]+(/permissions/(?:grant|revoke)|/deactivate|/reactivate|/reactivation-preview)?");
     private static final Pattern STORY =
             Pattern.compile(
-                    "/admin/api/stories/[A-Za-z0-9_-]+(/(?:deactivate|reactivate|access(?:/(?:grant|revoke))?)|/versions/[0-9]+(?:/sections/(?:basic|answer|reveal))?)?");
+                    "/admin/api/stories/[A-Za-z0-9_-]+(/(?:deactivate|reactivate|drafts|access(?:/(?:grant|revoke))?)|/versions/[0-9]+(?:/sections/(?:basic|answer|reveal))?)?");
     private static final Pattern STORY_OWNERSHIP =
             Pattern.compile(
                     "/admin/api/stories/[A-Za-z0-9_-]+/ownership(/requests(?:/([A-Za-z0-9_-]+)/(accept|close))?|/override)?");
@@ -81,88 +75,94 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
                     "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/grade-samples(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private static final Pattern STORY_REVIEW_COMMAND =
             Pattern.compile(
-                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/(review-precheck|review-requests|preview|grade-samples/check)");
+                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/(review-precheck|review-requests|return-to-draft|preview|grade-samples/check|evidence)");
     private static final Pattern STORY_REVIEW_SNAPSHOT =
             Pattern.compile(
-                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/review-snapshots(?:/([0-9]+))?");
+                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/review-snapshots(?:/([0-9]+)(/records)?)?");
+    private static final Pattern STORY_BATCH =
+            Pattern.compile(
+                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/regressions(?:/([A-Za-z0-9_-]+))?");
+    private static final Pattern STORY_EXECUTION_ISSUES =
+            Pattern.compile(
+                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/execution-issues(?:/([A-Za-z0-9_-]+)/resolve)?");
     private final JdbcTemplate db;
+    private final RequestAuditKernel kernel;
 
+    /**
+     * 기존 독립 접근 이력 저장 도구를 보관한다.
+     *
+     * @param db 접근 이력 DB 도구, null 불가
+     */
     public AccessHistoryFilter(JdbcTemplate db) {
         this.db = db;
+        this.kernel = new RequestAuditKernel(db);
     }
 
+    /**
+     * 공통 요청 관측에 관리자 경로·주체·활동 갱신 정책을 연결한다.
+     *
+     * @param request 클라이언트 추적 입력을 신뢰하지 않는 실제 요청
+     * @param response 새 X-Request-Id를 제공할 실제 응답
+     * @param chain 이력 뒤의 인증·인가·업무 체인
+     * @throws ServletException 하위 체인 실패
+     * @throws IOException 하위 전송 실패; 이력 저장 실패는 기존 안전 경고만 남김
+     */
     @Override
     protected void doFilterInternal(
             HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        UUID requestId = UUID.randomUUID();
-        request.setAttribute(REQUEST_ID_ATTRIBUTE, requestId);
-        Instant started = Instant.now();
-        long startTick = System.nanoTime();
-        boolean completed = false;
-        try {
-            chain.doFilter(request, response);
-            completed = true;
-        } finally {
-            Instant ended = Instant.now();
-            long duration =
-                    Math.max(0, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTick));
-            // The active-session filter ran downstream; SecurityContextHolder is cleared only after
-            // our return.
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            UUID actor =
-                    authentication != null
-                                    && authentication.isAuthenticated()
-                                    && authentication.getPrincipal()
-                                            instanceof AdminPrincipal principal
-                            ? principal.accountKey()
-                            : null;
-            // An exception or async continuation means that the eventual HTTP status is not yet
-            // observable.
-            Integer status = completed && !request.isAsyncStarted() ? response.getStatus() : null;
-            String route = route(request.getRequestURI());
-            try {
-                if (actor != null
-                        && status != null
-                        && status >= 200
-                        && status < 300
-                        && businessRoute(route)
-                        && authentication.getPrincipal() instanceof AdminPrincipal principal) {
-                    db.update(
-                            "UPDATE admin_session SET"
-                                + " last_action_at=clock_timestamp(),updated_at=clock_timestamp()"
-                                + " WHERE session_key=? AND account_id=? AND auth_rev=? AND"
-                                + " state='ACTIVE' AND clock_timestamp()<last_action_at+interval"
-                                + " '30 minutes' AND clock_timestamp()<expires_at AND EXISTS"
-                                + " (SELECT 1 FROM admin_credential c JOIN admin_account a ON"
-                                + " a.id=c.account_id WHERE c.account_id=admin_session.account_id"
-                                + " AND c.auth_rev=admin_session.auth_rev AND c.enrolled_at IS NOT"
-                                + " NULL AND c.mfa_state='READY' AND a.active_yn)",
-                            principal.sessionKey(),
-                            principal.accountId(),
-                            principal.authRev());
-                }
-                db.update(
-                        "INSERT INTO access_history"
-                            + " (kind,request_id,actor_kind,actor_key,route,method,started_at,ended_at,duration_ms,http_status)"
-                            + " VALUES ('SERVER',?,?,?,?,?,?,?,?,?)",
-                        requestId,
-                        actor == null ? "ANONYMOUS" : "ADMIN",
-                        actor,
-                        route,
-                        method(request.getMethod()),
-                        Timestamp.from(started),
-                        Timestamp.from(ended),
-                        duration,
-                        status);
-            } catch (RuntimeException failure) {
-                // Never include the exception or request contents: JDBC exceptions can embed SQL
-                // parameter values.
-                log.warn("Access history write failed; operational investigation required");
-            }
-        }
+        kernel.record(request, response, chain, this::observe);
     }
 
+    /**
+     * 실제 인증된 관리자만 기록하고 관측된 업무 성공에서 기존 세션 활동 조건을 그대로 적용한다.
+     *
+     * @param authentication 하위 인증 증명, 부재 시 null
+     * @param status 정상 동기 완료 상태, 예외·비동기 진행 시 null
+     * @param uri query 없는 요청 URI, null 불가
+     * @return 관리자 정규화 경로와 실제 ADMIN 또는 ANONYMOUS 주체
+     * @throws RuntimeException 활동 갱신 실패; 공통 비치명적 경계에서 후속 INSERT도 생략
+     */
+    private Observation observe(Authentication authentication, Integer status, String uri) {
+        String route = route(uri);
+        AdminPrincipal principal =
+                authentication != null
+                                && authentication.isAuthenticated()
+                                && authentication.getPrincipal() instanceof AdminPrincipal admin
+                        ? admin
+                        : null;
+        Actor actor =
+                principal == null
+                        ? new Actor(ActorKind.ANONYMOUS, null, null)
+                        : new Actor(ActorKind.ADMIN, principal.accountKey(), null);
+        if (principal != null
+                && status != null
+                && status >= 200
+                && status < 300
+                && businessRoute(route)) {
+            db.update(
+                    "UPDATE admin_session SET"
+                            + " last_action_at=clock_timestamp(),updated_at=clock_timestamp()"
+                            + " WHERE session_key=? AND account_id=? AND auth_rev=? AND"
+                            + " state='ACTIVE' AND clock_timestamp()<last_action_at+interval"
+                            + " '30 minutes' AND clock_timestamp()<expires_at AND EXISTS"
+                            + " (SELECT 1 FROM admin_credential c JOIN admin_account a ON"
+                            + " a.id=c.account_id WHERE c.account_id=admin_session.account_id"
+                            + " AND c.auth_rev=admin_session.auth_rev AND c.enrolled_at IS NOT"
+                            + " NULL AND c.mfa_state='READY' AND a.active_yn)",
+                    principal.sessionKey(),
+                    principal.accountId(),
+                    principal.authRev());
+        }
+        return new Observation(route, actor);
+    }
+
+    /**
+     * 관리자 활동 시간을 갱신할 기존 업무 경로만 선택한다.
+     *
+     * @param route 정규화된 관리자 경로, null 불가
+     * @return 기존 활동 갱신 대상이면 true
+     */
     private static boolean businessRoute(String route) {
         return route.startsWith("/admin/api/auth/invitations")
                 || route.equals("/admin/api/auth/recovery-codes")
@@ -171,14 +171,12 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
                 || route.startsWith("/admin/api/stories");
     }
 
-    private static String method(String method) {
-        return switch (method) {
-            case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE" -> method;
-            default -> "UNKNOWN";
-        };
-    }
-
-    /** 실제 식별자를 제거하고 승인된 서버 경로 틀만 반환하며 미등록 경로는 UNMATCHED다. */
+    /**
+     * 실제 식별자를 제거하고 승인된 서버 경로 틀만 반환한다.
+     *
+     * @param path 쿼리가 없는 요청 URI
+     * @return 승인된 경로 틀 또는 UNMATCHED
+     */
     private static String route(String path) {
         // 서버가 고정한 경로 틀만 저장하며 요청 경로의 식별자·원문은 기록하지 않는다.
         switch (path) {
@@ -240,7 +238,17 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
         Matcher snapshot = STORY_REVIEW_SNAPSHOT.matcher(path);
         if (snapshot.matches())
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/review-snapshots"
-                    + (snapshot.group(1) == null ? "" : "/{snapshotId}");
+                    + (snapshot.group(1) == null ? "" : "/{snapshotId}")
+                    + (snapshot.group(2) == null ? "" : "/records");
+        Matcher batch = STORY_BATCH.matcher(path);
+        Matcher issue = STORY_EXECUTION_ISSUES.matcher(path);
+        if (issue.matches())
+            return "/admin/api/stories/{storyCode}/versions/{versionNo}/execution-issues"
+                    + (issue.group(1) == null ? "" : "/{issueKey}/resolve");
+
+        if (batch.matches())
+            return "/admin/api/stories/{storyCode}/versions/{versionNo}/regressions"
+                    + (batch.group(1) == null ? "" : "/{batchKey}");
         Matcher person = STORY_PERSON.matcher(path);
         if (person.matches()) {
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/persons"
