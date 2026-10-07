@@ -5,6 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { captureReportPreview } from "./story-report-preview.mjs";
 import { exerciseAdminWorkspace } from "./admin-workspace.mjs";
+import { exerciseAdminAccounts } from "./admin-accounts.mjs";
 import { exerciseRolePairs } from "./story-role-pair.mjs";
 import { exerciseClueAssignments } from "./story-clue-assignment.mjs";
 import { exerciseHints } from "./story-hints.mjs";
@@ -327,6 +328,12 @@ async function inspectLayout(page, name, viewport) {
   const state = await page.evaluate(() => {
     const visible = (e) =>
       e.getClientRects().length && e.getBoundingClientRect().width > 1;
+    const touchTarget = (e) => {
+      const label = e.matches('input[type="checkbox"]')
+        ? e.closest("label")
+        : null;
+      return label?.control === e ? label : e;
+    };
     const luminance = (rgb) =>
       rgb
         .slice(0, 3)
@@ -371,8 +378,9 @@ async function inspectLayout(page, name, viewport) {
       height: document.documentElement.scrollHeight,
       small: [
         ...document.querySelectorAll("button,a,input,select,textarea,summary"),
-      ].filter((e) => visible(e) && e.getBoundingClientRect().height < 48)
-        .length,
+      ].filter(
+        (e) => visible(e) && touchTarget(e).getBoundingClientRect().height < 48,
+      ).length,
       minContrast: Math.min(...ratios.map((e) => e.ratio)),
       minFont: Math.min(...ratios.map((e) => e.size)),
     };
@@ -524,6 +532,14 @@ try {
   assert.ok(session.secure && session.httpOnly, "실제 HTTPS 세션 쿠키");
   console.log("PASS HTTPS password + MFA login");
 
+  await exerciseAdminAccounts(page, fixture, {
+    notice,
+    layout,
+    inspectLayout,
+    text,
+    confirmation,
+    loseResponse,
+  });
   await exerciseAdminWorkspace(page, fixture, {
     notice,
     text,

@@ -745,12 +745,39 @@
       throw { status: 400 };
     return value;
   }
+  const permissionNames = {
+    CREATE: "사건 제작",
+    REVIEW: "사건 검수",
+    PUBLISH: "사건 공개",
+    MANAGE: "관리자 운영",
+  };
+  /** 서버 코드와 뜻을 함께 표시한다. 실제 자격과 실행 가능 상태를 합치지 않는다. */
+  function permissionText(value) {
+    return permissionNames[value]
+      ? `${permissionNames[value]} (${value})`
+      : value;
+  }
+  /** 조회 결과의 실제 상태만 badge로 표시한다. 원문은 textContent로 넣는다. */
+  function accountBadges(view) {
+    const badges = document.createElement("div");
+    badges.className = "account-badges";
+    for (const [label, ready] of [
+      [view.activeYn ? "활성" : "비활성", view.activeYn],
+      [view.enrolled ? "등록 완료" : "등록 미완료", view.enrolled],
+      [`MFA · ${view.mfaState}`, view.mfaState === "READY"],
+    ]) {
+      const badge = document.createElement("span");
+      badge.className = ready
+        ? "ui-badge ui-badge-success"
+        : "ui-badge ui-badge-info";
+      badge.textContent = label;
+      badges.append(badge);
+    }
+    return badges;
+  }
   function accountFields(view) {
     const labels = {
       accountKey: "계정 키",
-      activeYn: "활성",
-      enrolled: "등록 완료",
-      mfaState: "MFA 상태",
       permissions: "설정된 작업 자격",
       editRev: "수정번호",
       createdAt: "생성 시각",
@@ -765,7 +792,7 @@
       const raw = view[fieldName];
       value.textContent =
         fieldName === "permissions"
-          ? raw?.join(", ") || "없음"
+          ? raw?.map(permissionText).join(", ") || "없음"
           : typeof raw === "boolean"
             ? raw
               ? "예"
@@ -781,16 +808,16 @@
         "계정 검색",
         form(
           "account-filter",
-          '<label>정확한 accountKey (선택)<input name="accountKey" type="text" autocomplete="off"></label>' +
+          '<p class="muted">로그인 ID가 아닌 정확한 계정 키로 검색합니다. 목록은 전체 인원 통계가 아닙니다.</p><div class="account-filter-fields"><label>정확한 accountKey (선택)<input name="accountKey" type="text" autocomplete="off" placeholder="계정 UUID 전체 입력"></label>' +
             '<label>활성 상태<select name="activeYn"><option value="">전체</option><option value="true">활성</option><option value="false">비활성</option></select></label>' +
             '<label>등록 상태<select name="enrolled"><option value="">전체</option><option value="true">완료</option><option value="false">미완료</option></select></label>' +
-            '<label>작업 자격<select name="permission"><option value="">전체</option><option>CREATE</option><option>REVIEW</option><option>PUBLISH</option><option>MANAGE</option></select></label>',
+            '<label>작업 자격<select name="permission"><option value="">전체</option><option value="CREATE">사건 제작 (CREATE)</option><option value="REVIEW">사건 검수 (REVIEW)</option><option value="PUBLISH">사건 공개 (PUBLISH)</option><option value="MANAGE">관리자 운영 (MANAGE)</option></select></label></div>',
           "검색",
         ),
       ) +
         section(
           "검색 결과",
-          '<p>최근 생성 순서입니다. 페이지 사이에 상태가 변경될 수 있습니다.</p><div id="account-rows"></div><button type="button" class="secondary" data-next hidden>다음 페이지</button>',
+          '<p class="muted">최근 생성 순 · 한 페이지 최대 20개 · 페이지 사이에 상태가 변경될 수 있습니다.</p><div id="account-rows" aria-live="polite" aria-busy="true"></div><button type="button" class="secondary" data-next hidden>다음 페이지</button>',
         ) +
         '<p><a href="/admin/auth/manage">초대와 복구 발급</a></p>',
     );
@@ -804,8 +831,18 @@
     const requestId = ++accountListRequest;
     const params = new URLSearchParams({ size: "20", ...accountFilters });
     if (append && nextAccountId) params.set("afterId", nextAccountId);
+    document.getElementById("account-rows").setAttribute("aria-busy", "true");
     status("계정 목록을 조회하고 있습니다.");
-    const data = await request("GET", `?${params}`, undefined, accountsBase);
+    let data;
+    try {
+      data = await request("GET", `?${params}`, undefined, accountsBase);
+    } catch (error) {
+      if (id === epoch && requestId === accountListRequest)
+        document
+          .getElementById("account-rows")
+          ?.setAttribute("aria-busy", "false");
+      throw error;
+    }
     if (id !== epoch || requestId !== accountListRequest) return;
     const rows = document.getElementById("account-rows");
     if (!append) rows.replaceChildren();
@@ -813,19 +850,27 @@
       const row = document.createElement("article");
       row.className = "account-row";
       const link = document.createElement("a");
+      link.className = "account-key-link";
       link.href = `/admin/accounts/${encodeURIComponent(view.accountKey)}`;
       link.textContent = view.accountKey;
       const summary = document.createElement("p");
-      summary.textContent = `${view.activeYn ? "활성" : "비활성"} · ${view.enrolled ? "등록 완료" : "미등록"} · ${view.mfaState} · 자격: ${view.permissions.join(", ") || "없음"}`;
-      row.append(link, summary);
+      summary.className = "muted";
+      summary.textContent = `설정된 자격: ${view.permissions.map(permissionText).join(", ") || "없음"}`;
+      const action = document.createElement("span");
+      action.className = "account-row-action";
+      action.textContent = "상태·권한 상세 보기 →";
+      link.append(action);
+      row.append(accountBadges(view), link, summary);
       rows.append(row);
     }
     if (!rows.childElementCount) {
       const empty = document.createElement("p");
+      empty.className = "account-empty";
       empty.textContent = "조건에 맞는 계정이 없습니다.";
       rows.append(empty);
     }
     nextAccountId = data.hasNext ? data.nextAfterId : null;
+    rows.setAttribute("aria-busy", "false");
     content.querySelector("[data-next]").hidden = !nextAccountId;
     status(
       "현재 페이지를 조회했습니다. 변경 승인 전에는 계정 상세의 최신 상태를 확인하세요.",
@@ -844,11 +889,12 @@
     render(
       section(
         "현재 계정 상태",
-        '<div id="account-state"></div><p>비활성·미등록 계정에 설정된 자격은 현재 실행할 수 없습니다. 변경 시 기존 인증 자격은 회수될 수 있습니다.</p><p><a href="/admin/accounts">계정 목록</a></p>',
+        '<div id="account-state"></div><p class="account-state-guide">비활성·미등록 계정에 설정된 자격은 현재 실행할 수 없습니다. 변경 시 기존 인증 자격은 회수될 수 있습니다.</p>',
       ) +
         section(
           "작업 자격 변경",
           "<p>부여는 활성·등록 완료·MFA READY 계정에만 가능합니다. 회수는 별도 작업입니다.</p>" +
+            '<div class="account-mutation-grid">' +
             accountMutation("account-grant", "작업 자격 부여", [
               "ASSIGNMENT_CHANGE",
               "ACCESS_REVIEW",
@@ -858,7 +904,8 @@
               "ACCESS_REVIEW",
               "OFFBOARDING",
               "INCIDENT",
-            ]),
+            ]) +
+            "</div>",
         ) +
         section(
           "활성 상태 변경",
@@ -884,7 +931,9 @@
             )
           : ""),
     );
-    document.getElementById("account-state").append(accountFields(account));
+    document
+      .getElementById("account-state")
+      .append(accountBadges(account), accountFields(account));
     content
       .querySelector('[data-action="account-grant"]')
       .closest("fieldset").disabled =
@@ -904,7 +953,7 @@
     account = preview.account;
     document
       .getElementById("account-state")
-      .replaceChildren(accountFields(account));
+      .replaceChildren(accountBadges(account), accountFields(account));
     const container = document.getElementById("reactivation-impact");
     const summary = document.createElement("p");
     summary.textContent = `소유 사건 ${preview.ownedCount}건, 활성 사건 접근 ${preview.accessCount}건. 재활성 후 자격증명 조치: ${preview.nextCredentialAction}.`;
@@ -944,7 +993,7 @@
     const choices = ["CREATE", "REVIEW", "PUBLISH", "MANAGE"]
       .map(
         (value) =>
-          `<label class="permission-choice"><input type="checkbox" name="permissions" value="${value}">${value}</label>`,
+          `<label class="permission-choice"><input type="checkbox" name="permissions" value="${value}">${permissionText(value)}</label>`,
       )
       .join("");
     return `<fieldset><legend>${label}</legend>${form(action, `<fieldset><legend>작업 자격 (1개 이상)</legend><div class="permission-choices">${choices}</div></fieldset>` + reasonFields(reasons), label)}</fieldset>`;

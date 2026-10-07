@@ -49,6 +49,8 @@ class StoryBrowserIT extends DatabaseContextTest {
     @Autowired EnrollmentService enrollment;
     @Autowired TotpService totp;
     @Autowired CryptoService crypto;
+    @Autowired com.reasoning.admin.auth.service.AdminAccountService accounts;
+    @Autowired com.reasoning.admin.auth.session.AdminSessionAdapter frameworkSessions;
     @Autowired JdbcTemplate db;
     @Autowired ObjectMapper json;
 
@@ -140,21 +142,32 @@ class StoryBrowserIT extends DatabaseContextTest {
         UUID inviterKey =
                 db.queryForObject(
                         "SELECT account_key FROM admin_account WHERE id=?", UUID.class, inviterId);
-        String fixtureSid = UUID.randomUUID().toString();
+        var prepared = frameworkSessions.prepare();
+        String fixtureSid = prepared.id();
+        Long fixtureAuthRev =
+                db.queryForObject(
+                        "SELECT auth_rev FROM admin_credential WHERE account_id=?",
+                        Long.class,
+                        inviterId);
         UUID fixtureSession = UUID.randomUUID();
         Instant now = Instant.now();
         db.update(
                 "INSERT INTO"
                     + " admin_session(session_key,account_id,sid_hash,auth_rev,state,started_at,last_action_at,expires_at,reauth_at,activated_at)"
-                    + " VALUES (?,?,?,1,'ACTIVE',?,?,?, ?,?)",
+                    + " VALUES (?,?,?,?,'ACTIVE',?,?,?, ?,?)",
                 fixtureSession,
                 inviterId,
                 crypto.sessionHash(fixtureSid),
+                fixtureAuthRev,
                 Timestamp.from(now),
                 Timestamp.from(now),
                 Timestamp.from(now.plusSeconds(8 * 3600)),
                 Timestamp.from(now),
                 Timestamp.from(now));
+        var fixturePrincipal =
+                new com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal(
+                        inviterId, inviterKey, fixtureSession, fixtureAuthRev);
+        frameworkSessions.save(prepared, fixturePrincipal);
         var inviter =
                 new AuthModels.SessionPrincipal(
                         inviterId,
@@ -176,6 +189,28 @@ class StoryBrowserIT extends DatabaseContextTest {
                         "browser02",
                         "verified_receiver",
                         UUID.randomUUID());
+        UUID inactiveRegistration = UUID.randomUUID();
+        enrollment.issueInvitation(
+                inviter,
+                fixtureSid,
+                inactiveRegistration,
+                "browser03",
+                "verified_ui_inactive",
+                UUID.randomUUID());
+        UUID inactiveKey =
+                db.queryForObject(
+                        "SELECT a.account_key FROM admin_account a JOIN admin_enrollment e"
+                                + " ON e.account_id=a.id WHERE e.registration_key=?",
+                        UUID.class,
+                        inactiveRegistration);
+        accounts.deactivate(
+                fixtureSid,
+                fixturePrincipal,
+                inactiveKey,
+                "1",
+                "OFFBOARDING",
+                "verified_ui_inactive",
+                UUID.randomUUID());
         db.update(
                 "UPDATE admin_session SET state='REVOKED',revoked_at=clock_timestamp() WHERE"
                         + " session_key=?",
@@ -223,7 +258,9 @@ class StoryBrowserIT extends DatabaseContextTest {
                             "receiverSecret",
                             receiverSetup.secret(),
                             "receiverKey",
-                            receiverKey));
+                            receiverKey,
+                            "inactiveKey",
+                            inactiveKey));
         }
         boolean completed = browser.waitFor(180, TimeUnit.SECONDS);
         if (!completed) browser.destroyForcibly();
