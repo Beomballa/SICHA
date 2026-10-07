@@ -4,6 +4,7 @@ import { createHmac } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { captureReportPreview } from "./story-report-preview.mjs";
+import { exerciseAdminWorkspace } from "./admin-workspace.mjs";
 import { exerciseRolePairs } from "./story-role-pair.mjs";
 import { exerciseClueAssignments } from "./story-clue-assignment.mjs";
 import { exerciseHints } from "./story-hints.mjs";
@@ -523,6 +524,13 @@ try {
   assert.ok(session.secure && session.httpOnly, "실제 HTTPS 세션 쿠키");
   console.log("PASS HTTPS password + MFA login");
 
+  await exerciseAdminWorkspace(page, fixture, {
+    notice,
+    text,
+    layout,
+    inspectLayout,
+  });
+
   await page.goto(`${fixture.url}/admin/stories`);
   await notice(page, "현재 페이지");
   assert.equal(await page.title(), "시차 · 관리자 사건 목록");
@@ -547,6 +555,19 @@ try {
   ]);
   await page.waitForSelector("#editor:not([hidden])");
   assert.equal(await page.title(), "시차 · 관리자 사건 보고서");
+  assert.equal(await page.$$(".workbench").then((nodes) => nodes.length), 1);
+  assert.equal(
+    await page.evaluate(() =>
+      Boolean(
+        document
+          .querySelector(".workbench")
+          .compareDocumentPosition(document.getElementById("review-check")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ),
+    true,
+    "실제 DOM에서 원고 작성이 검수보다 앞선다",
+  );
   assert.equal(await text(page, ".workspace-label"), "시차 · 관리자 제작실");
   const editorUrl = page.url();
   const apiPath = new URL(editorUrl).pathname.replace(
@@ -564,6 +585,42 @@ try {
   );
   assert.equal(await page.$eval("#basic-title", (e) => e.hidden), true);
   await edit(page, "answer", "methodAnswer", "local-answer 보존할 미저장 원고");
+  const beforeSidebar = await text(page, "#draft-summary");
+  await page.setViewport({ width: 360, height: 900, deviceScaleFactor: 1 });
+  await page.waitForFunction(
+    () => document.getElementById("admin-menu").hidden,
+  );
+  await page.click("#admin-nav-toggle");
+  await page.focus('.admin-nav-list a[href="/admin/stories"]');
+  await page.keyboard.press("Escape");
+  assert.equal(
+    await page.$eval("#answer-methodAnswer", (input) => input.value),
+    "local-answer 보존할 미저장 원고",
+  );
+  assert.equal(await text(page, "#draft-summary"), beforeSidebar);
+  assert.equal(
+    await page.$eval('#editor-nav a[href="#answer-heading"]', (link) =>
+      link.getAttribute("aria-current"),
+    ),
+    "location",
+  );
+  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  await page.click(".review-tools > summary");
+  assert.equal(
+    await page.$eval(".review-tools", (details) => details.open),
+    false,
+  );
+  assert.equal(
+    await page.$eval("#answer-methodAnswer", (input) => input.value),
+    "local-answer 보존할 미저장 원고",
+  );
+  assert.equal(await text(page, "#draft-summary"), beforeSidebar);
+  await layout(page, "editor-compact");
+  await page.click(".review-tools > summary");
+  assert.equal(
+    await page.$eval(".review-tools", (details) => details.open),
+    true,
+  );
   await edit(page, "basic", "difficulty", 3);
   await edit(page, "basic", "estMin", 20);
   await edit(page, "basic", "estMax", 30);

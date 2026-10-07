@@ -27,7 +27,7 @@
     AUTH_ENROLL: "관리자 등록",
     AUTH_PASSWORD_RECOVERY: "비밀번호 복구",
     AUTH_MFA_RECOVERY: "MFA 복구",
-    ADMIN_HOME: "관리자 시작",
+    ADMIN_HOME: "대시보드",
     ADMIN_AUTH_MANAGE: "초대와 복구 발급",
     ADMIN_ACCOUNTS: "관리자 계정",
     ADMIN_ACCOUNT_DETAIL: "관리자 계정 상세",
@@ -500,16 +500,173 @@
     expiry(state.expiresAt);
   }
   function home() {
-    render(
-      section(
-        "관리자 시작",
-        '<p id="permission-list"></p><p>전체 로그아웃은 다른 기기의 세션도 회수합니다. 복구 코드 교체는 기존 미사용 코드를 모두 무효화합니다.</p>' +
-          form("logout", "", "현재 기기 로그아웃") +
-          form("logout-all", "", "모든 기기 로그아웃") +
-          form("codes-replace", "", "복구 코드 전체 교체") +
-          '<p><a href="/admin/stories">사건 목록 및 초안</a></p><p id="manage-link"></p>',
-      ),
-    );
+    const category = document.body.dataset.category || "dashboard";
+    const labels = {
+      dashboard: "대시보드",
+      members: "회원 관리",
+      statistics: "통계 관리",
+      security: "보안 관리",
+      payments: "유료 결제 관리",
+    };
+    title.textContent = labels[category];
+    const descriptions = {
+      dashboard: "사건 제작과 운영 업무를 한 곳에서 확인하세요.",
+      members: "회원용 인증과 관리자 회원 운영의 연결 범위를 구분합니다.",
+      statistics:
+        "실제 집계가 연결되기 전에는 수치와 그래프를 표시하지 않습니다.",
+      security: "현재 기기와 전체 세션, 복구 자격을 안전하게 관리하세요.",
+      payments: "결제 제공자와 거래 API 연결 전의 관리 영역입니다.",
+    };
+    document.getElementById("page-description").textContent =
+      descriptions[category];
+    const card = (
+      index,
+      heading,
+      badge,
+      body,
+      href,
+      action,
+      connected = false,
+    ) =>
+      `<article class="workspace-card"><span class="workspace-index">${index}</span><h3>${heading}</h3><span class="ui-badge ${connected ? "ui-badge-success" : "ui-badge-info"}">${badge}</span><p>${body}</p>${href ? `<a class="secondary-link" href="${href}">${action}</a>` : ""}</article>`;
+    const permissions =
+      '<section class="workspace-note"><h2>나의 작업 자격</h2><p id="permission-list"></p><p class="muted">작업마다 서버가 현재 권한과 사건 접근을 다시 확인합니다.</p><p id="manage-link"></p></section>';
+    if (category === "dashboard") {
+      render(
+        '<div class="workspace-hero"><div><span class="ui-badge ui-badge-info">사건 제작 워크스페이스</span><h2>다음 사건의 시작을,<br>이곳에서 준비하세요.</h2><p class="muted">원고 작성부터 자료 구성, 저장본 확인까지. 플레이어에게 공개되기 전의 제작 흐름을 차분하게 관리합니다.</p><div class="workspace-actions"><a class="primary-link" href="/admin/stories">게임 관리 열기</a><a class="secondary-link" href="/admin?tab=security">내 보안 설정</a></div></div><div class="workspace-context"><h3>오늘의 작업 흐름</h3><p>01 · 사건 목록에서 작업할 초안 선택</p><p>02 · 원고와 자료를 영역별로 명시 저장</p><p>03 · 저장본 확인 후 검수 요청</p><p class="muted">저장과 검수 요청만으로 공개되지 않습니다.</p></div></div>' +
+          '<div class="workspace-section-heading"><h2>관리 영역</h2><span class="muted">연결 상태를 기준으로 안내합니다.</span></div><div class="workspace-grid">' +
+          card(
+            "01 / CONTENT",
+            "게임 관리",
+            "기존 기능 연결",
+            "사건 목록·초안 생성·원고 편집·검수 근거를 관리합니다.",
+            "/admin/stories",
+            "사건 기록부",
+            true,
+          ) +
+          card(
+            "02 / MEMBERS",
+            "회원 관리",
+            "관리 API 미연동",
+            "LOCAL 회원 인증은 구현되어 있으며 회원 목록·운영 제어는 별도 연결이 필요합니다.",
+            "/admin?tab=members",
+            "회원 영역 확인",
+          ) +
+          card(
+            "03 / ANALYTICS",
+            "통계 관리",
+            "집계 미연동",
+            "회원 활동과 게임 결과 집계는 아직 연결되지 않았습니다.",
+            "/admin?tab=statistics",
+            "통계 영역 확인",
+          ) +
+          card(
+            "04 / SECURITY",
+            "보안 관리",
+            "기존 기능 연결",
+            "관리자 세션 회수와 복구 코드 교체를 실제 기존 기능으로 처리합니다.",
+            "/admin?tab=security",
+            "보안 설정",
+            true,
+          ) +
+          card(
+            "05 / BILLING",
+            "유료 결제 관리",
+            "결제 미연동",
+            "거래·상품·환불 처리는 제공자 및 API 연결 전입니다.",
+            "/admin?tab=payments",
+            "결제 영역 확인",
+          ) +
+          card(
+            "06 / EXPERIENCE",
+            "플레이어 메인",
+            "HTML 디자인 시안",
+            "회원 수집이나 게임 실행 없이 사용자 메인 화면의 구성을 확인합니다.",
+            "/admin/preview/player-home",
+            "메인 시안 보기",
+          ) +
+          "</div>" +
+          permissions,
+      );
+    } else if (category === "security") {
+      render(
+        '<div class="security-grid">' +
+          section(
+            "현재 기기 세션",
+            '<span class="ui-badge ui-badge-success">기존 기능 연결</span><p>현재 기기의 관리자 세션을 종료합니다.</p>' +
+              form("logout", "", "현재 기기 로그아웃"),
+          ) +
+          section(
+            "전체 기기 회수",
+            '<span class="ui-badge ui-badge-info">최근 재인증 필요</span><p>다른 기기를 포함한 모든 관리자 세션을 회수합니다.</p>' +
+              form("logout-all", "", "모든 기기 로그아웃"),
+          ) +
+          section(
+            "복구 코드 교체",
+            '<span class="ui-badge ui-badge-info">최근 재인증 필요</span><p>기존 미사용 복구 코드를 전부 무효화하고 새 코드를 발급합니다.</p>' +
+              form("codes-replace", "", "복구 코드 전체 교체"),
+          ) +
+          "</div>" +
+          permissions,
+      );
+    } else {
+      const areas = {
+        members: [
+          "회원 운영의 연결 범위",
+          "실제 회원 목록과 개인 정보를 이 화면에서 조회하지 않습니다. 관리자 회원 API가 연결되기 전까지 회원 수·활성 상태·가입 추이를 표시하지 않습니다.",
+          [
+            "01 / DIRECTORY",
+            "회원 조회",
+            "회원 목록·검색·상태 조회를 위한 관리 데이터 연결 전입니다.",
+          ],
+          [
+            "02 / LIFECYCLE",
+            "계정 생애주기",
+            "복구·탈퇴·파기 상태는 인증 및 개인정보 처리 계약과 함께 연결해야 합니다.",
+          ],
+        ],
+        statistics: [
+          "집계 없는 숫자를 만들지 않습니다",
+          "가입·활동·플레이 결과의 집계 원본과 기준 기간이 연결되면 통계를 표시합니다. 미연동 상태를 0건이나 정상 추이로 해석하지 않습니다.",
+          [
+            "01 / ACTIVITY",
+            "활동 집계",
+            "집계 기간·대상·갱신 시각을 확인할 원본 API가 필요합니다.",
+          ],
+          [
+            "02 / GAME RESULTS",
+            "게임 결과",
+            "실제 플레이와 결과 데이터 연결 전입니다. 검수 근거를 사용자 성과로 표시하지 않습니다.",
+          ],
+        ],
+        payments: [
+          "결제 운영은 별도 연결이 필요합니다",
+          "결제 제공자와 거래 API가 연결되지 않았습니다. 실제 상품 판매·승인·환불을 실행하거나 결제 상태를 추정하지 않습니다.",
+          [
+            "01 / TRANSACTIONS",
+            "거래 내역",
+            "승인·취소·환불의 실제 제공자 기록과 운영 권한 연결 전입니다.",
+          ],
+          [
+            "02 / PRODUCTS",
+            "유료 상품",
+            "상품과 이용 권한의 저장·검증 기준이 연결되기 전입니다.",
+          ],
+        ],
+      };
+      const area = areas[category];
+      render(
+        `<div class="workspace-hero"><div><span class="ui-badge ui-badge-info">관리 데이터 미연동</span><h2>${area[0]}</h2><p class="muted">${area[1]}</p><div class="workspace-actions"><a class="secondary-link" href="/admin">대시보드로 돌아가기</a></div></div><div class="workspace-context"><h3>화면과 기능의 경계</h3><p>탐색과 화면 구성이 적용되어 있습니다.</p><p>운영 데이터·변경 작업은 연결되지 않았습니다.</p><p class="muted">가짜 데이터·성공 처리·자동 요청을 제공하지 않습니다.</p></div></div><div class="workspace-grid">` +
+          area
+            .slice(2)
+            .map(([index, heading, body]) =>
+              card(index, heading, "미연동", body),
+            )
+            .join("") +
+          "</div>" +
+          permissions,
+      );
+    }
     document.getElementById("permission-list").textContent = me.permissions
       .length
       ? "현재 작업 자격: " + me.permissions.join(", ")

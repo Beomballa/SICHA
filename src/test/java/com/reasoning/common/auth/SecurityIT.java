@@ -92,10 +92,15 @@ class SecurityIT extends DatabaseContextTest {
                         header().string(
                                         "Content-Type",
                                         org.hamcrest.Matchers.containsString("javascript")));
+        mvc.perform(get("/admin/shell.js").secure(true)).andExpect(status().isOk());
         for (String path :
                 java.util.List.of(
                         "/admin/ui.css/extra",
                         "/admin/ui.js/extra",
+                        "/admin/shell.js/extra",
+                        "/admin/dashboard.css",
+                        "/admin/player-home.css",
+                        "/admin/preview/player-home/extra",
                         "/admin/stories.css",
                         "/admin/stories.js",
                         "/admin/api/stories")) {
@@ -104,6 +109,13 @@ class SecurityIT extends DatabaseContextTest {
                     .andExpect(jsonPath("$.code").value("AUTH_REQUIRED"));
         }
         mvc.perform(get("/admin/stories").secure(true))
+                .andExpect(status().isSeeOther())
+                .andExpect(header().string("Location", "/admin/login"));
+        mvc.perform(get("/admin/preview/player-home").secure(true))
+                .andExpect(status().isSeeOther())
+                .andExpect(header().string("Location", "/admin/login"))
+                .andExpect(header().string("Cache-Control", "no-store"));
+        mvc.perform(get("/admin").param("tab", "members").secure(true))
                 .andExpect(status().isSeeOther())
                 .andExpect(header().string("Location", "/admin/login"));
     }

@@ -7,246 +7,300 @@
     <title>시차 · 관리자 사건 목록</title>
     <link rel="stylesheet" href="/admin/stories.css" />
     <script defer src="/admin/ui.js"></script>
+    <script defer src="/admin/shell.js"></script>
     <script defer src="/admin/stories.js"></script>
   </head>
-  <body data-screen="list">
+  <body data-screen="list" class="admin-app">
     <a class="skip-link" href="#list-heading">사건 목록으로 바로 이동</a>
-    <main class="shell">
-      <nav class="top-nav" aria-label="관리자 화면">
-        <a href="/admin">관리자 시작</a>
-        <span class="workspace-label">시차 · 관리자 제작실</span>
-      </nav>
-      <header class="page-header list-header">
-        <div>
-          <p class="eyebrow">기록을 모으고, 사건의 진상을 구성하다</p>
-          <h1>사건 기록부</h1>
-          <p class="muted">접근 가능한 사건의 원고와 개정 상태를 확인합니다.</p>
-        </div>
-        <a href="#create-heading" id="create-jump" class="primary-link" hidden
-          >새 초안 만들기</a
-        >
-      </header>
-      <p id="notice" role="status" aria-live="polite">
-        현재 목록을 확인하고 있습니다.
-      </p>
-      <div class="list-workbench">
-        <section aria-labelledby="list-heading" class="list-panel">
-          <div class="register-heading">
-            <h2 id="list-heading" tabindex="-1">사건 문서</h2>
-            <span class="muted">생성 최신순</span>
+    <aside
+      th:replace="~{admin/fragments :: navigation('games', ${canManage})}"
+    ></aside>
+    <div class="admin-workspace">
+      <main class="shell">
+        <nav class="top-nav" aria-label="관리자 화면">
+          <a href="/admin">관리자 시작</a>
+          <span class="workspace-label">시차 · 관리자 제작실</span>
+        </nav>
+        <header class="page-header list-header">
+          <div>
+            <p class="eyebrow">GAME MANAGEMENT / 사건 제작</p>
+            <h1>사건 기록부</h1>
+            <p class="muted">
+              접근 가능한 사건의 원고와 개정 상태를 확인합니다.
+            </p>
           </div>
-          <form id="filter-form" class="filters">
-            <div>
-              <label for="code">사건 코드 정확 검색</label
+          <a href="#create-heading" id="create-jump" class="primary-link" hidden
+            >새 초안 만들기</a
+          >
+        </header>
+        <p id="notice" role="status" aria-live="polite">
+          현재 목록을 확인하고 있습니다.
+        </p>
+        <div class="list-workbench">
+          <section aria-labelledby="list-heading" class="list-panel">
+            <div class="register-heading">
+              <h2 id="list-heading" tabindex="-1">사건 문서</h2>
+              <span class="muted">생성 최신순</span>
+            </div>
+            <form id="filter-form" class="filters">
+              <div>
+                <label for="code">사건 코드 정확 검색</label
+                ><input
+                  id="code"
+                  name="code"
+                  autocomplete="off"
+                  placeholder="ST_…"
+                  pattern="[A-Z0-9_]{1,40}"
+                />
+              </div>
+              <div>
+                <label for="active">사건 상태</label
+                ><select id="active" name="activeYn">
+                  <option value="true">활성</option>
+                  <option value="false">비활성 (본인 사건)</option>
+                </select>
+              </div>
+              <button type="submit" class="secondary">조회</button>
+            </form>
+            <p class="muted">
+              생성 최신순 · 제목이 아닌 정확한 사건 코드로 검색합니다.
+            </p>
+            <div id="rows" aria-live="polite" aria-busy="true"></div>
+            <button type="button" id="next" class="secondary" hidden>
+              다음 페이지
+            </button>
+          </section>
+          <section id="create-panel" hidden aria-labelledby="create-heading">
+            <span class="ui-badge ui-badge-info">비공개 초안 · 버전 1</span>
+            <h2 id="create-heading" tabindex="-1">사건 파일 만들기</h2>
+            <p>
+              버전 1의 비공개 초안을 만듭니다. 생성 결과가 불확실하면 자동으로
+              재전송하지 않습니다.
+            </p>
+            <form id="create-form">
+              <label for="title">사건명</label
               ><input
-                id="code"
-                name="code"
+                id="title"
+                name="title"
+                required
                 autocomplete="off"
-                placeholder="ST_…"
-                pattern="[A-Z0-9_]{1,40}"
+                aria-describedby="create-title-help"
+                placeholder="새 사건의 이름을 입력하세요"
               />
+              <p id="create-title-help" class="muted">
+                제목은 서버 기준 최대 160자입니다. 사건 코드는 생성 시
+                부여됩니다.
+              </p>
+              <button type="submit">초안 생성</button>
+            </form>
+            <ol class="creation-steps" aria-label="사건 제작 흐름">
+              <li>
+                <strong>제목으로 시작</strong
+                ><span>빈 초안을 만들고 원고 편집기로 이동합니다.</span>
+              </li>
+              <li>
+                <strong>내용과 자료 구성</strong
+                ><span>개요·인물·역할·단서·진상을 영역별로 저장합니다.</span>
+              </li>
+              <li>
+                <strong>저장본 확인과 검수</strong
+                ><span
+                  >저장이나 생성만으로 플레이어에게 공개되지 않습니다.</span
+                >
+              </li>
+            </ol>
+            <div id="create-check" hidden>
+              <p id="create-check-message"></p>
+              <button type="button" id="check-create" class="secondary">
+                이 생성의 현재 상태 확인</button
+              ><button type="button" id="new-create" class="secondary">
+                새 생성 의도 시작
+              </button>
             </div>
-            <div>
-              <label for="active">사건 상태</label
-              ><select id="active" name="activeYn">
-                <option value="true">활성</option>
-                <option value="false">비활성 (본인 사건)</option>
-              </select>
-            </div>
-            <button type="submit" class="secondary">조회</button>
-          </form>
-          <p class="muted">
-            생성 최신순 · 제목이 아닌 정확한 사건 코드로 검색합니다.
-          </p>
-          <div id="rows" aria-live="polite" aria-busy="true"></div>
-          <button type="button" id="next" class="secondary" hidden>
-            다음 페이지
+          </section>
+        </div>
+        <section id="manage-panel" hidden aria-labelledby="manage-heading">
+          <h2 id="manage-heading" tabindex="-1">사건 접근·상태 관리</h2>
+          <p id="manage-code" class="story-code"></p>
+          <p id="manage-summary" class="muted"></p>
+          <p id="manage-result" role="status" aria-live="polite"></p>
+          <button type="button" id="manage-refresh" class="secondary">
+            현재 사건·관계 다시 조회</button
+          ><button type="button" id="manage-close" class="secondary">
+            닫기
           </button>
-        </section>
-        <section id="create-panel" hidden aria-labelledby="create-heading">
-          <p class="eyebrow">새 기록의 시작</p>
-          <h2 id="create-heading" tabindex="-1">사건 파일 만들기</h2>
-          <p>
-            버전 1의 비공개 초안을 만듭니다. 생성 결과가 불확실하면 자동으로
-            재전송하지 않습니다.
-          </p>
-          <form id="create-form">
-            <label for="title">사건명</label
+          <h3>접근 관계</h3>
+          <p id="access-impact"></p>
+          <ul id="access-rows"></ul>
+          <button type="button" id="access-next" class="secondary" hidden>
+            관계 다음 페이지
+          </button>
+          <form id="access-form">
+            <label for="access-account">대상 관리자 accountKey</label
             ><input
-              id="title"
-              name="title"
+              id="access-account"
+              name="accountKey"
               required
               autocomplete="off"
-            /><button type="submit">초안 생성</button>
+              pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+            />
+            <label for="access-permission">사건별 권한</label
+            ><select id="access-permission" name="permission">
+              <option value="EDIT">EDIT · 초안 편집</option>
+              <option value="REVIEW">REVIEW · 사건 검수</option>
+              <option value="PUBLISH">PUBLISH · 사건 공개</option>
+            </select>
+            <label for="access-operation">변경</label
+            ><select id="access-operation" name="operation">
+              <option value="grant">부여</option>
+              <option value="revoke">회수</option>
+            </select>
+            <label for="access-reason">변경 사유</label
+            ><select id="access-reason" name="reasonCode">
+              <option value="ASSIGNMENT_CHANGE">담당 변경</option>
+              <option value="ACCESS_REVIEW">접근 검토</option>
+              <option value="OFFBOARDING">업무 종료</option>
+              <option value="INCIDENT">사고 대응</option>
+            </select>
+            <label for="access-reference">별도 확인 참조 (비개인 8~64자)</label
+            ><input
+              id="access-reference"
+              name="verificationRef"
+              required
+              autocomplete="off"
+              pattern="[A-Za-z0-9_-]{8,64}"
+            />
+            <button type="submit" id="access-submit">관계 변경 확인</button>
           </form>
-          <div id="create-check" hidden>
-            <p id="create-check-message"></p>
-            <button type="button" id="check-create" class="secondary">
-              이 생성의 현재 상태 확인</button
-            ><button type="button" id="new-create" class="secondary">
-              새 생성 의도 시작
+          <div id="story-state-actions" hidden>
+            <h3>최초 초안 사건 상태</h3>
+            <p>
+              사건만 비활성화하거나 복원합니다. 원고·자식·접근 관계의 개별
+              상태는 유지됩니다. 복원하면 남은 활성 관계의 접근이 다시
+              가능해집니다.
+            </p>
+            <label for="state-reference">별도 확인 참조 (비개인 8~64자)</label
+            ><input
+              id="state-reference"
+              required
+              autocomplete="off"
+              pattern="[A-Za-z0-9_-]{8,64}"
+            />
+            <label class="impact-confirm" for="state-impact-reviewed">
+              <input type="checkbox" id="state-impact-reviewed" />
+              활성 관계의 수와 목록을 검토했습니다.
+            </label>
+            <button type="button" id="state-change">사건 상태 변경</button>
+          </div>
+        </section>
+        <section
+          id="ownership-panel"
+          hidden
+          aria-labelledby="ownership-heading"
+        >
+          <h2 id="ownership-heading" tabindex="-1">사건 소유권 인계</h2>
+          <p id="ownership-summary"></p>
+          <p id="ownership-result" role="status" aria-live="polite"></p>
+          <button type="button" id="ownership-refresh" class="secondary">
+            현재 소유권 다시 조회</button
+          ><button type="button" id="ownership-close" class="secondary">
+            닫기
+          </button>
+          <div id="ownership-pending" hidden>
+            <h3>지정 수신자와 요청 효력</h3>
+            <p id="ownership-pending-detail"></p>
+            <button type="button" id="ownership-accept" hidden>
+              인계 수락
+            </button>
+            <button
+              type="button"
+              id="ownership-cancel"
+              class="secondary"
+              hidden
+            >
+              소유자 요청 취소
+            </button>
+            <button
+              type="button"
+              id="ownership-decline"
+              class="secondary"
+              hidden
+            >
+              수신자 요청 거절
+            </button>
+          </div>
+          <form id="ownership-request-form" hidden>
+            <h3>활성 공동 편집자에게 인계 요청</h3>
+            <label for="ownership-recipient">수신자 accountKey</label
+            ><input
+              id="ownership-recipient"
+              name="toAccountKey"
+              required
+              autocomplete="off"
+              pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+            />
+            <label class="impact-confirm" for="ownership-keep-editor">
+              <input
+                type="checkbox"
+                id="ownership-keep-editor"
+                name="keepEditor"
+              />
+              수락 뒤 이전 소유자의 EDIT 관계 유지
+            </label>
+            <label for="ownership-reference"
+              >별도 확인 참조 (비개인 8~64자)</label
+            ><input
+              id="ownership-reference"
+              name="verificationRef"
+              required
+              autocomplete="off"
+              pattern="[A-Za-z0-9_-]{8,64}"
+            />
+            <button type="submit">24시간 인계 요청</button>
+          </form>
+          <form id="ownership-override-form" hidden>
+            <h3>운영 예외 인계</h3>
+            <p>
+              실제 비활성 또는 복구 제한 소유자에게서만 소유권을 복구합니다.
+            </p>
+            <label for="ownership-override-recipient"
+              >새 소유자 accountKey</label
+            ><input
+              id="ownership-override-recipient"
+              name="toAccountKey"
+              required
+              autocomplete="off"
+              pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+            />
+            <label for="ownership-override-reason">확인된 소유자 상태</label
+            ><select id="ownership-override-reason" name="reasonCode">
+              <option value="OWNER_DISABLED">소유자 비활성</option>
+              <option value="OWNER_RECOVERY">소유자 복구 제한</option>
+            </select>
+            <label for="ownership-override-reference"
+              >별도 확인 참조 (비개인 8~64자)</label
+            ><input
+              id="ownership-override-reference"
+              name="verificationRef"
+              required
+              autocomplete="off"
+              pattern="[A-Za-z0-9_-]{8,64}"
+            />
+            <button type="submit">예외 인계 확인</button>
+          </form>
+          <div id="ownership-reconcile" hidden>
+            <p>
+              변경 확정 여부가 불확실합니다. 원래 의도 키로만 결과를 조회합니다.
+            </p>
+            <button type="button" id="ownership-replay" class="secondary">
+              동일 의도 영수증 확인</button
+            ><button type="button" id="ownership-new-intent" class="secondary">
+              현재 상태 확인 후 새 의도 준비
             </button>
           </div>
         </section>
-      </div>
-      <section id="manage-panel" hidden aria-labelledby="manage-heading">
-        <h2 id="manage-heading" tabindex="-1">사건 접근·상태 관리</h2>
-        <p id="manage-code" class="story-code"></p>
-        <p id="manage-summary" class="muted"></p>
-        <p id="manage-result" role="status" aria-live="polite"></p>
-        <button type="button" id="manage-refresh" class="secondary">
-          현재 사건·관계 다시 조회</button
-        ><button type="button" id="manage-close" class="secondary">닫기</button>
-        <h3>접근 관계</h3>
-        <p id="access-impact"></p>
-        <ul id="access-rows"></ul>
-        <button type="button" id="access-next" class="secondary" hidden>
-          관계 다음 페이지
-        </button>
-        <form id="access-form">
-          <label for="access-account">대상 관리자 accountKey</label
-          ><input
-            id="access-account"
-            name="accountKey"
-            required
-            autocomplete="off"
-            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-          />
-          <label for="access-permission">사건별 권한</label
-          ><select id="access-permission" name="permission">
-            <option value="EDIT">EDIT · 초안 편집</option>
-            <option value="REVIEW">REVIEW · 사건 검수</option>
-            <option value="PUBLISH">PUBLISH · 사건 공개</option>
-          </select>
-          <label for="access-operation">변경</label
-          ><select id="access-operation" name="operation">
-            <option value="grant">부여</option>
-            <option value="revoke">회수</option>
-          </select>
-          <label for="access-reason">변경 사유</label
-          ><select id="access-reason" name="reasonCode">
-            <option value="ASSIGNMENT_CHANGE">담당 변경</option>
-            <option value="ACCESS_REVIEW">접근 검토</option>
-            <option value="OFFBOARDING">업무 종료</option>
-            <option value="INCIDENT">사고 대응</option>
-          </select>
-          <label for="access-reference">별도 확인 참조 (비개인 8~64자)</label
-          ><input
-            id="access-reference"
-            name="verificationRef"
-            required
-            autocomplete="off"
-            pattern="[A-Za-z0-9_-]{8,64}"
-          />
-          <button type="submit" id="access-submit">관계 변경 확인</button>
-        </form>
-        <div id="story-state-actions" hidden>
-          <h3>최초 초안 사건 상태</h3>
-          <p>
-            사건만 비활성화하거나 복원합니다. 원고·자식·접근 관계의 개별 상태는
-            유지됩니다. 복원하면 남은 활성 관계의 접근이 다시 가능해집니다.
-          </p>
-          <label for="state-reference">별도 확인 참조 (비개인 8~64자)</label
-          ><input
-            id="state-reference"
-            required
-            autocomplete="off"
-            pattern="[A-Za-z0-9_-]{8,64}"
-          />
-          <label class="impact-confirm" for="state-impact-reviewed">
-            <input type="checkbox" id="state-impact-reviewed" />
-            활성 관계의 수와 목록을 검토했습니다.
-          </label>
-          <button type="button" id="state-change">사건 상태 변경</button>
-        </div>
-      </section>
-      <section id="ownership-panel" hidden aria-labelledby="ownership-heading">
-        <h2 id="ownership-heading" tabindex="-1">사건 소유권 인계</h2>
-        <p id="ownership-summary"></p>
-        <p id="ownership-result" role="status" aria-live="polite"></p>
-        <button type="button" id="ownership-refresh" class="secondary">
-          현재 소유권 다시 조회</button
-        ><button type="button" id="ownership-close" class="secondary">
-          닫기
-        </button>
-        <div id="ownership-pending" hidden>
-          <h3>지정 수신자와 요청 효력</h3>
-          <p id="ownership-pending-detail"></p>
-          <button type="button" id="ownership-accept" hidden>인계 수락</button>
-          <button type="button" id="ownership-cancel" class="secondary" hidden>
-            소유자 요청 취소
-          </button>
-          <button type="button" id="ownership-decline" class="secondary" hidden>
-            수신자 요청 거절
-          </button>
-        </div>
-        <form id="ownership-request-form" hidden>
-          <h3>활성 공동 편집자에게 인계 요청</h3>
-          <label for="ownership-recipient">수신자 accountKey</label
-          ><input
-            id="ownership-recipient"
-            name="toAccountKey"
-            required
-            autocomplete="off"
-            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-          />
-          <label class="impact-confirm" for="ownership-keep-editor">
-            <input
-              type="checkbox"
-              id="ownership-keep-editor"
-              name="keepEditor"
-            />
-            수락 뒤 이전 소유자의 EDIT 관계 유지
-          </label>
-          <label for="ownership-reference">별도 확인 참조 (비개인 8~64자)</label
-          ><input
-            id="ownership-reference"
-            name="verificationRef"
-            required
-            autocomplete="off"
-            pattern="[A-Za-z0-9_-]{8,64}"
-          />
-          <button type="submit">24시간 인계 요청</button>
-        </form>
-        <form id="ownership-override-form" hidden>
-          <h3>운영 예외 인계</h3>
-          <p>실제 비활성 또는 복구 제한 소유자에게서만 소유권을 복구합니다.</p>
-          <label for="ownership-override-recipient">새 소유자 accountKey</label
-          ><input
-            id="ownership-override-recipient"
-            name="toAccountKey"
-            required
-            autocomplete="off"
-            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-          />
-          <label for="ownership-override-reason">확인된 소유자 상태</label
-          ><select id="ownership-override-reason" name="reasonCode">
-            <option value="OWNER_DISABLED">소유자 비활성</option>
-            <option value="OWNER_RECOVERY">소유자 복구 제한</option>
-          </select>
-          <label for="ownership-override-reference"
-            >별도 확인 참조 (비개인 8~64자)</label
-          ><input
-            id="ownership-override-reference"
-            name="verificationRef"
-            required
-            autocomplete="off"
-            pattern="[A-Za-z0-9_-]{8,64}"
-          />
-          <button type="submit">예외 인계 확인</button>
-        </form>
-        <div id="ownership-reconcile" hidden>
-          <p>
-            변경 확정 여부가 불확실합니다. 원래 의도 키로만 결과를 조회합니다.
-          </p>
-          <button type="button" id="ownership-replay" class="secondary">
-            동일 의도 영수증 확인</button
-          ><button type="button" id="ownership-new-intent" class="secondary">
-            현재 상태 확인 후 새 의도 준비
-          </button>
-        </div>
-      </section>
-    </main>
+      </main>
+    </div>
     <dialog id="story-reauth" aria-labelledby="story-reauth-heading">
       <form id="story-reauth-form">
         <h2 id="story-reauth-heading">재인증</h2>

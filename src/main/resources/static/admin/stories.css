@@ -5,7 +5,8 @@
   margin: auto;
   padding: var(--gap-related) var(--page-gutter) var(--space-16);
 }
-nav {
+.top-nav,
+.section-nav {
   display: flex;
   flex-wrap: wrap;
   gap: var(--gap-related);
@@ -40,7 +41,41 @@ nav {
 }
 .list-header {
   padding-block: var(--gap-group);
-  border-bottom: var(--space-1) solid var(--color-brand);
+  border-bottom: 1px solid var(--color-border);
+}
+.page-header .eyebrow {
+  color: var(--color-info);
+  font-family: var(--font-code);
+}
+#create-panel {
+  border-top: var(--space-1) solid var(--color-brand);
+}
+#create-panel h2 {
+  margin-top: var(--gap-related);
+}
+#create-panel form > button {
+  width: 100%;
+}
+#create-title-help {
+  margin-top: var(--gap-helper);
+  font-size: var(--font-size-caption);
+}
+.creation-steps {
+  padding-left: var(--gap-group);
+  margin: var(--gap-group) 0 0;
+  border-top: 1px solid var(--color-border);
+}
+.creation-steps li {
+  padding-top: var(--gap-related);
+}
+.creation-steps strong,
+.creation-steps span {
+  display: block;
+  font-size: var(--font-size-caption);
+}
+.creation-steps span {
+  margin-top: var(--gap-helper);
+  color: var(--color-text-muted);
 }
 section {
   min-width: 0;
@@ -75,6 +110,19 @@ section {
 .story-row p {
   margin-block: var(--gap-helper);
   font-size: var(--font-size-caption);
+}
+.story-row-actions {
+  margin-top: var(--gap-related);
+}
+.review-tools {
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--gap-group);
+}
+.review-tools > summary {
+  padding: var(--panel-padding);
+  color: var(--color-info);
+  font-size: var(--font-size-section);
+  font-weight: 600;
 }
 .story-row h3 a {
   display: flex;
@@ -114,6 +162,7 @@ section {
 }
 .story-badges span {
   background: var(--color-surface-raised);
+  border-radius: var(--radius-control);
 }
 .field {
   margin-top: var(--gap-group);
@@ -318,7 +367,7 @@ dd {
   background: var(--color-surface-raised);
 }
 .section-nav a[aria-current="location"] {
-  box-shadow: inset 3px 0 var(--color-brand);
+  box-shadow: inset var(--space-1) 0 var(--color-brand);
   font-weight: 600;
 }
 .section-nav a[data-dirty="true"]::after {
@@ -427,6 +476,7 @@ dd {
   padding: var(--gap-group) var(--gap-related);
   border: 1px solid var(--color-border);
   background: var(--color-background);
+  border-radius: var(--radius-card);
 }
 section h2,
 h3,

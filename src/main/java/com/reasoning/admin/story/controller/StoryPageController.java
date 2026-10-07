@@ -85,13 +85,18 @@ public class StoryPageController {
         response.setHeader("Cache-Control", "no-store");
         var session = sessions.current(request);
         if (session.isEmpty()) return loginRedirect(response);
+        ModelAndView view = new ModelAndView(template);
         try {
-            login.me(session.get().id(), session.get().principal());
+            view.addObject(
+                    "canManage",
+                    login.me(session.get().id(), session.get().principal())
+                            .permissions()
+                            .contains("MANAGE"));
         } catch (AuthException ex) {
             if (ex.status() == 401) return loginRedirect(response);
             throw ex;
         }
-        return new ModelAndView(template);
+        return view;
     }
 
     private ModelAndView loginRedirect(HttpServletResponse response) {

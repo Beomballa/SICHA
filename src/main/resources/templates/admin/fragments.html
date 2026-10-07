@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+  <body>
+    <aside
+      th:fragment="navigation(active, manage)"
+      th:if="${active != null}"
+      class="admin-sidebar"
+      aria-label="관리자 탐색"
+    >
+      <div class="admin-brand-row">
+        <a href="/admin" class="admin-brand" aria-label="시차 관리자 대시보드">
+          <span class="brand-mark" aria-hidden="true">시</span>
+          <span>시차<span class="brand-caption">ADMIN WORKSPACE</span></span>
+        </a>
+        <button
+          id="admin-nav-toggle"
+          type="button"
+          class="secondary"
+          aria-controls="admin-menu"
+          aria-expanded="true"
+          hidden
+        >
+          메뉴 닫기
+        </button>
+      </div>
+      <nav id="admin-menu" aria-label="관리 영역">
+        <p class="nav-group-label">관리 워크스페이스</p>
+        <div class="admin-nav-list">
+          <a
+            href="/admin"
+            th:attr="aria-current=${active == 'dashboard'} ? 'page' : null"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"
+              /></svg
+            ><span>대시보드</span>
+          </a>
+          <a
+            href="/admin/stories"
+            th:attr="aria-current=${active == 'games'} ? 'page' : null"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 6h7l2 2h9v12H3zM3 6V4h7l2 2M7 12h10M7 16h6" /></svg
+            ><span>게임 관리</span>
+          </a>
+          <a
+            href="/admin?tab=members"
+            th:attr="aria-current=${active == 'members'} ? 'page' : null"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="9" cy="7" r="3" />
+              <path
+                d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M17 13a5 5 0 0 1 4 5v3"
+              /></svg
+            ><span>회원 관리</span>
+          </a>
+          <a
+            href="/admin?tab=statistics"
+            th:attr="aria-current=${active == 'statistics'} ? 'page' : null"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 20V10M12 20V4M20 20v-7M2 20h20" /></svg
+            ><span>통계 관리</span>
+          </a>
+          <a
+            href="/admin?tab=security"
+            th:attr="aria-current=${active == 'security'} ? 'page' : null"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6" /></svg
+            ><span>보안 관리</span>
+          </a>
+          <a
+            href="/admin?tab=payments"
+            th:attr="aria-current=${active == 'payments'} ? 'page' : null"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="M3 10h18M7 15h3" /></svg
+            ><span>유료 결제 관리</span>
+          </a>
+        </div>
+        <div th:if="${manage}" class="admin-nav-secondary">
+          <p class="nav-group-label">운영자 도구</p>
+          <a href="/admin/accounts">관리자 계정</a>
+          <a href="/admin/auth/manage">초대·복구 발급</a>
+        </div>
+        <div class="admin-nav-footer">
+          <span class="ui-badge ui-badge-info">보호된 관리 화면</span>
+          <p>회원용 화면과 관리자 작업을 분리합니다.</p>
+        </div>
+      </nav>
+    </aside>
+    <dialog
+      th:fragment="reauthentication"
+      id="reauth-dialog"
+      aria-labelledby="reauth-title"
+    >
+      <form id="reauth-form" autocomplete="on">
+        <h2 id="reauth-title">재인증</h2>
+        <p>
+          현재 비밀번호와 인증 앱 코드를 확인합니다. 완료 뒤 작업 버튼을 다시
+          눌러야 합니다.
+        </p>
+        <label for="reauth-password">현재 비밀번호</label>
+        <input
+          id="reauth-password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
+        <label for="reauth-totp">인증 앱 6자리 코드</label>
+        <input
+          id="reauth-totp"
+          name="totp"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          autocomplete="one-time-code"
+          required
+        />
+        <p id="reauth-error" role="alert"></p>
+        <div class="actions">
+          <button type="submit">재인증</button
+          ><button type="button" id="reauth-close" class="secondary">
+            취소
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

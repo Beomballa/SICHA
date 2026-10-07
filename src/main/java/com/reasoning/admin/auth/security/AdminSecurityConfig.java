@@ -142,6 +142,7 @@ public class AdminSecurityConfig {
                                                 "/admin/auth.css",
                                                 "/admin/ui.css",
                                                 "/admin/ui.js",
+                                                "/admin/shell.js",
                                                 "/admin/login",
                                                 "/admin/login/mfa",
                                                 "/admin/enroll",
@@ -160,6 +161,9 @@ public class AdminSecurityConfig {
                                                     if (request.getMethod().equals("GET")
                                                             && (request.getRequestURI()
                                                                             .equals("/admin")
+                                                                    || request.getRequestURI()
+                                                                            .equals(
+                                                                                    "/admin/preview/player-home")
                                                                     || request.getRequestURI()
                                                                             .equals(
                                                                                     "/admin/auth/manage")

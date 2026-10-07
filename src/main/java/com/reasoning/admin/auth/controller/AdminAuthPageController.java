@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.servlet.ModelAndView;
 
 import java.util.List;
+import java.util.Map;
 
 @Controller
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -36,22 +37,24 @@ public class AdminAuthPageController {
         "/admin/recovery/password",
         "/admin/recovery/mfa",
         "/admin",
+        "/admin/preview/player-home",
         "/admin/auth/manage",
         "/admin/accounts"
     })
     public ModelAndView page(HttpServletRequest request, HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-store");
         String path = request.getRequestURI();
+        List<String> permissions = List.of();
         boolean protectedPage =
                 path.equals("/admin")
+                        || path.equals("/admin/preview/player-home")
                         || path.equals("/admin/auth/manage")
                         || path.equals("/admin/accounts");
         if (protectedPage) {
             var session = sessions.current(request);
             if (session.isEmpty()) return loginRedirect(response);
             try {
-                List<String> permissions =
-                        login.me(session.get().id(), session.get().principal()).permissions();
+                permissions = login.me(session.get().id(), session.get().principal()).permissions();
                 if ((path.equals("/admin/auth/manage") || path.equals("/admin/accounts"))
                         && !permissions.contains("MANAGE")) {
                     ModelAndView denied = view("FORBIDDEN");
@@ -63,18 +66,40 @@ public class AdminAuthPageController {
                 throw ex;
             }
         }
-        return view(
-                switch (path) {
-                    case "/admin/login" -> "AUTH_LOGIN";
-                    case "/admin/login/mfa" -> "AUTH_MFA";
-                    case "/admin/enroll" -> "AUTH_ENROLL";
-                    case "/admin/recovery/password" -> "AUTH_PASSWORD_RECOVERY";
-                    case "/admin/recovery/mfa" -> "AUTH_MFA_RECOVERY";
-                    case "/admin" -> "ADMIN_HOME";
-                    case "/admin/auth/manage" -> "ADMIN_AUTH_MANAGE";
-                    case "/admin/accounts" -> "ADMIN_ACCOUNTS";
-                    default -> throw new IllegalStateException("Unknown auth page");
-                });
+        ModelAndView result =
+                view(
+                        switch (path) {
+                            case "/admin/login" -> "AUTH_LOGIN";
+                            case "/admin/login/mfa" -> "AUTH_MFA";
+                            case "/admin/enroll" -> "AUTH_ENROLL";
+                            case "/admin/recovery/password" -> "AUTH_PASSWORD_RECOVERY";
+                            case "/admin/recovery/mfa" -> "AUTH_MFA_RECOVERY";
+                            case "/admin" -> "ADMIN_HOME";
+                            case "/admin/preview/player-home" -> "PLAYER_HOME_PREVIEW";
+                            case "/admin/auth/manage" -> "ADMIN_AUTH_MANAGE";
+                            case "/admin/accounts" -> "ADMIN_ACCOUNTS";
+                            default -> throw new IllegalStateException("Unknown auth page");
+                        });
+        result.addObject("canManage", permissions.contains("MANAGE"));
+        if (path.equals("/admin")) {
+            Map<String, String> categories =
+                    Map.of(
+                            "dashboard", "대시보드",
+                            "members", "회원 관리",
+                            "statistics", "통계 관리",
+                            "security", "보안 관리",
+                            "payments", "유료 결제 관리");
+            String category = request.getParameter("tab");
+            if (category == null) category = "dashboard";
+            if (!categories.containsKey(category)) {
+                ModelAndView invalid = new ModelAndView("admin/navigation-error");
+                invalid.setStatus(HttpStatus.BAD_REQUEST);
+                return invalid;
+            }
+            result.addObject("category", category);
+            result.addObject("categoryTitle", categories.get(category));
+        }
+        return result;
     }
 
     /**
@@ -101,8 +126,19 @@ public class AdminAuthPageController {
     }
 
     private ModelAndView view(String screen) {
-        ModelAndView view = new ModelAndView("admin/auth");
+        ModelAndView view =
+                new ModelAndView(
+                        switch (screen) {
+                            case "ADMIN_HOME" -> "admin/dashboard";
+                            case "PLAYER_HOME_PREVIEW" -> "admin/player-home";
+                            default -> "admin/auth";
+                        });
         view.addObject("screen", screen);
+        view.addObject(
+                "canManage",
+                screen.equals("ADMIN_AUTH_MANAGE")
+                        || screen.equals("ADMIN_ACCOUNTS")
+                        || screen.equals("ADMIN_ACCOUNT_DETAIL"));
         return view;
     }
 

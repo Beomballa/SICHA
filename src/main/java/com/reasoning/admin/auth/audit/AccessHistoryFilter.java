@@ -181,6 +181,7 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
         // 서버가 고정한 경로 틀만 저장하며 요청 경로의 식별자·원문은 기록하지 않는다.
         switch (path) {
             case "/admin",
+                    "/admin/preview/player-home",
                     "/admin/auth/manage",
                     "/admin/accounts",
                     "/admin/stories",

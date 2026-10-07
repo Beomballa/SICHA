@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>시차 · 관리자 워크스페이스</title>
+    <link rel="stylesheet" href="/admin/dashboard.css" />
+    <script defer src="/admin/ui.js"></script>
+    <script defer src="/admin/shell.js"></script>
+    <script defer src="/admin/auth.js"></script>
+  </head>
+  <body
+    class="admin-app"
+    data-screen="ADMIN_HOME"
+    th:attr="data-category=${category}"
+  >
+    <a class="skip-link" href="#page-title">관리 화면으로 바로 이동</a>
+    <aside
+      th:replace="~{admin/fragments :: navigation(${category}, ${canManage})}"
+    ></aside>
+    <div class="admin-workspace">
+      <main class="shell dashboard-shell">
+        <nav class="admin-breadcrumb" aria-label="현재 위치">
+          <a href="/admin">관리자 워크스페이스</a
+          ><span>운영과 제작을 위한 공간</span>
+        </nav>
+        <header class="dashboard-header">
+          <div>
+            <p class="eyebrow">SI:CHA / WORKSPACE</p>
+            <h1 id="page-title" tabindex="-1" th:text="${categoryTitle}">
+              대시보드
+            </h1>
+            <p id="page-description" class="muted">
+              사건 제작과 운영 업무를 한 곳에서 확인하세요.
+            </p>
+          </div>
+          <a class="secondary-link" href="/admin/preview/player-home"
+            >플레이어 메인 시안</a
+          >
+        </header>
+        <p id="notice" role="status" aria-live="polite">
+          현재 세션을 확인하고 있습니다.
+        </p>
+        <div id="content" aria-busy="true"></div>
+      </main>
+    </div>
+    <dialog th:replace="~{admin/fragments :: reauthentication}"></dialog>
+  </body>
+</html>

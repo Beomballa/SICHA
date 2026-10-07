@@ -7,919 +7,1029 @@
     <title>시차 · 관리자 사건 보고서</title>
     <link rel="stylesheet" href="/admin/stories.css" />
     <script defer src="/admin/ui.js"></script>
+    <script defer src="/admin/shell.js"></script>
     <script defer src="/admin/stories.js"></script>
   </head>
-  <body data-screen="editor">
+  <body data-screen="editor" class="admin-app">
     <a class="skip-link" href="#basic-heading">원고 편집으로 바로 이동</a>
-    <main class="shell">
-      <nav class="top-nav" aria-label="관리자 화면">
-        <a href="/admin">관리자 시작</a><a href="/admin/stories">사건 기록부</a>
-        <span class="workspace-label">시차 · 관리자 제작실</span>
-      </nav>
-      <header class="page-header editor-header">
-        <h1>사건 보고서</h1>
-        <p class="muted">기록을 읽고, 필요한 항목만 직접 수정합니다.</p>
-      </header>
-      <p id="notice" role="status" aria-live="polite">
-        사건 자료를 확인하고 있습니다.
-      </p>
-      <article id="editor" class="report-document" hidden>
-        <section class="version-panel" aria-labelledby="state-heading">
-          <div class="report-masthead">
-            <p class="eyebrow">사건 원고 · 열람 기준본</p>
-            <p class="document-scope">제작자 열람</p>
+    <aside
+      th:replace="~{admin/fragments :: navigation('games', ${canManage})}"
+    ></aside>
+    <div class="admin-workspace">
+      <main class="shell">
+        <nav class="top-nav" aria-label="관리자 화면">
+          <a href="/admin">관리자 시작</a
+          ><a href="/admin/stories">사건 기록부</a>
+          <span class="workspace-label">시차 · 관리자 제작실</span>
+        </nav>
+        <header class="page-header editor-header">
+          <div>
+            <p class="eyebrow">STORY WORKSPACE / 원고 편집</p>
+            <h1>사건 보고서</h1>
+            <p class="muted">기록을 읽고, 필요한 항목만 직접 수정합니다.</p>
           </div>
-          <h2 id="state-heading">현재 사건</h2>
-          <p id="version-summary"></p>
-          <details>
-            <summary>
-              문서 식별 정보 · 사건 코드 / 소유 계정 / 수정 시각
-            </summary>
-            <dl id="version-state"></dl>
-          </details>
-        </section>
-        <div class="report-status">
-          <p id="draft-summary" role="status" aria-live="polite">
-            저장할 변경 없음
-          </p>
-          <p class="muted">영역별 명시 저장 · 저장만으로 공개되지 않음</p>
-        </div>
-        <section
-          id="review-check"
-          class="version-panel"
-          aria-labelledby="review-check-heading"
-        >
-          <h2 id="review-check-heading">저장 초안 확인</h2>
-          <p class="muted">
-            모든 영역의 입력을 먼저 저장하거나 취소하세요. 사전 검사는 저장본의
-            구조 진단이며 품질 통과·검수 요청·공개가 아닙니다.
-          </p>
-          <div class="button-row">
-            <button
-              type="button"
-              id="review-precheck"
-              class="secondary"
-              disabled
-            >
-              저장본 사전 검사
-            </button>
-            <button
-              type="button"
-              id="review-samples-open"
-              class="secondary"
-              disabled
-            >
-              저장 예시 열람·수정
-            </button>
-            <button
-              type="button"
-              id="review-samples-check"
-              class="secondary"
-              disabled
-            >
-              전체 활성 저장 예시 사람 확인
-            </button>
+          <span class="ui-badge ui-badge-info">제작자 전용</span>
+        </header>
+        <p id="notice" role="status" aria-live="polite">
+          사건 자료를 확인하고 있습니다.
+        </p>
+        <article id="editor" class="report-document" hidden>
+          <section class="version-panel" aria-labelledby="state-heading">
+            <div class="report-masthead">
+              <p class="eyebrow">사건 원고 · 열람 기준본</p>
+              <p class="document-scope">제작자 열람</p>
+            </div>
+            <h2 id="state-heading">현재 사건</h2>
+            <p id="version-summary"></p>
+            <details>
+              <summary>
+                문서 식별 정보 · 사건 코드 / 소유 계정 / 수정 시각
+              </summary>
+              <dl id="version-state"></dl>
+            </details>
+          </section>
+          <div class="report-status">
+            <p id="draft-summary" role="status" aria-live="polite">
+              저장할 변경 없음
+            </p>
+            <p class="muted">영역별 명시 저장 · 저장만으로 공개되지 않음</p>
           </div>
-          <p id="review-check-status" role="status" aria-live="polite"></p>
-          <p id="review-check-receipt" role="status" aria-live="polite"></p>
-          <button
-            type="button"
-            id="review-check-refresh"
-            class="secondary"
-            hidden
-          >
-            현재 저장본 조회·비교
-          </button>
-          <div id="review-check-diagnostics"></div>
-        </section>
-        <section
-          id="review-lifecycle"
-          class="version-panel"
-          aria-labelledby="review-lifecycle-heading"
-        >
-          <div class="reading">
-            <h2 id="review-lifecycle-heading">검수 요청 · 초안 반환</h2>
-            <p id="review-permissions" role="status" aria-live="polite">
-              서버 권한 응답을 확인하고 있습니다. 쓰기는 아직 허용되지 않습니다.
-            </p>
-            <p id="review-lifecycle-target"></p>
-            <p class="muted">
-              현재 권한과 상태는 별도 조건입니다. 모든 변경은 서버가 다시
-              검증합니다. 공개 권한이 있어도 이 화면은 승인·공개를 제공하지
-              않습니다. 명시 조회·동의·전송과 응답 반영 때 계정과 고정 절대
-              기한을 다시 확인합니다. 신원 변경·확인 실패 시 이전 입력과 민감
-              열람을 폐기합니다.
-            </p>
-            <div class="state-action">
-              <h3>저장 초안의 검수 요청</h3>
-              <p class="muted">
-                편집 권한과 활성 DRAFT·현재 사본 없음이 필요합니다. 모든 원고와
-                자식 자료의 미저장 입력을 먼저 저장하거나 취소하세요. 불변
-                사본과 서버 구조 검사를 만들며 품질 승인이 아닙니다. 확정 거절은
-                현재 GET·비교 수락으로 종료한 뒤 수정·저장하고 새 요청을
-                결정하세요. 응답 유실·형식 오류는 새 키로 바꾸지 않으며 원래
-                키·본문만 재확인합니다. 같은 신원의 CSRF 거절도 원래 의도를
-                유지합니다.
-              </p>
-              <div class="button-row">
-                <button type="button" id="review-request" disabled>
-                  저장 초안 검수 요청
-                </button>
-                <button
-                  type="button"
-                  id="review-request-replay"
-                  class="secondary"
-                  hidden
-                  disabled
-                >
-                  원래 키·본문으로 검수 요청 재확인
-                </button>
-              </div>
-            </div>
-            <div class="state-action">
-              <h3>작성자 철회 · WITHDRAW</h3>
-              <p class="muted">
-                편집 권한으로 현재 REVIEW/READY를 반환합니다. 사유는
-                AUTHOR_REVISION입니다. 원고와 미저장 입력은 유지됩니다.
-              </p>
-              <form id="review-withdraw-form">
-                <label for="review-withdraw-ref">작성자 철회 확인 참조</label>
-                <input
-                  id="review-withdraw-ref"
-                  type="text"
-                  required
-                  pattern="[A-Za-z0-9_-]{8,64}"
-                  minlength="8"
-                  maxlength="64"
-                  autocomplete="off"
-                  aria-describedby="review-return-help"
-                />
-                <div class="form-actions">
-                  <button
-                    type="submit"
-                    id="review-withdraw"
-                    class="secondary"
-                    disabled
-                  >
-                    작성자 철회로 초안 반환
-                  </button>
-                </div>
-              </form>
-            </div>
-            <div class="state-action">
-              <h3>검수자 수정 요구 · CHANGES_REQUIRED</h3>
-              <p class="muted">
-                현재 전역 REVIEW와 같은 사건 REVIEW 관계가 모두 필요합니다.
-                소유자도 별도 검수 권한이 필요하며 선택한 역사 사본은 반환하지
-                않습니다.
-              </p>
-              <form id="review-changes-form">
-                <label for="review-changes-reason">수정 요구 사유</label>
-                <select id="review-changes-reason" required>
-                  <option value="">사유 선택</option>
-                  <option value="CONTENT_DEFECT">
-                    CONTENT_DEFECT · 콘텐츠 결함
-                  </option>
-                  <option value="FAIRNESS_ISSUE">
-                    FAIRNESS_ISSUE · 공정성 문제
-                  </option>
-                  <option value="GRADING_ISSUE">
-                    GRADING_ISSUE · 판정 문제
-                  </option>
-                </select>
-                <label for="review-changes-ref"
-                  >검수자 수정 요구 확인 참조</label
-                >
-                <input
-                  id="review-changes-ref"
-                  type="text"
-                  required
-                  pattern="[A-Za-z0-9_-]{8,64}"
-                  minlength="8"
-                  maxlength="64"
-                  autocomplete="off"
-                  aria-describedby="review-return-help"
-                />
-                <div class="form-actions">
-                  <button
-                    type="submit"
-                    id="review-changes-required"
-                    class="secondary"
-                    disabled
-                  >
-                    검수자 수정 요구로 초안 반환
-                  </button>
-                </div>
-              </form>
-            </div>
-            <p id="review-return-help" class="muted">
-              확인 참조는 사용자가 확인한 비개인 영문·숫자·밑줄·하이픈
-              8~64자입니다. 외부 증명을 자동 조회하거나 참조를 생성하지
-              않습니다. 반환 응답 유실은 재전송하지 않고 현재 GET·비교만
-              제공합니다. DRAFT 조회는 이 요청의 성공 증거가 아닙니다. 반환
-              입력은 비우거나 확정 영수증의 값으로 되돌리면 미저장 상태가
-              해제됩니다. 원고·반환 입력·미확정 전환은 이 페이지 메모리에만
-              남습니다. 이탈 경고에서 떠나기를 선택하면 폐기되며 복원되지
-              않습니다. 입력을 비우거나 현재 GET을 수락해도 미확정 전환이
-              성공으로 바뀌거나 사라지지는 않습니다.
-            </p>
-            <p
-              id="review-lifecycle-status"
-              role="status"
-              aria-live="polite"
-            ></p>
-            <p
-              id="review-lifecycle-receipt"
-              role="status"
-              aria-live="polite"
-            ></p>
-            <button
-              type="button"
-              id="review-lifecycle-refresh"
-              class="secondary"
-              disabled
+          <div th:replace="~{:: manuscript(true)}"></div>
+          <details class="review-tools" open>
+            <summary>검수·열람·근거 도구 접기/펼치기</summary>
+            <section
+              id="review-check"
+              class="version-panel"
+              aria-labelledby="review-check-heading"
             >
-              현재 전환 기준 조회·비교
-            </button>
-          </div>
-        </section>
-        <section
-          id="clone-panel"
-          class="version-panel"
-          aria-labelledby="clone-heading"
-        >
-          <div class="reading">
-            <h2 id="clone-heading">공개본에서 새 초안 만들기</h2>
-            <p id="clone-target"></p>
-            <p class="muted">
-              선택 버전은 복제 후보입니다. 현재 공개본과 같은지, 진행 중인
-              DRAFT/REVIEW/READY가 있는지는 요청 시 서버가 잠금 아래 확인합니다.
-              활성 사건·버전과 사건 편집 권한이 필요하며 CREATE·검수·공개 권한,
-              최근 재인증·엔진 가용성·품질 통과는 복제 조건이 아닙니다.
-            </p>
-            <div class="state-action">
-              <h3>이어받는 자료와 초기화되는 기록</h3>
-              <p>
-                공개 사본의 기본·정답·해설과 활성 자식 자료 11종을 새 식별자로
-                복사합니다. 원고·코드·관계는 유지하고 현재 제작 정책을
-                적용합니다. 새 버전은 DRAFT·수정번호 0·현재 사본 없음으로
-                시작합니다. 검수·실행·사람 확인·READY 근거는 승계하지 않습니다.
-                기존 공개본·노출·진행 게임과 이 화면의 미저장 입력은 바꾸지
-                않습니다.
-              </p>
-              <div class="button-row">
-                <button type="button" id="clone-submit" disabled>
-                  후보 공개본에서 새 초안 만들기
-                </button>
-                <button
-                  type="button"
-                  id="clone-refresh"
-                  class="secondary"
-                  disabled
-                >
-                  복제 후보만 다시 조회
-                </button>
-                <button
-                  type="button"
-                  id="clone-reconfirm"
-                  class="secondary"
-                  hidden
-                  disabled
-                >
-                  원래 키·본문으로 복제 재확인
-                </button>
-              </div>
-            </div>
-            <p class="muted">
-              후보 조회는 원고·쓰기 기준·다른 미확인 의도를 갱신하지 않습니다.
-              응답 유실은 새 키로 복구하지 않습니다. 재확인은 원래 요청이
-              미확정이면 새 초안을 실제로 생성할 수 있습니다. 키·본문·영수증은
-              이 페이지 메모리에만 남으며 이탈 시 폐기됩니다. 성공해도 자동
-              이동하지 않습니다.
-            </p>
-            <p id="clone-status" role="status" aria-live="polite">
-              복제 요청 전입니다.
-            </p>
-            <p id="clone-receipt" role="status" aria-live="polite"></p>
-            <ul id="clone-policy"></ul>
-            <div class="button-row">
-              <a id="clone-link" hidden>확인된 작업 버전 열기</a>
-            </div>
-          </div>
-        </section>
-        <section
-          id="saved-review"
-          class="version-panel"
-          aria-labelledby="saved-review-heading"
-        >
-          <div class="reading">
-            <h2 id="saved-review-heading">저장 검수 자료 열람</h2>
-            <p class="muted">
-              제작자 편집기에 포함된 열람 영역입니다. 주변 원고에는 정답과
-              제작자 비밀이 남아 있으므로 독립된 역할 전용 화면이 아닙니다.
-              조회마다 서버가 접근권을 확인합니다. 아래 수동 의견 추가는 모델
-              실행·품질 인증·공개가 아니며 위의 검수 요청·반환과도 구분됩니다.
-            </p>
-            <h3>마지막 상세 조회로 확인한 현재 버전</h3>
-            <dl id="saved-review-current"></dl>
-            <p
-              id="saved-metadata-status"
-              role="status"
-              aria-live="polite"
-              data-state="stale"
-            >
-              쓰기 비교와 별도로 현재 열람 기준만 다시 확인할 수 있습니다.
-            </p>
-            <button
-              type="button"
-              id="saved-metadata-refresh"
-              class="secondary"
-              hidden
-              disabled
-            >
-              현재 열람 기준만 다시 조회
-            </button>
-            <p class="muted">
-              열람 기준 재조회는 원고 입력·쓰기 수정번호·저장 잠금·사람 확인
-              영수증을 변경하지 않습니다. 저장 재개는 기존 최신본 비교·수락과
-              별개입니다.
-            </p>
-            <div class="state-action">
-              <h3>검수 사본 이력 · 원문 없는 목록</h3>
+              <h2 id="review-check-heading">저장 초안 확인</h2>
               <p class="muted">
-                서버 ID 내림차순, 한 번에 20건입니다. 첫 행이 현재 회차라는 뜻은
-                아닙니다.
+                모든 영역의 입력을 먼저 저장하거나 취소하세요. 사전 검사는
+                저장본의 구조 진단이며 품질 통과·검수 요청·공개가 아닙니다.
               </p>
               <div class="button-row">
                 <button
                   type="button"
-                  id="saved-history-first"
+                  id="review-precheck"
                   class="secondary"
                   disabled
                 >
-                  사본 이력 처음 20건 조회
+                  저장본 사전 검사
                 </button>
                 <button
                   type="button"
-                  id="saved-history-next"
+                  id="review-samples-open"
                   class="secondary"
                   disabled
                 >
-                  사본 이력 다음 20건 조회
+                  저장 예시 열람·수정
+                </button>
+                <button
+                  type="button"
+                  id="review-samples-check"
+                  class="secondary"
+                  disabled
+                >
+                  전체 활성 저장 예시 사람 확인
                 </button>
               </div>
-              <p
-                id="saved-history-status"
-                role="status"
-                aria-live="polite"
-                data-state="unopened"
-              >
-                아직 조회하지 않았습니다.
-              </p>
-              <div id="saved-history-result"></div>
-              <h3>선택한 불변 사본 · 목록에서 확인한 메타데이터</h3>
-              <p class="muted">
-                선택만으로 원문·근거·미리보기를 불러오지 않으며 미저장 편집
-                입력은 유지됩니다.
-              </p>
-              <dl id="saved-review-selected"></dl>
-            </div>
-            <div class="state-action">
-              <h3>선택 사본의 제작자 민감 저장 원문</h3>
-              <p class="muted">
-                SR04 응답 전체의 원래 JSON 텍스트(snapshot와 payload)입니다.
-                정답·정책·세 영역과 열한 자료 배열을 포함하며 현재 테이블로
-                재구성하지 않습니다. null·빈 문자열·배열 순서·큰 정수를 그대로
-                표시합니다.
-              </p>
+              <p id="review-check-status" role="status" aria-live="polite"></p>
+              <p id="review-check-receipt" role="status" aria-live="polite"></p>
               <button
                 type="button"
-                id="saved-payload-read"
+                id="review-check-refresh"
                 class="secondary"
-                disabled
+                hidden
               >
-                선택 사본 민감 원문 조회
+                현재 저장본 조회·비교
               </button>
-              <p
-                id="saved-payload-status"
-                role="status"
-                aria-live="polite"
-                data-state="unopened"
-              >
-                아직 조회하지 않았습니다.
-              </p>
-              <p id="saved-payload-result" class="report-value" hidden></p>
-            </div>
-            <div class="state-action">
-              <h3>선택 사본의 저장 검수 근거 · 민감 자료</h3>
-              <p class="muted">
-                SR06 응답 전체의 원래 JSON 텍스트입니다. evidenceData는 저장
-                wrapper가 아닌 근거 details입니다. 서버 순서와 과거
-                FAIL·selfReviewYn을 유지합니다. 이 페이지에 없는 종류는 통과나
-                미실시로 확정하지 않습니다. 한 페이지는 전체 검수 근거가 아니며
-                다음 조회는 앞 페이지를 대체합니다.
-              </p>
-              <div class="button-row">
-                <button
-                  type="button"
-                  id="saved-records-first"
-                  class="secondary"
-                  disabled
-                >
-                  민감 근거 처음 20건 조회
-                </button>
-                <button
-                  type="button"
-                  id="saved-records-next"
-                  class="secondary"
-                  disabled
-                >
-                  민감 근거 다음 20건 조회
-                </button>
-              </div>
-              <p
-                id="saved-records-status"
-                role="status"
-                aria-live="polite"
-                data-state="unopened"
-              >
-                아직 조회하지 않았습니다.
-              </p>
-              <p id="saved-records-result" class="report-value" hidden></p>
-            </div>
+              <div id="review-check-diagnostics"></div>
+            </section>
             <section
-              class="state-action"
-              id="saved-issues"
-              aria-labelledby="saved-issues-heading"
+              id="review-lifecycle"
+              class="version-panel"
+              aria-labelledby="review-lifecycle-heading"
             >
-              <h3 id="saved-issues-heading">
-                선택 사본의 실행 지적 이력 · 읽기 전용
-              </h3>
-              <p class="muted" id="saved-issues-help">
-                저장된 BATCH 지적의 허용 메타데이터만 읽습니다. 매 페이지 현재
-                전역 REVIEW와 활성 사건 REVIEW 관계가 모두 필요합니다.
-                소유·편집·공개 권한은 대체하지 않습니다. 과거 사본도 조회할 수
-                있으며 현재 상태·runtime 가용성은 이력 조회 조건이 아닙니다. 빈
-                페이지는 전체 이력 없음·통과·치명 지적 없음·해소·READY·공개
-                가능의 증거가 아닙니다. 다음 조회는 앞 페이지를 대체합니다.
-              </p>
-              <p id="saved-issues-eligibility" role="status"></p>
-              <label for="saved-issues-filter">실행 지적 상태 조건</label>
-              <select
-                id="saved-issues-filter"
-                aria-describedby="saved-issues-help"
-                disabled
-              >
-                <option value="ALL">ALL · 상태 조건 없음</option>
-                <option value="OPEN">OPEN · 미해소</option>
-                <option value="RESOLVED">RESOLVED · 저장된 해소 이력</option>
-              </select>
-              <div class="button-row">
-                <button
-                  type="button"
-                  id="saved-issues-first"
-                  class="secondary"
-                  disabled
-                >
-                  실행 지적 처음 20건 조회
-                </button>
-                <button
-                  type="button"
-                  id="saved-issues-next"
-                  class="secondary"
-                  disabled
-                >
-                  실행 지적 다음 20건 조회
-                </button>
-              </div>
-              <p
-                id="saved-issues-status"
-                role="status"
-                aria-live="polite"
-                data-state="unopened"
-              >
-                아직 조회하지 않았습니다.
-              </p>
-              <p id="saved-issues-result" class="report-value" hidden></p>
-            </section>
-            <section class="state-action" id="issue-resolution" aria-labelledby="issue-resolution-heading">
-              <h3 id="issue-resolution-heading">현재 REVIEW · BATCH 지적 해소</h3>
               <div class="reading">
-                <p class="muted">
-                  조회한 현재 사본의 OPEN INFRA / GRADING만 새 해소 대상으로 선택합니다.
-                  CONTENT·OBSERVATION·RESOLVED와 과거 이력은 읽기 전용입니다.
-                  실제 후속 batchKey와 비개인 확인 참조를 직접 입력하세요.
-                  조회는 관측일 뿐이며 현재 전역·사건 REVIEW 자격과 증거는 POST에서 서버가 판단합니다.
-                  원고 수정번호를 올리거나 품질·READY·공개·운영 효력을 승인하지 않습니다.
+                <h2 id="review-lifecycle-heading">검수 요청 · 초안 반환</h2>
+                <p id="review-permissions" role="status" aria-live="polite">
+                  서버 권한 응답을 확인하고 있습니다. 쓰기는 아직 허용되지
+                  않습니다.
                 </p>
-                <div id="issue-resolution-choices" class="button-row"></div>
-                <p id="issue-resolution-source" class="report-value">선택한 지적 없음</p>
-                <form id="issue-resolution-form" novalidate>
-                  <div class="field">
-                    <label for="issue-resolution-batch">후속 targetBatchKey · 소문자 UUID v4</label>
-                    <input id="issue-resolution-batch" type="text" autocomplete="off" maxlength="36" aria-describedby="issue-resolution-status">
+                <p id="review-lifecycle-target"></p>
+                <p class="muted">
+                  현재 권한과 상태는 별도 조건입니다. 모든 변경은 서버가 다시
+                  검증합니다. 공개 권한이 있어도 이 화면은 승인·공개를 제공하지
+                  않습니다. 명시 조회·동의·전송과 응답 반영 때 계정과 고정 절대
+                  기한을 다시 확인합니다. 신원 변경·확인 실패 시 이전 입력과
+                  민감 열람을 폐기합니다.
+                </p>
+                <div class="state-action">
+                  <h3>저장 초안의 검수 요청</h3>
+                  <p class="muted">
+                    편집 권한과 활성 DRAFT·현재 사본 없음이 필요합니다. 모든
+                    원고와 자식 자료의 미저장 입력을 먼저 저장하거나 취소하세요.
+                    불변 사본과 서버 구조 검사를 만들며 품질 승인이 아닙니다.
+                    확정 거절은 현재 GET·비교 수락으로 종료한 뒤 수정·저장하고
+                    새 요청을 결정하세요. 응답 유실·형식 오류는 새 키로 바꾸지
+                    않으며 원래 키·본문만 재확인합니다. 같은 신원의 CSRF 거절도
+                    원래 의도를 유지합니다.
+                  </p>
+                  <div class="button-row">
+                    <button type="button" id="review-request" disabled>
+                      저장 초안 검수 요청
+                    </button>
+                    <button
+                      type="button"
+                      id="review-request-replay"
+                      class="secondary"
+                      hidden
+                      disabled
+                    >
+                      원래 키·본문으로 검수 요청 재확인
+                    </button>
                   </div>
-                  <div class="field">
-                    <label for="issue-resolution-ref">비개인 verificationRef · 영문·숫자·_ - 8~64자</label>
-                    <input id="issue-resolution-ref" type="text" autocomplete="off" maxlength="64" aria-describedby="issue-resolution-status">
-                  </div>
-                  <p id="issue-resolution-reason">사유는 선택한 지적 종류에 결속됩니다. targetReviewId는 null입니다.</p>
-                  <div class="form-actions">
-                    <button type="button" id="issue-resolution-batch-read" class="secondary" disabled>입력한 후속 BATCH 상세 조회</button>
-                    <button type="submit" id="issue-resolution-submit" disabled>선택한 지적 해소</button>
-                  </div>
-                </form>
-                <p id="issue-resolution-batch-status" role="status">아직 조회하지 않았습니다. 자동 조회하지 않습니다.</p>
-                <p id="issue-resolution-batch-detail" class="report-value" hidden></p>
-                <div class="button-row">
-                  <button type="button" id="issue-resolution-replay" class="secondary" hidden disabled>보관한 원래 키·본문 재확인</button>
-                  <button type="button" id="issue-resolution-discard" class="secondary">해소 입력·보관 의도 명시 폐기</button>
                 </div>
-                <p id="issue-resolution-status" role="status" aria-live="polite">전송하지 않았습니다.</p>
-                <p id="issue-resolution-receipt" class="report-value" role="status" aria-live="polite"></p>
-                <p class="muted">
-                  결과 미확인 중 새 입력은 별도로 보존합니다. 재확인은 현재 입력이 아닌
-                  원래 경로·키·본문만 전송하며 최초 요청이 저장되지 않았다면 실제 해소할 수 있습니다.
-                  현재 GET·RESOLVED 이력은 유실 요청의 영수증이 아닙니다.
-                  페이지를 떠나거나 명시 폐기하면 메모리의 재확인 의도를 잃습니다.
+                <div class="state-action">
+                  <h3>작성자 철회 · WITHDRAW</h3>
+                  <p class="muted">
+                    편집 권한으로 현재 REVIEW/READY를 반환합니다. 사유는
+                    AUTHOR_REVISION입니다. 원고와 미저장 입력은 유지됩니다.
+                  </p>
+                  <form id="review-withdraw-form">
+                    <label for="review-withdraw-ref"
+                      >작성자 철회 확인 참조</label
+                    >
+                    <input
+                      id="review-withdraw-ref"
+                      type="text"
+                      required
+                      pattern="[A-Za-z0-9_-]{8,64}"
+                      minlength="8"
+                      maxlength="64"
+                      autocomplete="off"
+                      aria-describedby="review-return-help"
+                    />
+                    <div class="form-actions">
+                      <button
+                        type="submit"
+                        id="review-withdraw"
+                        class="secondary"
+                        disabled
+                      >
+                        작성자 철회로 초안 반환
+                      </button>
+                    </div>
+                  </form>
+                </div>
+                <div class="state-action">
+                  <h3>검수자 수정 요구 · CHANGES_REQUIRED</h3>
+                  <p class="muted">
+                    현재 전역 REVIEW와 같은 사건 REVIEW 관계가 모두 필요합니다.
+                    소유자도 별도 검수 권한이 필요하며 선택한 역사 사본은
+                    반환하지 않습니다.
+                  </p>
+                  <form id="review-changes-form">
+                    <label for="review-changes-reason">수정 요구 사유</label>
+                    <select id="review-changes-reason" required>
+                      <option value="">사유 선택</option>
+                      <option value="CONTENT_DEFECT">
+                        CONTENT_DEFECT · 콘텐츠 결함
+                      </option>
+                      <option value="FAIRNESS_ISSUE">
+                        FAIRNESS_ISSUE · 공정성 문제
+                      </option>
+                      <option value="GRADING_ISSUE">
+                        GRADING_ISSUE · 판정 문제
+                      </option>
+                    </select>
+                    <label for="review-changes-ref"
+                      >검수자 수정 요구 확인 참조</label
+                    >
+                    <input
+                      id="review-changes-ref"
+                      type="text"
+                      required
+                      pattern="[A-Za-z0-9_-]{8,64}"
+                      minlength="8"
+                      maxlength="64"
+                      autocomplete="off"
+                      aria-describedby="review-return-help"
+                    />
+                    <div class="form-actions">
+                      <button
+                        type="submit"
+                        id="review-changes-required"
+                        class="secondary"
+                        disabled
+                      >
+                        검수자 수정 요구로 초안 반환
+                      </button>
+                    </div>
+                  </form>
+                </div>
+                <p id="review-return-help" class="muted">
+                  확인 참조는 사용자가 확인한 비개인 영문·숫자·밑줄·하이픈
+                  8~64자입니다. 외부 증명을 자동 조회하거나 참조를 생성하지
+                  않습니다. 반환 응답 유실은 재전송하지 않고 현재 GET·비교만
+                  제공합니다. DRAFT 조회는 이 요청의 성공 증거가 아닙니다. 반환
+                  입력은 비우거나 확정 영수증의 값으로 되돌리면 미저장 상태가
+                  해제됩니다. 원고·반환 입력·미확정 전환은 이 페이지 메모리에만
+                  남습니다. 이탈 경고에서 떠나기를 선택하면 폐기되며 복원되지
+                  않습니다. 입력을 비우거나 현재 GET을 수락해도 미확정 전환이
+                  성공으로 바뀌거나 사라지지는 않습니다.
                 </p>
+                <p
+                  id="review-lifecycle-status"
+                  role="status"
+                  aria-live="polite"
+                ></p>
+                <p
+                  id="review-lifecycle-receipt"
+                  role="status"
+                  aria-live="polite"
+                ></p>
+                <button
+                  type="button"
+                  id="review-lifecycle-refresh"
+                  class="secondary"
+                  disabled
+                >
+                  현재 전환 기준 조회·비교
+                </button>
               </div>
             </section>
-            <div class="state-action" id="manual-review">
-              <h3>MODEL / APPROVAL 의견 추가</h3>
-              <p class="muted">
-                실제로 확인한 근거만 직접 입력하세요. 모델 실행이나 사람 승인을
-                자동 생성하지 않습니다. 새 기록은 수락한 상세의 활성 REVIEW,
-                현재 사본 선택과 현재 검수 권한이 모두 필요하며 서버가
-                재인가합니다. sourceRev·열람 전용 GET·과거 영수증은 쓰기 기준이
-                아닙니다.
-              </p>
-              <p id="manual-target" role="status"></p>
-              <div class="button-row">
-                <button
-                  type="button"
-                  id="manual-baseline"
-                  class="secondary"
-                  disabled
-                >
-                  선택한 현재 사본·쓰기 기준 수락
-                </button>
-                <button
-                  type="button"
-                  id="manual-refresh"
-                  class="secondary"
-                  disabled
-                >
-                  기록 쓰기 기준 조회·비교
-                </button>
-              </div>
-              <details>
-                <summary>근거 입력 계약과 미실시 안내</summary>
+            <section
+              id="clone-panel"
+              class="version-panel"
+              aria-labelledby="clone-heading"
+            >
+              <div class="reading">
+                <h2 id="clone-heading">공개본에서 새 초안 만들기</h2>
+                <p id="clone-target"></p>
                 <p class="muted">
-                  MODEL 근거 있음은 실제 모델·effort·실행 참조·별도 문맥 true가
-                  필요합니다. 새 PASS는 gpt-6-astra / medium과 미해결 0건입니다.
-                  APPROVAL은 모델·effort·실행 참조·별도 문맥을 모두 명시적
-                  null로 선택하며 PASS는 미해결 0건입니다. 근거 없음은
-                  INCOMPLETE만 가능하고 모든 nullable 항목은 null, 비고와 근거
-                  설명에는 정직한 미실시 사유가 필요합니다. 확인 시각은 실제
-                  UTC이며 미래 여부의 최종 기준은 서버 시각입니다. 참조 주소를
-                  자동 조회하지 않습니다.
+                  선택 버전은 복제 후보입니다. 현재 공개본과 같은지, 진행 중인
+                  DRAFT/REVIEW/READY가 있는지는 요청 시 서버가 잠금 아래
+                  확인합니다. 활성 사건·버전과 사건 편집 권한이 필요하며
+                  CREATE·검수·공개 권한, 최근 재인증·엔진 가용성·품질 통과는
+                  복제 조건이 아닙니다.
                 </p>
-                <p class="muted">
-                  형식 2의 해결 항목은 같은 사본·같은 종류의 이전
-                  FAIL/INCOMPLETE만 대상으로 합니다. PASS 외에는 비워 두세요.
-                  이전 행은 수정하지 않으며 화면에 보인 이력이 전체라는 뜻도
-                  아닙니다.
-                </p>
-              </details>
-              <form id="manual-form" novalidate>
-                <div id="manual-fields"></div>
-                <fieldset>
-                  <legend>형식 2 해결 항목 · 최대 100개</legend>
-                  <div id="manual-resolutions"></div>
-                  <button
-                    type="button"
-                    id="manual-resolution-add"
-                    class="secondary"
-                  >
-                    해결 항목 입력 추가
-                  </button>
-                  <p id="manual-resolves-error" class="error" role="status"></p>
-                </fieldset>
-                <div class="form-actions">
-                  <button type="submit" id="manual-submit" disabled>
-                    입력한 검수 의견 추가
-                  </button>
+                <div class="state-action">
+                  <h3>이어받는 자료와 초기화되는 기록</h3>
+                  <p>
+                    공개 사본의 기본·정답·해설과 활성 자식 자료 11종을 새
+                    식별자로 복사합니다. 원고·코드·관계는 유지하고 현재 제작
+                    정책을 적용합니다. 새 버전은 DRAFT·수정번호 0·현재 사본
+                    없음으로 시작합니다. 검수·실행·사람 확인·READY 근거는
+                    승계하지 않습니다. 기존 공개본·노출·진행 게임과 이 화면의
+                    미저장 입력은 바꾸지 않습니다.
+                  </p>
+                  <div class="button-row">
+                    <button type="button" id="clone-submit" disabled>
+                      후보 공개본에서 새 초안 만들기
+                    </button>
+                    <button
+                      type="button"
+                      id="clone-refresh"
+                      class="secondary"
+                      disabled
+                    >
+                      복제 후보만 다시 조회
+                    </button>
+                    <button
+                      type="button"
+                      id="clone-reconfirm"
+                      class="secondary"
+                      hidden
+                      disabled
+                    >
+                      원래 키·본문으로 복제 재확인
+                    </button>
+                  </div>
                 </div>
-              </form>
-              <div class="button-row">
+                <p class="muted">
+                  후보 조회는 원고·쓰기 기준·다른 미확인 의도를 갱신하지
+                  않습니다. 응답 유실은 새 키로 복구하지 않습니다. 재확인은 원래
+                  요청이 미확정이면 새 초안을 실제로 생성할 수 있습니다.
+                  키·본문·영수증은 이 페이지 메모리에만 남으며 이탈 시
+                  폐기됩니다. 성공해도 자동 이동하지 않습니다.
+                </p>
+                <p id="clone-status" role="status" aria-live="polite">
+                  복제 요청 전입니다.
+                </p>
+                <p id="clone-receipt" role="status" aria-live="polite"></p>
+                <ul id="clone-policy"></ul>
+                <div class="button-row">
+                  <a id="clone-link" hidden>확인된 작업 버전 열기</a>
+                </div>
+              </div>
+            </section>
+            <section
+              id="saved-review"
+              class="version-panel"
+              aria-labelledby="saved-review-heading"
+            >
+              <div class="reading">
+                <h2 id="saved-review-heading">저장 검수 자료 열람</h2>
+                <p class="muted">
+                  제작자 편집기에 포함된 열람 영역입니다. 주변 원고에는 정답과
+                  제작자 비밀이 남아 있으므로 독립된 역할 전용 화면이 아닙니다.
+                  조회마다 서버가 접근권을 확인합니다. 아래 수동 의견 추가는
+                  모델 실행·품질 인증·공개가 아니며 위의 검수 요청·반환과도
+                  구분됩니다.
+                </p>
+                <h3>마지막 상세 조회로 확인한 현재 버전</h3>
+                <dl id="saved-review-current"></dl>
+                <p
+                  id="saved-metadata-status"
+                  role="status"
+                  aria-live="polite"
+                  data-state="stale"
+                >
+                  쓰기 비교와 별도로 현재 열람 기준만 다시 확인할 수 있습니다.
+                </p>
                 <button
                   type="button"
-                  id="manual-reconfirm"
+                  id="saved-metadata-refresh"
                   class="secondary"
                   hidden
                   disabled
                 >
-                  원래 키·정확한 본문으로 추가·재확인
+                  현재 열람 기준만 다시 조회
                 </button>
-                <button type="button" id="manual-discard" class="secondary">
-                  기록 입력·보관 의도 명시 폐기
-                </button>
-              </div>
-              <p id="manual-status" role="status" aria-live="polite"></p>
-              <p id="manual-receipt" role="status" aria-live="polite"></p>
-              <p class="muted">
-                응답 유실·503·잘못된 성공 응답은 결과 미확인입니다. 재확인은
-                읽기 전용 조회가 아니라 원래 추가가 실행될 수 있는 POST입니다.
-                SR06 이력에는 요청 키가 없어 이전 요청의 소유권·실패를 증명하지
-                못합니다. 자동 재전송·자동 민감 이력 조회는 없습니다. 원래 키와
-                본문은 이 페이지 메모리에만 남고 명시 폐기·이탈 후 복구되지
-                않습니다. current/replayed는 품질·현재 쓰기 자격이 아닙니다.
-              </p>
-            </div>
-            <div class="state-action">
-              <h3>저장 자료의 서버 미리보기 투영</h3>
-              <p class="muted">
-                로컬 미저장 입력이 아닌 저장 DRAFT 또는 선택 사본만 조회합니다.
-                ROLE은 서버가 허용한 해당 역할 자료, REVEAL은 종료 해설입니다.
-                역할 코드의 존재·활성은 서버가 검사합니다. 게임·힌트
-                소비·블라인드 테스트 실적을 만들지 않으며 원문 속 주소나
-                마크업도 문자로만 표시합니다.
-              </p>
-              <label for="saved-preview-source">저장 자료 출처</label>
-              <select id="saved-preview-source" disabled>
-                <option value="DRAFT">저장 DRAFT · 확인한 수정번호</option>
-                <option value="SNAPSHOT">목록에서 선택한 불변 사본</option>
-              </select>
-              <p id="saved-preview-eligibility" class="muted">
-                DRAFT 출처는 활성 사건·활성 DRAFT 버전이며 현재 사본이 없을 때만
-                조회합니다.
-              </p>
-              <label for="saved-preview-mode">서버 투영 모드</label>
-              <select id="saved-preview-mode" disabled>
-                <option value="ROLE">ROLE · 선택 역할 자료</option>
-                <option value="REVEAL">REVEAL · 종료 후 해설</option>
-              </select>
-              <label for="saved-preview-role">역할 코드 (ROLE만 필수)</label>
-              <input
-                id="saved-preview-role"
-                type="text"
-                maxlength="32"
-                pattern="[A-Z0-9_]{1,32}"
-                autocomplete="off"
-                aria-describedby="saved-preview-role-help saved-preview-status"
-                disabled
-              />
-              <p id="saved-preview-role-help" class="muted">
-                영문 대문자·숫자·밑줄 1~32자. 공백을 자동 제거하거나 코드를
-                변환하지 않습니다.
-              </p>
-              <div class="form-actions">
-                <button
-                  type="button"
-                  id="saved-preview-read"
-                  class="secondary"
-                  disabled
-                >
-                  선택 조건의 서버 미리보기 조회
-                </button>
-              </div>
-              <p
-                id="saved-preview-status"
-                role="status"
-                aria-live="polite"
-                data-state="unopened"
-              >
-                아직 조회하지 않았습니다.
-              </p>
-              <div id="saved-preview-result"></div>
-            </div>
-          </div>
-        </section>
-        <section id="comparison" hidden aria-labelledby="compare-heading">
-          <p class="eyebrow">개정 대조 · 저장 전 확인</p>
-          <h2 id="compare-heading" tabindex="-1">
-            서로 다른 기록을 확인하세요
-          </h2>
-          <p>
-            이전 확인본, 현재 입력, 서버 최신본을 나란히 대조하세요. 비교 완료는
-            새 수정번호의 사용만 허용하며 저장하거나 자동 병합하지 않습니다.
-          </p>
-          <div id="latest-values"></div>
-          <div class="button-row">
-            <button type="button" id="refresh-latest" class="secondary">
-              최신본 다시 조회
-            </button>
-            <button type="button" id="accept-latest" disabled>
-              비교 완료, 최신 상태·권한·수정번호 수락
-            </button>
-          </div>
-        </section>
-        <div class="workbench">
-          <nav
-            id="editor-nav"
-            class="section-nav"
-            aria-label="원고 영역"
-            tabindex="-1"
-          >
-            <p class="index-label">보고서 목차</p>
-            <a href="#basic-heading"
-              ><span class="index-number">01</span> 사건 개요</a
-            >
-            <a href="#child-heading"
-              ><span class="index-number">02</span> 사건 자료</a
-            >
-            <a href="#answer-heading"
-              ><span class="index-number">03</span> 진상과 정답</a
-            >
-            <a href="#reveal-heading"
-              ><span class="index-number">04</span> 종결 해설</a
-            >
-            <a href="#policy-heading">작성 기준·경고</a>
-          </nav>
-          <div class="manuscript">
-            <section aria-labelledby="basic-heading">
-              <div class="reading">
-                <div class="chapter-head">
-                  <span class="chapter-number" aria-hidden="true">01</span>
-                  <div>
-                    <p class="eyebrow">사건의 시작과 조사 배경</p>
-                    <h2 id="basic-heading" tabindex="-1">사건 개요</h2>
-                  </div>
-                </div>
-                <p class="section-guide">
-                  기록 유지는 서버값을 유지합니다. 직접 수정한 항목과 비우기로
-                  선택한 항목만 이 영역의 저장에 포함됩니다.
+                <p class="muted">
+                  열람 기준 재조회는 원고 입력·쓰기 수정번호·저장 잠금·사람 확인
+                  영수증을 변경하지 않습니다. 저장 재개는 기존 최신본
+                  비교·수락과 별개입니다.
                 </p>
-                <form data-section="basic"></form>
-              </div>
-            </section>
-            <section aria-labelledby="child-heading" hidden>
-              <div class="reading">
-                <div class="chapter-head">
-                  <span class="chapter-number" aria-hidden="true">02</span>
-                  <div>
-                    <p class="eyebrow">관계와 공개 소개 · 제작자 비밀 분리</p>
-                    <h2 id="child-heading" tabindex="-1">사건 자료</h2>
-                  </div>
-                </div>
-                <p class="section-guide">
-                  필요한 자료부터 자유롭게 작성하세요. 목록은 키와 상태만 보여
-                  주며 선택한 자료만 열람합니다.
-                </p>
-              </div>
-              <div class="child-toolbar">
-                <div>
-                  <label for="child-resource">자료 종류</label>
-                  <select id="child-resource" disabled>
-                    <option value="persons">인물</option>
-                    <option value="roles">역할</option>
-                    <option value="pairs">역할 조합</option>
-                    <option value="clues">단서</option>
-                    <option value="clue-roles">단서 역할 배정</option>
-                    <option value="hints">힌트</option>
-                    <option value="events">시간선</option>
-                    <option value="facts">사실 원장</option>
-                    <option value="rubrics">채점 소항목</option>
-                    <option value="rubric-clues">소항목 단서 연결</option>
-                    <option value="grade-samples">판정 검증 예시</option>
-                  </select>
-                </div>
-                <div>
-                  <label for="child-filter">조회할 자료 상태</label
-                  ><select id="child-filter">
-                    <option value="true">활성 자료</option>
-                    <option value="false">논리 삭제된 자료</option>
-                  </select>
-                </div>
-                <div class="button-row">
-                  <button type="button" id="child-list" class="secondary">
-                    인물 목록 조회</button
-                  ><button type="button" id="child-new" class="secondary">
-                    새 인물 작성
-                  </button>
-                </div>
-              </div>
-              <div class="child-layout">
-                <aside class="child-list-pane" aria-label="자료 목록">
-                  <p id="child-list-status" role="status">
-                    목록을 조회하거나 새 인물을 작성하세요.
+                <div class="state-action">
+                  <h3>검수 사본 이력 · 원문 없는 목록</h3>
+                  <p class="muted">
+                    서버 ID 내림차순, 한 번에 20건입니다. 첫 행이 현재 회차라는
+                    뜻은 아닙니다.
                   </p>
-                  <div id="child-rows"></div>
+                  <div class="button-row">
+                    <button
+                      type="button"
+                      id="saved-history-first"
+                      class="secondary"
+                      disabled
+                    >
+                      사본 이력 처음 20건 조회
+                    </button>
+                    <button
+                      type="button"
+                      id="saved-history-next"
+                      class="secondary"
+                      disabled
+                    >
+                      사본 이력 다음 20건 조회
+                    </button>
+                  </div>
+                  <p
+                    id="saved-history-status"
+                    role="status"
+                    aria-live="polite"
+                    data-state="unopened"
+                  >
+                    아직 조회하지 않았습니다.
+                  </p>
+                  <div id="saved-history-result"></div>
+                  <h3>선택한 불변 사본 · 목록에서 확인한 메타데이터</h3>
+                  <p class="muted">
+                    선택만으로 원문·근거·미리보기를 불러오지 않으며 미저장 편집
+                    입력은 유지됩니다.
+                  </p>
+                  <dl id="saved-review-selected"></dl>
+                </div>
+                <div class="state-action">
+                  <h3>선택 사본의 제작자 민감 저장 원문</h3>
+                  <p class="muted">
+                    SR04 응답 전체의 원래 JSON 텍스트(snapshot와 payload)입니다.
+                    정답·정책·세 영역과 열한 자료 배열을 포함하며 현재 테이블로
+                    재구성하지 않습니다. null·빈 문자열·배열 순서·큰 정수를
+                    그대로 표시합니다.
+                  </p>
                   <button
                     type="button"
-                    id="child-next"
+                    id="saved-payload-read"
                     class="secondary"
-                    hidden
+                    disabled
                   >
-                    다음 인물
+                    선택 사본 민감 원문 조회
                   </button>
-                </aside>
-                <div id="child-edit" hidden>
+                  <p
+                    id="saved-payload-status"
+                    role="status"
+                    aria-live="polite"
+                    data-state="unopened"
+                  >
+                    아직 조회하지 않았습니다.
+                  </p>
+                  <p id="saved-payload-result" class="report-value" hidden></p>
+                </div>
+                <div class="state-action">
+                  <h3>선택 사본의 저장 검수 근거 · 민감 자료</h3>
+                  <p class="muted">
+                    SR06 응답 전체의 원래 JSON 텍스트입니다. evidenceData는 저장
+                    wrapper가 아닌 근거 details입니다. 서버 순서와 과거
+                    FAIL·selfReviewYn을 유지합니다. 이 페이지에 없는 종류는
+                    통과나 미실시로 확정하지 않습니다. 한 페이지는 전체 검수
+                    근거가 아니며 다음 조회는 앞 페이지를 대체합니다.
+                  </p>
+                  <div class="button-row">
+                    <button
+                      type="button"
+                      id="saved-records-first"
+                      class="secondary"
+                      disabled
+                    >
+                      민감 근거 처음 20건 조회
+                    </button>
+                    <button
+                      type="button"
+                      id="saved-records-next"
+                      class="secondary"
+                      disabled
+                    >
+                      민감 근거 다음 20건 조회
+                    </button>
+                  </div>
+                  <p
+                    id="saved-records-status"
+                    role="status"
+                    aria-live="polite"
+                    data-state="unopened"
+                  >
+                    아직 조회하지 않았습니다.
+                  </p>
+                  <p id="saved-records-result" class="report-value" hidden></p>
+                </div>
+                <section
+                  class="state-action"
+                  id="saved-issues"
+                  aria-labelledby="saved-issues-heading"
+                >
+                  <h3 id="saved-issues-heading">
+                    선택 사본의 실행 지적 이력 · 읽기 전용
+                  </h3>
+                  <p class="muted" id="saved-issues-help">
+                    저장된 BATCH 지적의 허용 메타데이터만 읽습니다. 매 페이지
+                    현재 전역 REVIEW와 활성 사건 REVIEW 관계가 모두 필요합니다.
+                    소유·편집·공개 권한은 대체하지 않습니다. 과거 사본도 조회할
+                    수 있으며 현재 상태·runtime 가용성은 이력 조회 조건이
+                    아닙니다. 빈 페이지는 전체 이력 없음·통과·치명 지적
+                    없음·해소·READY·공개 가능의 증거가 아닙니다. 다음 조회는 앞
+                    페이지를 대체합니다.
+                  </p>
+                  <p id="saved-issues-eligibility" role="status"></p>
+                  <label for="saved-issues-filter">실행 지적 상태 조건</label>
+                  <select
+                    id="saved-issues-filter"
+                    aria-describedby="saved-issues-help"
+                    disabled
+                  >
+                    <option value="ALL">ALL · 상태 조건 없음</option>
+                    <option value="OPEN">OPEN · 미해소</option>
+                    <option value="RESOLVED">
+                      RESOLVED · 저장된 해소 이력
+                    </option>
+                  </select>
+                  <div class="button-row">
+                    <button
+                      type="button"
+                      id="saved-issues-first"
+                      class="secondary"
+                      disabled
+                    >
+                      실행 지적 처음 20건 조회
+                    </button>
+                    <button
+                      type="button"
+                      id="saved-issues-next"
+                      class="secondary"
+                      disabled
+                    >
+                      실행 지적 다음 20건 조회
+                    </button>
+                  </div>
+                  <p
+                    id="saved-issues-status"
+                    role="status"
+                    aria-live="polite"
+                    data-state="unopened"
+                  >
+                    아직 조회하지 않았습니다.
+                  </p>
+                  <p id="saved-issues-result" class="report-value" hidden></p>
+                </section>
+                <section
+                  class="state-action"
+                  id="issue-resolution"
+                  aria-labelledby="issue-resolution-heading"
+                >
+                  <h3 id="issue-resolution-heading">
+                    현재 REVIEW · BATCH 지적 해소
+                  </h3>
                   <div class="reading">
-                    <h3 id="child-edit-heading" tabindex="-1">
-                      선택한 인물의 기록
-                    </h3>
-                    <p id="child-state"></p>
-                    <p id="child-guide" class="section-guide">
-                      코드는 영문 대문자·숫자·밑줄 1~32자이며 생성 뒤
-                      고정됩니다. 이름은 필수이고 공개 소개·비밀 원고는 각각
-                      8,000자까지 작성할 수 있습니다.
+                    <p class="muted">
+                      조회한 현재 사본의 OPEN INFRA / GRADING만 새 해소 대상으로
+                      선택합니다. CONTENT·OBSERVATION·RESOLVED와 과거 이력은
+                      읽기 전용입니다. 실제 후속 batchKey와 비개인 확인 참조를
+                      직접 입력하세요. 조회는 관측일 뿐이며 현재 전역·사건
+                      REVIEW 자격과 증거는 POST에서 서버가 판단합니다. 원고
+                      수정번호를 올리거나 품질·READY·공개·운영 효력을 승인하지
+                      않습니다.
+                    </p>
+                    <div id="issue-resolution-choices" class="button-row"></div>
+                    <p id="issue-resolution-source" class="report-value">
+                      선택한 지적 없음
+                    </p>
+                    <form id="issue-resolution-form" novalidate>
+                      <div class="field">
+                        <label for="issue-resolution-batch"
+                          >후속 targetBatchKey · 소문자 UUID v4</label
+                        >
+                        <input
+                          id="issue-resolution-batch"
+                          type="text"
+                          autocomplete="off"
+                          maxlength="36"
+                          aria-describedby="issue-resolution-status"
+                        />
+                      </div>
+                      <div class="field">
+                        <label for="issue-resolution-ref"
+                          >비개인 verificationRef · 영문·숫자·_ - 8~64자</label
+                        >
+                        <input
+                          id="issue-resolution-ref"
+                          type="text"
+                          autocomplete="off"
+                          maxlength="64"
+                          aria-describedby="issue-resolution-status"
+                        />
+                      </div>
+                      <p id="issue-resolution-reason">
+                        사유는 선택한 지적 종류에 결속됩니다. targetReviewId는
+                        null입니다.
+                      </p>
+                      <div class="form-actions">
+                        <button
+                          type="button"
+                          id="issue-resolution-batch-read"
+                          class="secondary"
+                          disabled
+                        >
+                          입력한 후속 BATCH 상세 조회
+                        </button>
+                        <button
+                          type="submit"
+                          id="issue-resolution-submit"
+                          disabled
+                        >
+                          선택한 지적 해소
+                        </button>
+                      </div>
+                    </form>
+                    <p id="issue-resolution-batch-status" role="status">
+                      아직 조회하지 않았습니다. 자동 조회하지 않습니다.
                     </p>
                     <p
-                      id="pair-key-preview"
-                      class="muted"
-                      role="status"
+                      id="issue-resolution-batch-detail"
+                      class="report-value"
                       hidden
                     ></p>
-                    <form data-section="child"></form>
-                    <div class="state-action">
+                    <div class="button-row">
                       <button
                         type="button"
-                        id="child-active"
+                        id="issue-resolution-replay"
                         class="secondary"
                         hidden
-                      ></button>
-                      <p class="muted">
-                        논리 삭제는 원고 저장과 별개입니다. 활성 참조를 먼저
-                        해제하세요. 삭제된 키도 예약되며 같은 자료를 복원할 수
-                        있습니다.
+                        disabled
+                      >
+                        보관한 원래 키·본문 재확인
+                      </button>
+                      <button
+                        type="button"
+                        id="issue-resolution-discard"
+                        class="secondary"
+                      >
+                        해소 입력·보관 의도 명시 폐기
+                      </button>
+                    </div>
+                    <p
+                      id="issue-resolution-status"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      전송하지 않았습니다.
+                    </p>
+                    <p
+                      id="issue-resolution-receipt"
+                      class="report-value"
+                      role="status"
+                      aria-live="polite"
+                    ></p>
+                    <p class="muted">
+                      결과 미확인 중 새 입력은 별도로 보존합니다. 재확인은 현재
+                      입력이 아닌 원래 경로·키·본문만 전송하며 최초 요청이
+                      저장되지 않았다면 실제 해소할 수 있습니다. 현재
+                      GET·RESOLVED 이력은 유실 요청의 영수증이 아닙니다.
+                      페이지를 떠나거나 명시 폐기하면 메모리의 재확인 의도를
+                      잃습니다.
+                    </p>
+                  </div>
+                </section>
+                <div class="state-action" id="manual-review">
+                  <h3>MODEL / APPROVAL 의견 추가</h3>
+                  <p class="muted">
+                    실제로 확인한 근거만 직접 입력하세요. 모델 실행이나 사람
+                    승인을 자동 생성하지 않습니다. 새 기록은 수락한 상세의 활성
+                    REVIEW, 현재 사본 선택과 현재 검수 권한이 모두 필요하며
+                    서버가 재인가합니다. sourceRev·열람 전용 GET·과거 영수증은
+                    쓰기 기준이 아닙니다.
+                  </p>
+                  <p id="manual-target" role="status"></p>
+                  <div class="button-row">
+                    <button
+                      type="button"
+                      id="manual-baseline"
+                      class="secondary"
+                      disabled
+                    >
+                      선택한 현재 사본·쓰기 기준 수락
+                    </button>
+                    <button
+                      type="button"
+                      id="manual-refresh"
+                      class="secondary"
+                      disabled
+                    >
+                      기록 쓰기 기준 조회·비교
+                    </button>
+                  </div>
+                  <details>
+                    <summary>근거 입력 계약과 미실시 안내</summary>
+                    <p class="muted">
+                      MODEL 근거 있음은 실제 모델·effort·실행 참조·별도 문맥
+                      true가 필요합니다. 새 PASS는 gpt-6-astra / medium과 미해결
+                      0건입니다. APPROVAL은 모델·effort·실행 참조·별도 문맥을
+                      모두 명시적 null로 선택하며 PASS는 미해결 0건입니다. 근거
+                      없음은 INCOMPLETE만 가능하고 모든 nullable 항목은 null,
+                      비고와 근거 설명에는 정직한 미실시 사유가 필요합니다. 확인
+                      시각은 실제 UTC이며 미래 여부의 최종 기준은 서버
+                      시각입니다. 참조 주소를 자동 조회하지 않습니다.
+                    </p>
+                    <p class="muted">
+                      형식 2의 해결 항목은 같은 사본·같은 종류의 이전
+                      FAIL/INCOMPLETE만 대상으로 합니다. PASS 외에는 비워
+                      두세요. 이전 행은 수정하지 않으며 화면에 보인 이력이
+                      전체라는 뜻도 아닙니다.
+                    </p>
+                  </details>
+                  <form id="manual-form" novalidate>
+                    <div id="manual-fields"></div>
+                    <fieldset>
+                      <legend>형식 2 해결 항목 · 최대 100개</legend>
+                      <div id="manual-resolutions"></div>
+                      <button
+                        type="button"
+                        id="manual-resolution-add"
+                        class="secondary"
+                      >
+                        해결 항목 입력 추가
+                      </button>
+                      <p
+                        id="manual-resolves-error"
+                        class="error"
+                        role="status"
+                      ></p>
+                    </fieldset>
+                    <div class="form-actions">
+                      <button type="submit" id="manual-submit" disabled>
+                        입력한 검수 의견 추가
+                      </button>
+                    </div>
+                  </form>
+                  <div class="button-row">
+                    <button
+                      type="button"
+                      id="manual-reconfirm"
+                      class="secondary"
+                      hidden
+                      disabled
+                    >
+                      원래 키·정확한 본문으로 추가·재확인
+                    </button>
+                    <button type="button" id="manual-discard" class="secondary">
+                      기록 입력·보관 의도 명시 폐기
+                    </button>
+                  </div>
+                  <p id="manual-status" role="status" aria-live="polite"></p>
+                  <p id="manual-receipt" role="status" aria-live="polite"></p>
+                  <p class="muted">
+                    응답 유실·503·잘못된 성공 응답은 결과 미확인입니다. 재확인은
+                    읽기 전용 조회가 아니라 원래 추가가 실행될 수 있는
+                    POST입니다. SR06 이력에는 요청 키가 없어 이전 요청의
+                    소유권·실패를 증명하지 못합니다. 자동 재전송·자동 민감 이력
+                    조회는 없습니다. 원래 키와 본문은 이 페이지 메모리에만 남고
+                    명시 폐기·이탈 후 복구되지 않습니다. current/replayed는
+                    품질·현재 쓰기 자격이 아닙니다.
+                  </p>
+                </div>
+                <div class="state-action">
+                  <h3>저장 자료의 서버 미리보기 투영</h3>
+                  <p class="muted">
+                    로컬 미저장 입력이 아닌 저장 DRAFT 또는 선택 사본만
+                    조회합니다. ROLE은 서버가 허용한 해당 역할 자료, REVEAL은
+                    종료 해설입니다. 역할 코드의 존재·활성은 서버가 검사합니다.
+                    게임·힌트 소비·블라인드 테스트 실적을 만들지 않으며 원문 속
+                    주소나 마크업도 문자로만 표시합니다.
+                  </p>
+                  <label for="saved-preview-source">저장 자료 출처</label>
+                  <select id="saved-preview-source" disabled>
+                    <option value="DRAFT">저장 DRAFT · 확인한 수정번호</option>
+                    <option value="SNAPSHOT">목록에서 선택한 불변 사본</option>
+                  </select>
+                  <p id="saved-preview-eligibility" class="muted">
+                    DRAFT 출처는 활성 사건·활성 DRAFT 버전이며 현재 사본이 없을
+                    때만 조회합니다.
+                  </p>
+                  <label for="saved-preview-mode">서버 투영 모드</label>
+                  <select id="saved-preview-mode" disabled>
+                    <option value="ROLE">ROLE · 선택 역할 자료</option>
+                    <option value="REVEAL">REVEAL · 종료 후 해설</option>
+                  </select>
+                  <label for="saved-preview-role"
+                    >역할 코드 (ROLE만 필수)</label
+                  >
+                  <input
+                    id="saved-preview-role"
+                    type="text"
+                    maxlength="32"
+                    pattern="[A-Z0-9_]{1,32}"
+                    autocomplete="off"
+                    aria-describedby="saved-preview-role-help saved-preview-status"
+                    disabled
+                  />
+                  <p id="saved-preview-role-help" class="muted">
+                    영문 대문자·숫자·밑줄 1~32자. 공백을 자동 제거하거나 코드를
+                    변환하지 않습니다.
+                  </p>
+                  <div class="form-actions">
+                    <button
+                      type="button"
+                      id="saved-preview-read"
+                      class="secondary"
+                      disabled
+                    >
+                      선택 조건의 서버 미리보기 조회
+                    </button>
+                  </div>
+                  <p
+                    id="saved-preview-status"
+                    role="status"
+                    aria-live="polite"
+                    data-state="unopened"
+                  >
+                    아직 조회하지 않았습니다.
+                  </p>
+                  <div id="saved-preview-result"></div>
+                </div>
+              </div>
+            </section>
+          </details>
+          <section id="comparison" hidden aria-labelledby="compare-heading">
+            <p class="eyebrow">개정 대조 · 저장 전 확인</p>
+            <h2 id="compare-heading" tabindex="-1">
+              서로 다른 기록을 확인하세요
+            </h2>
+            <p>
+              이전 확인본, 현재 입력, 서버 최신본을 나란히 대조하세요. 비교
+              완료는 새 수정번호의 사용만 허용하며 저장하거나 자동 병합하지
+              않습니다.
+            </p>
+            <div id="latest-values"></div>
+            <div class="button-row">
+              <button type="button" id="refresh-latest" class="secondary">
+                최신본 다시 조회
+              </button>
+              <button type="button" id="accept-latest" disabled>
+                비교 완료, 최신 상태·권한·수정번호 수락
+              </button>
+            </div>
+          </section>
+          <div
+            class="workbench"
+            th:fragment="manuscript(renderWorkbench)"
+            th:if="${renderWorkbench}"
+          >
+            <nav
+              id="editor-nav"
+              class="section-nav"
+              aria-label="원고 영역"
+              tabindex="-1"
+            >
+              <p class="index-label">보고서 목차</p>
+              <a href="#basic-heading"
+                ><span class="index-number">01</span> 사건 개요</a
+              >
+              <a href="#child-heading"
+                ><span class="index-number">02</span> 사건 자료</a
+              >
+              <a href="#answer-heading"
+                ><span class="index-number">03</span> 진상과 정답</a
+              >
+              <a href="#reveal-heading"
+                ><span class="index-number">04</span> 종결 해설</a
+              >
+              <a href="#policy-heading">작성 기준·경고</a>
+            </nav>
+            <div class="manuscript">
+              <section aria-labelledby="basic-heading">
+                <div class="reading">
+                  <div class="chapter-head">
+                    <span class="chapter-number" aria-hidden="true">01</span>
+                    <div>
+                      <p class="eyebrow">사건의 시작과 조사 배경</p>
+                      <h2 id="basic-heading" tabindex="-1">사건 개요</h2>
+                    </div>
+                  </div>
+                  <p class="section-guide">
+                    기록 유지는 서버값을 유지합니다. 직접 수정한 항목과 비우기로
+                    선택한 항목만 이 영역의 저장에 포함됩니다.
+                  </p>
+                  <form data-section="basic"></form>
+                </div>
+              </section>
+              <section aria-labelledby="child-heading" hidden>
+                <div class="reading">
+                  <div class="chapter-head">
+                    <span class="chapter-number" aria-hidden="true">02</span>
+                    <div>
+                      <p class="eyebrow">관계와 공개 소개 · 제작자 비밀 분리</p>
+                      <h2 id="child-heading" tabindex="-1">사건 자료</h2>
+                    </div>
+                  </div>
+                  <p class="section-guide">
+                    필요한 자료부터 자유롭게 작성하세요. 목록은 키와 상태만 보여
+                    주며 선택한 자료만 열람합니다.
+                  </p>
+                </div>
+                <div class="child-toolbar">
+                  <div>
+                    <label for="child-resource">자료 종류</label>
+                    <select id="child-resource" disabled>
+                      <option value="persons">인물</option>
+                      <option value="roles">역할</option>
+                      <option value="pairs">역할 조합</option>
+                      <option value="clues">단서</option>
+                      <option value="clue-roles">단서 역할 배정</option>
+                      <option value="hints">힌트</option>
+                      <option value="events">시간선</option>
+                      <option value="facts">사실 원장</option>
+                      <option value="rubrics">채점 소항목</option>
+                      <option value="rubric-clues">소항목 단서 연결</option>
+                      <option value="grade-samples">판정 검증 예시</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="child-filter">조회할 자료 상태</label
+                    ><select id="child-filter">
+                      <option value="true">활성 자료</option>
+                      <option value="false">논리 삭제된 자료</option>
+                    </select>
+                  </div>
+                  <div class="button-row">
+                    <button type="button" id="child-list" class="secondary">
+                      인물 목록 조회</button
+                    ><button type="button" id="child-new" class="secondary">
+                      새 인물 작성
+                    </button>
+                  </div>
+                </div>
+                <div class="child-layout">
+                  <aside class="child-list-pane" aria-label="자료 목록">
+                    <p id="child-list-status" role="status">
+                      목록을 조회하거나 새 인물을 작성하세요.
+                    </p>
+                    <div id="child-rows"></div>
+                    <button
+                      type="button"
+                      id="child-next"
+                      class="secondary"
+                      hidden
+                    >
+                      다음 인물
+                    </button>
+                  </aside>
+                  <div id="child-edit" hidden>
+                    <div class="reading">
+                      <h3 id="child-edit-heading" tabindex="-1">
+                        선택한 인물의 기록
+                      </h3>
+                      <p id="child-state"></p>
+                      <p id="child-guide" class="section-guide">
+                        코드는 영문 대문자·숫자·밑줄 1~32자이며 생성 뒤
+                        고정됩니다. 이름은 필수이고 공개 소개·비밀 원고는 각각
+                        8,000자까지 작성할 수 있습니다.
                       </p>
+                      <p
+                        id="pair-key-preview"
+                        class="muted"
+                        role="status"
+                        hidden
+                      ></p>
+                      <form data-section="child"></form>
+                      <div class="state-action">
+                        <button
+                          type="button"
+                          id="child-active"
+                          class="secondary"
+                          hidden
+                        ></button>
+                        <p class="muted">
+                          논리 삭제는 원고 저장과 별개입니다. 활성 참조를 먼저
+                          해제하세요. 삭제된 키도 예약되며 같은 자료를 복원할 수
+                          있습니다.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </section>
-            <section
-              aria-labelledby="answer-heading"
-              class="restricted-chapter"
-              hidden
-            >
-              <div class="reading">
-                <div class="chapter-head">
-                  <span class="chapter-number" aria-hidden="true">03</span>
-                  <div>
-                    <p class="eyebrow">
-                      제작자 전용 · 플레이어에게 표시되지 않음
-                    </p>
-                    <h2 id="answer-heading" tabindex="-1">진상과 정답</h2>
+              </section>
+              <section
+                aria-labelledby="answer-heading"
+                class="restricted-chapter"
+                hidden
+              >
+                <div class="reading">
+                  <div class="chapter-head">
+                    <span class="chapter-number" aria-hidden="true">03</span>
+                    <div>
+                      <p class="eyebrow">
+                        제작자 전용 · 플레이어에게 표시되지 않음
+                      </p>
+                      <h2 id="answer-heading" tabindex="-1">진상과 정답</h2>
+                    </div>
                   </div>
+                  <p class="section-guide">
+                    범인·수법·시간·동기의 연결을 기록합니다. 범인은 같은 버전의
+                    활성 인물 코드만 지정할 수 있습니다.
+                  </p>
+                  <form data-section="answer"></form>
                 </div>
-                <p class="section-guide">
-                  범인·수법·시간·동기의 연결을 기록합니다. 범인은 같은 버전의
-                  활성 인물 코드만 지정할 수 있습니다.
-                </p>
-                <form data-section="answer"></form>
-              </div>
-            </section>
-            <section aria-labelledby="reveal-heading" hidden>
-              <div class="reading">
-                <div class="chapter-head">
-                  <span class="chapter-number" aria-hidden="true">04</span>
-                  <div>
-                    <p class="eyebrow">종료 후 공개용 원고</p>
-                    <h2 id="reveal-heading" tabindex="-1">종결 해설</h2>
+              </section>
+              <section aria-labelledby="reveal-heading" hidden>
+                <div class="reading">
+                  <div class="chapter-head">
+                    <span class="chapter-number" aria-hidden="true">04</span>
+                    <div>
+                      <p class="eyebrow">종료 후 공개용 원고</p>
+                      <h2 id="reveal-heading" tabindex="-1">종결 해설</h2>
+                    </div>
                   </div>
+                  <p class="section-guide">
+                    조사로 드러난 사실을 연결해 설명합니다. 현재는 편집 원고이며
+                    저장만으로 공개되지 않습니다.
+                  </p>
+                  <form data-section="reveal"></form>
                 </div>
-                <p class="section-guide">
-                  조사로 드러난 사실을 연결해 설명합니다. 현재는 편집 원고이며
-                  저장만으로 공개되지 않습니다.
-                </p>
-                <form data-section="reveal"></form>
-              </div>
-            </section>
+              </section>
+            </div>
+            <aside class="report-notes" aria-label="작성 참고">
+              <section aria-labelledby="policy-heading">
+                <details id="policy-details">
+                  <summary id="policy-heading">작성 기준 · 읽기 전용</summary>
+                  <p class="muted">난이도 저장 후 적용되는 서버 정책입니다.</p>
+                  <dl id="policy"></dl>
+                </details>
+              </section>
+              <section aria-label="저장 경고">
+                <details id="warning-details">
+                  <summary>
+                    <strong id="warning-count">작성 확인 0건</strong> · 저장은
+                    가능하며 검수 통과를 의미하지 않습니다.
+                  </summary>
+                  <div id="warnings"></div>
+                </details>
+              </section>
+              <p class="muted">
+                미저장 입력은 현재 페이지에만 있습니다. 새로고침·이동하면 사라질
+                수 있으며 자동 저장은 하지 않습니다.
+              </p>
+            </aside>
           </div>
-          <aside class="report-notes" aria-label="작성 참고">
-            <section aria-labelledby="policy-heading">
-              <details id="policy-details">
-                <summary id="policy-heading">작성 기준 · 읽기 전용</summary>
-                <p class="muted">난이도 저장 후 적용되는 서버 정책입니다.</p>
-                <dl id="policy"></dl>
-              </details>
-            </section>
-            <section aria-label="저장 경고">
-              <details id="warning-details">
-                <summary>
-                  <strong id="warning-count">작성 확인 0건</strong> · 저장은
-                  가능하며 검수 통과를 의미하지 않습니다.
-                </summary>
-                <div id="warnings"></div>
-              </details>
-            </section>
-            <p class="muted">
-              미저장 입력은 현재 페이지에만 있습니다. 새로고침·이동하면 사라질
-              수 있으며 자동 저장은 하지 않습니다.
-            </p>
-          </aside>
-        </div>
-      </article>
-      <section id="unavailable" hidden>
-        <h2>사건 자료를 표시할 수 없습니다</h2>
-        <p id="unavailable-message"></p>
-        <button type="button" id="retry-detail" class="secondary">
-          사건 자료 다시 조회</button
-        ><a href="/admin/stories">사건 목록으로 이동</a>
-      </section>
-    </main>
+        </article>
+        <section id="unavailable" hidden>
+          <h2>사건 자료를 표시할 수 없습니다</h2>
+          <p id="unavailable-message"></p>
+          <button type="button" id="retry-detail" class="secondary">
+            사건 자료 다시 조회</button
+          ><a href="/admin/stories">사건 목록으로 이동</a>
+        </section>
+      </main>
+    </div>
   </body>
 </html>

@@ -1,0 +1,164 @@
+@import url("/admin/ui.css");
+
+.dashboard-shell {
+  max-width: calc(var(--content-max-width) + 2 * var(--page-gutter));
+  margin: auto;
+  padding: var(--gap-related) var(--page-gutter) var(--space-16);
+}
+.dashboard-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-group);
+  padding-block: var(--gap-section);
+}
+.dashboard-header .eyebrow {
+  color: var(--color-info);
+  font-family: var(--font-code);
+}
+.dashboard-header h1 {
+  margin-bottom: var(--gap-helper);
+}
+#notice {
+  padding: var(--gap-related);
+  margin-bottom: var(--gap-group);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+#notice.error {
+  border-color: var(--color-focus);
+  color: var(--color-text);
+}
+#content > section,
+.workspace-card,
+.workspace-hero,
+.workspace-note {
+  min-width: 0;
+  padding: var(--panel-padding);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+#content > section {
+  margin-bottom: var(--gap-group);
+}
+.workspace-hero {
+  display: grid;
+  gap: var(--gap-group);
+  margin-bottom: var(--gap-group);
+  border-top: var(--space-1) solid var(--color-brand);
+}
+.workspace-hero h2 {
+  margin: var(--gap-related) 0;
+  font-size: var(--font-size-title-mobile);
+}
+.workspace-hero p,
+.workspace-card p {
+  max-width: var(--reading-max-width);
+}
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-related);
+  margin-top: var(--gap-group);
+}
+.workspace-context {
+  padding: var(--gap-group);
+  border-radius: var(--radius-control);
+  background: var(--color-navigation);
+}
+.workspace-context h3 {
+  margin-bottom: var(--gap-related);
+}
+.workspace-context p + p {
+  margin-top: var(--gap-related);
+}
+.workspace-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-related);
+  margin: var(--gap-section) 0 var(--gap-related);
+}
+.workspace-grid {
+  display: grid;
+  gap: var(--gap-related);
+}
+.workspace-card {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: var(--gap-related);
+}
+.workspace-card .secondary-link {
+  margin-top: auto;
+}
+.workspace-card p {
+  color: var(--color-text-muted);
+}
+.workspace-index {
+  color: var(--color-info);
+  font: var(--font-size-caption)/var(--line-height-body) var(--font-code);
+}
+.workspace-note {
+  margin-top: var(--gap-group);
+  border-left: var(--space-1) solid var(--color-info);
+}
+.workspace-note h2 {
+  margin-bottom: var(--gap-related);
+}
+.workspace-note ul {
+  margin: var(--gap-related) 0 0;
+  padding-left: var(--gap-group);
+}
+.workspace-note li + li {
+  margin-top: var(--gap-label);
+}
+.security-grid {
+  display: grid;
+  gap: var(--gap-group);
+}
+.security-grid section {
+  min-width: 0;
+  padding: var(--panel-padding);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+.security-grid form {
+  margin-top: var(--gap-group);
+}
+.security-grid button {
+  width: 100%;
+}
+#manage-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-related);
+  margin-top: var(--gap-related);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-related);
+  margin-top: var(--gap-group);
+}
+@media (min-width: 768px) {
+  .workspace-hero {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  }
+  .workspace-grid,
+  .security-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1440px) {
+  .workspace-grid,
+  .security-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

@@ -7,58 +7,42 @@
     <title>시차 · 관리자 인증</title>
     <link rel="stylesheet" href="/admin/auth.css" />
     <script defer src="/admin/ui.js"></script>
+    <script defer src="/admin/shell.js"></script>
     <script defer src="/admin/auth.js"></script>
   </head>
-  <body th:attr="data-screen=${screen}">
-    <main class="shell">
-      <header>
-        <p class="eyebrow">시차 · 관리자 보안</p>
-        <h1 id="page-title" tabindex="-1">관리자 인증</h1>
-      </header>
-      <p id="notice" role="status" aria-live="polite">
-        현재 상태를 확인하고 있습니다.
-      </p>
-      <div id="content" aria-busy="true"></div>
-      <nav aria-label="인증 화면 이동" class="links">
-        <a href="/admin/login">로그인</a><a href="/admin/enroll">등록</a>
-        <a href="/admin/recovery/password">비밀번호 복구</a
-        ><a href="/admin/recovery/mfa">MFA 복구</a>
-      </nav>
-    </main>
-    <dialog id="reauth-dialog" aria-labelledby="reauth-title">
-      <form id="reauth-form" autocomplete="on">
-        <h2 id="reauth-title">재인증</h2>
-        <p>
-          현재 비밀번호와 인증 앱 코드를 확인합니다. 완료 뒤 작업 버튼을 다시
-          눌러야 합니다.
+  <body
+    th:attr="data-screen=${screen}"
+    th:classappend="${#strings.startsWith(screen, 'ADMIN_')} ? 'admin-app' : ''"
+  >
+    <a class="skip-link" href="#page-title">현재 화면으로 바로 이동</a>
+    <aside
+      th:replace="~{admin/fragments :: navigation(${#strings.startsWith(screen, 'ADMIN_') ? 'security' : null}, ${canManage})}"
+    ></aside>
+    <div class="admin-workspace">
+      <main class="shell">
+        <nav
+          th:if="${#strings.startsWith(screen, 'ADMIN_')}"
+          class="admin-breadcrumb"
+          aria-label="현재 위치"
+        >
+          <a href="/admin">대시보드</a
+          ><a href="/admin?tab=security">보안 관리</a>
+        </nav>
+        <header>
+          <p class="eyebrow">시차 · 관리자 보안</p>
+          <h1 id="page-title" tabindex="-1">관리자 인증</h1>
+        </header>
+        <p id="notice" role="status" aria-live="polite">
+          현재 상태를 확인하고 있습니다.
         </p>
-        <label for="reauth-password">현재 비밀번호</label
-        ><input
-          id="reauth-password"
-          name="password"
-          type="password"
-          autocomplete="current-password"
-          required
-        />
-        <label for="reauth-totp">인증 앱 6자리 코드</label
-        ><input
-          id="reauth-totp"
-          name="totp"
-          type="text"
-          inputmode="numeric"
-          pattern="[0-9]{6}"
-          maxlength="6"
-          autocomplete="one-time-code"
-          required
-        />
-        <p id="reauth-error" role="alert"></p>
-        <div class="actions">
-          <button type="submit">재인증</button
-          ><button type="button" id="reauth-close" class="secondary">
-            취소
-          </button>
-        </div>
-      </form>
-    </dialog>
+        <div id="content" aria-busy="true"></div>
+        <nav aria-label="인증 화면 이동" class="links">
+          <a href="/admin/login">로그인</a><a href="/admin/enroll">등록</a>
+          <a href="/admin/recovery/password">비밀번호 복구</a
+          ><a href="/admin/recovery/mfa">MFA 복구</a>
+        </nav>
+      </main>
+    </div>
+    <dialog th:replace="~{admin/fragments :: reauthentication}"></dialog>
   </body>
 </html>

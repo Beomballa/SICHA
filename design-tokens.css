@@ -15,6 +15,12 @@
   --color-border: #2b323d;
   --color-control-border: #9ca3af;
   --color-focus: #ffc700;
+  --color-navigation: #171b24;
+  --color-brand-surface: #342026;
+  --color-info: #a8baff;
+  --color-info-surface: #202c40;
+  --color-success: #86cbb6;
+  --color-success-surface: #1b3430;
   --font-ui: "SUIT Variable", "Apple SD Gothic Neo", sans-serif;
   --font-code: "JetBrains Mono", ui-monospace, monospace;
   --font-size-caption: 0.875rem;

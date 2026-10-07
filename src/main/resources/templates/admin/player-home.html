@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>시차 · 플레이어 메인 디자인 시안</title>
+    <link rel="stylesheet" href="/admin/player-home.css" />
+  </head>
+  <body class="player-home">
+    <a class="skip-link" href="#player-heading">메인 내용으로 바로 이동</a>
+    <div class="preview-banner">
+      <p>HTML 디자인 시안 · 게임 실행과 회원 데이터 연결 전</p>
+      <a href="/admin">관리자 대시보드로</a>
+    </div>
+    <div class="player-shell">
+      <header class="player-header">
+        <a href="#player-heading" class="admin-brand" aria-label="시차 메인"
+          ><span class="brand-mark" aria-hidden="true">시</span
+          ><span>시차<span class="brand-caption">SI:CHA</span></span></a
+        >
+        <nav aria-label="메인 화면 탐색">
+          <a href="#cases" aria-current="location">사건</a
+          ><a href="#guide">플레이 안내</a>
+        </nav>
+        <span class="ui-badge ui-badge-info">2인 협동 추리</span>
+      </header>
+      <main>
+        <section class="player-hero" aria-labelledby="player-heading">
+          <div class="player-hero-copy">
+            <p class="eyebrow">TWO PERSPECTIVES. ONE TRUTH.</p>
+            <h1 id="player-heading" tabindex="-1">
+              서로 다른 단서,<br /><span>하나의 진실.</span>
+            </h1>
+            <p class="hero-description">
+              혼자서는 보이지 않던 이야기.<br />서로의 단서를 나누고, 함께
+              사건의 진상을 밝혀보세요.
+            </p>
+            <div class="player-actions">
+              <a class="primary-link" href="#cases">사건 살펴보기</a
+              ><a class="secondary-link" href="#guide">참여 방법 알아보기</a>
+            </div>
+            <div class="player-premise">
+              <span>서로 다른 조사 관점</span><span>함께 완성하는 보고서</span>
+            </div>
+          </div>
+          <div class="player-art">
+            <svg
+              viewBox="0 0 520 400"
+              role="img"
+              aria-labelledby="player-art-title"
+            >
+              <title id="player-art-title">
+                사건 파일과 서로 다른 두 관점의 단서를 표현한 일러스트
+              </title>
+              <rect
+                class="art-frame"
+                x="18"
+                y="18"
+                width="484"
+                height="364"
+                rx="16"
+              />
+              <path
+                class="art-rule"
+                d="M42 80h436M42 326h436M74 42v316M446 42v316"
+              />
+              <circle class="art-orbit" cx="260" cy="198" r="134" />
+              <path
+                class="art-connection"
+                d="m118 160 160 42 120-100M142 296l136-94 126 56"
+              />
+              <g transform="rotate(-9 242 202)">
+                <path class="art-folder" d="M138 104h76l18 20h132v172H138z" />
+                <path class="art-paper" d="M157 139h184v138H157z" />
+                <path
+                  class="art-ink"
+                  d="M181 168h120M181 188h94M181 233h112M181 251h68"
+                />
+                <text class="art-title" x="181" y="216">SI:CHA</text>
+              </g>
+              <g transform="rotate(8 408 118)">
+                <rect
+                  class="art-card"
+                  x="350"
+                  y="68"
+                  width="108"
+                  height="100"
+                  rx="8"
+                />
+                <circle class="art-signal" cx="379" cy="101" r="9" />
+                <path class="art-ink" d="M366 130h73M366 146h42" />
+              </g>
+              <g transform="rotate(-6 114 290)">
+                <rect
+                  class="art-card"
+                  x="53"
+                  y="246"
+                  width="122"
+                  height="88"
+                  rx="8"
+                />
+                <path class="art-signal-line" d="m76 278 13 13 23-24" />
+                <path class="art-ink" d="M75 313h76" />
+              </g>
+              <circle class="art-pin" cx="121" cy="159" r="7" />
+              <circle class="art-pin" cx="401" cy="256" r="7" />
+            </svg>
+            <p>흩어진 기록이 만나는 순간, 사건의 새로운 면이 드러납니다.</p>
+          </div>
+        </section>
+        <section
+          id="cases"
+          class="player-cases"
+          aria-labelledby="cases-heading"
+        >
+          <div class="player-section-heading">
+            <div>
+              <p class="eyebrow">CASE LIBRARY</p>
+              <h2 id="cases-heading">함께 풀어갈 사건</h2>
+            </div>
+            <span class="ui-badge">공개 사건 API 미연동</span>
+          </div>
+          <div class="case-empty">
+            <div class="case-symbol" aria-hidden="true">?</div>
+            <div>
+              <h3>아직 사건 목록이 연결되지 않았습니다.</h3>
+              <p class="muted">
+                이 화면은 메인 디자인 시안입니다. 승인된 공개 사건과 플레이
+                API가 연결되면 실제 참여 가능한 사건을 표시합니다.
+              </p>
+              <div class="player-actions">
+                <button type="button" disabled>게임 시작 · 연결 전</button
+                ><a class="secondary-link" href="#guide">플레이 방식 보기</a>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section
+          id="guide"
+          class="player-guide"
+          aria-labelledby="guide-heading"
+        >
+          <div class="player-section-heading">
+            <div>
+              <p class="eyebrow">HOW TO PLAY</p>
+              <h2 id="guide-heading">둘이 만드는 조사 기록</h2>
+            </div>
+            <span class="muted">제품의 플레이 흐름 안내</span>
+          </div>
+          <div class="guide-grid">
+            <article>
+              <span class="guide-number">01</span>
+              <h3>각자의 관점에서 조사</h3>
+              <p>배정된 역할의 자료를 읽고, 사건을 이해할 단서를 모읍니다.</p>
+            </article>
+            <article>
+              <span class="guide-number">02</span>
+              <h3>단서를 나누고 대조</h3>
+              <p>
+                서로 알고 있는 사실을 공유하고, 다르게 보이던 기록을 함께
+                비교합니다.
+              </p>
+            </article>
+            <article>
+              <span class="guide-number">03</span>
+              <h3>공동 보고서 완성</h3>
+              <p>
+                진상을 정리한 보고서를 함께 확인하고, 두 사람의 동의로
+                제출합니다.
+              </p>
+            </article>
+          </div>
+        </section>
+      </main>
+      <footer class="player-footer">
+        <p>시차 · 서로 다른 관점이 만나는 추리</p>
+        <a href="/admin">관리자 화면으로 돌아가기</a
+        ><span>앱 구현·운영 서비스와 분리된 HTML 시안</span>
+      </footer>
+    </div>
+  </body>
+</html>

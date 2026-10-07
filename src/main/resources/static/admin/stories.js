@@ -355,8 +355,12 @@
    * @returns {boolean} 정규 식별자 여부.
    */
   function resolutionUuid(value) {
-    return typeof value === "string" &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+    return (
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        value,
+      )
+    );
   }
 
   /**
@@ -365,10 +369,15 @@
    * @returns {boolean} 실제 달력·시차를 확인한 문자열 여부.
    */
   function resolutionTime(value) {
-    return typeof value === "string" &&
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    return (
+      typeof value === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        value,
+      ) &&
       Number.isFinite(Date.parse(value)) &&
-      new Date(`${value.slice(0, 19)}Z`).toISOString().slice(0, 19) === value.slice(0, 19);
+      new Date(`${value.slice(0, 19)}Z`).toISOString().slice(0, 19) ===
+        value.slice(0, 19)
+    );
   }
 
   /** 선택과 두 비개인 입력의 메모리 비교값만 반환한다. 저장소에는 기록하지 않는다. */
@@ -382,29 +391,45 @@
 
   /** 입력 B와 결과 미확인 A를 독립적으로 이탈 보호한다. 확정 거절도 명시 폐기 전까지 보존한다. */
   function resolutionProtected() {
-    return Boolean(resolutionOperation ||
+    return Boolean(
+      resolutionOperation ||
       (resolutionIntent && !resolutionIntent.receipt) ||
-      resolutionFingerprint() !== resolutionAcknowledged);
+      resolutionFingerprint() !== resolutionAcknowledged,
+    );
   }
 
   /** 다른 변경 요청과 겹치지 않게 하되 각 흐름의 보관 의도는 변경하지 않는다. */
   function resolutionOtherBusy() {
-    return Boolean(reviewOperation || lifecycleOperation || manualOperation ||
-      cloneOperation || savedMetadataOperation || savedDetailPending);
+    return Boolean(
+      reviewOperation ||
+      lifecycleOperation ||
+      manualOperation ||
+      cloneOperation ||
+      savedMetadataOperation ||
+      savedDetailPending,
+    );
   }
 
   /** 같은 문서 신원·경로를 확인하며 로컬 명시 폐기에는 쓰기 권한을 요구하지 않는다. */
   function resolutionContext() {
-    return Boolean(detail && !editor.hidden && editorIdentity && !editorIdentityRevoked &&
+    return Boolean(
+      detail &&
+      !editor.hidden &&
+      editorIdentity &&
+      !editorIdentityRevoked &&
       document.getElementById("unavailable").hidden &&
       location.pathname === `/admin/stories${editorPath()}` &&
-      editorPath() === `/${detail.storyCode}/versions/${detail.versionNo}`);
+      editorPath() === `/${detail.storyCode}/versions/${detail.versionNo}`,
+    );
   }
 
   /** 재생은 같은 신원·경로의 현재 REVIEW 권한만 요구하며 과거 상태·runtime을 요구하지 않는다. */
   function resolutionAuthority() {
-    return Boolean(resolutionContext() &&
-      observedPermissions?.review === true && !resolutionOtherBusy());
+    return Boolean(
+      resolutionContext() &&
+      observedPermissions?.review === true &&
+      !resolutionOtherBusy(),
+    );
   }
 
   /**
@@ -414,21 +439,34 @@
    */
   function resolutionEligible(source = resolutionSource) {
     const read = savedReadMetadata();
-    return Boolean(resolutionAuthority() && hasPermission("review") &&
-      !saveLocked && !reviewNeedsRead && !lifecycleNeedsRead &&
+    return Boolean(
+      resolutionAuthority() &&
+      hasPermission("review") &&
+      !saveLocked &&
+      !reviewNeedsRead &&
+      !lifecycleNeedsRead &&
       document.getElementById("comparison").hidden &&
-      detail.status === "REVIEW" && detail.storyActiveYn === true && detail.activeYn === true &&
-      read?.status === "REVIEW" && read.storyActiveYn === true && read.activeYn === true &&
+      detail.status === "REVIEW" &&
+      detail.storyActiveYn === true &&
+      detail.activeYn === true &&
+      read?.status === "REVIEW" &&
+      read.storyActiveYn === true &&
+      read.activeYn === true &&
       read.editRev === detail.editRev &&
       read.currentSnapshotId === detail.currentSnapshotId &&
-      cloneDecimal(detail.editRev) && cloneVersion(detail.versionNo) &&
+      cloneDecimal(detail.editRev) &&
+      cloneVersion(detail.versionNo) &&
       savedIssueDecimal(detail.currentSnapshotId) &&
       savedSelection?.snapshotId === detail.currentSnapshotId &&
       source?.snapshotId === detail.currentSnapshotId &&
-      source.path === editorPath() && source.identity === editorIdentity &&
-      source.state === "OPEN" && ["INFRA", "GRADING"].includes(source.kind) &&
-      source.sourceReviewId === null && resolutionUuid(source.issueKey) &&
-      resolutionUuid(source.sourceBatchKey));
+      source.path === editorPath() &&
+      source.identity === editorIdentity &&
+      source.state === "OPEN" &&
+      ["INFRA", "GRADING"].includes(source.kind) &&
+      source.sourceReviewId === null &&
+      resolutionUuid(source.issueKey) &&
+      resolutionUuid(source.sourceBatchKey),
+    );
   }
 
   /** 제어만 갱신하며 입력·영수증·필터·커서는 그대로 보존한다. */
@@ -438,32 +476,52 @@
     const busy = Boolean(resolutionOperation);
     panel.setAttribute("aria-busy", String(busy));
     document.getElementById("issue-resolution-submit").disabled =
-      !resolutionEligible() || Boolean(resolutionIntent) ||
-      (busy && (resolutionOperation.kind !== "write" || resolutionOperation.sent || resolutionOperation.replay));
+      !resolutionEligible() ||
+      Boolean(resolutionIntent) ||
+      (busy &&
+        (resolutionOperation.kind !== "write" ||
+          resolutionOperation.sent ||
+          resolutionOperation.replay));
     const replay = document.getElementById("issue-resolution-replay");
     replay.hidden = !resolutionIntent || resolutionIntent.state === "rejected";
-    replay.disabled = !resolutionAuthority() || !resolutionIntent ||
-      resolutionIntent.identity !== editorIdentity || resolutionIntent.editorPath !== editorPath() ||
+    replay.disabled =
+      !resolutionAuthority() ||
+      !resolutionIntent ||
+      resolutionIntent.identity !== editorIdentity ||
+      resolutionIntent.editorPath !== editorPath() ||
       (busy && (!resolutionOperation.replay || resolutionOperation.sent));
     document.getElementById("issue-resolution-batch-read").disabled =
-      busy || !resolutionAuthority() ||
+      busy ||
+      !resolutionAuthority() ||
       !resolutionUuid(document.getElementById("issue-resolution-batch").value);
     document.getElementById("issue-resolution-discard").disabled =
       busy || !resolutionContext() || resolutionOtherBusy();
     for (const button of document.querySelectorAll("[data-resolution-issue]")) {
-      const item = savedIssuesPage?.items?.find((row) => row.issueKey === button.dataset.resolutionIssue);
-      button.disabled = busy || !item || !resolutionEligible({
-        ...item, path: savedIssuesPage.path, identity: savedIssuesPage.identity,
-      });
+      const item = savedIssuesPage?.items?.find(
+        (row) => row.issueKey === button.dataset.resolutionIssue,
+      );
+      button.disabled =
+        busy ||
+        !item ||
+        !resolutionEligible({
+          ...item,
+          path: savedIssuesPage.path,
+          identity: savedIssuesPage.identity,
+        });
     }
-    document.getElementById("issue-resolution-source").textContent = resolutionSource
-      ? `선택 지적 ${resolutionSource.issueKey} · 사본 ${resolutionSource.snapshotId} · ${resolutionSource.kind} / ${resolutionSource.state} · 원본 BATCH ${resolutionSource.sourceBatchKey}. 쓰기 수정번호 ${detail?.editRev ?? "미확인"} · ${resolutionEligible() ? "새 요청 후보 (서버 최종 판단)" : "현재 새 요청 불가"}.`
-      : "선택한 지적 없음";
-    document.getElementById("issue-resolution-reason").textContent = resolutionSource
-      ? `reasonCode=${resolutionSource.kind === "INFRA" ? "INFRA_RECOVERED" : "GRADING_FIX_VERIFIED"} · targetReviewId=null`
-      : "사유는 선택한 INFRA / GRADING 종류에 결속됩니다. targetReviewId는 null입니다.";
+    document.getElementById("issue-resolution-source").textContent =
+      resolutionSource
+        ? `선택 지적 ${resolutionSource.issueKey} · 사본 ${resolutionSource.snapshotId} · ${resolutionSource.kind} / ${resolutionSource.state} · 원본 BATCH ${resolutionSource.sourceBatchKey}. 쓰기 수정번호 ${detail?.editRev ?? "미확인"} · ${resolutionEligible() ? "새 요청 후보 (서버 최종 판단)" : "현재 새 요청 불가"}.`
+        : "선택한 지적 없음";
+    document.getElementById("issue-resolution-reason").textContent =
+      resolutionSource
+        ? `reasonCode=${resolutionSource.kind === "INFRA" ? "INFRA_RECOVERED" : "GRADING_FIX_VERIFIED"} · targetReviewId=null`
+        : "사유는 선택한 INFRA / GRADING 종류에 결속됩니다. targetReviewId는 null입니다.";
     for (const button of editor.querySelectorAll("form[data-section] button"))
-      button.disabled = busy || saveLocked || !writableSection(button.closest("form").dataset.section);
+      button.disabled =
+        busy ||
+        saveLocked ||
+        !writableSection(button.closest("form").dataset.section);
   }
 
   /** 페이지의 닫힌 허용 메타만 선택하며 목록 교체는 이미 보관한 원래 의도를 지우지 않는다. */
@@ -471,13 +529,23 @@
     const choices = document.getElementById("issue-resolution-choices");
     if (!choices) return;
     choices.replaceChildren();
-    const observed = savedIssuesPage?.items?.find((item) => item.issueKey === resolutionSource?.issueKey);
-    if (observed) resolutionSource = Object.freeze({
-      ...observed, path: savedIssuesPage.path, identity: savedIssuesPage.identity,
-    });
+    const observed = savedIssuesPage?.items?.find(
+      (item) => item.issueKey === resolutionSource?.issueKey,
+    );
+    if (observed)
+      resolutionSource = Object.freeze({
+        ...observed,
+        path: savedIssuesPage.path,
+        identity: savedIssuesPage.identity,
+      });
     for (const item of savedIssuesPage?.items || []) {
-      if (item.state !== "OPEN" || !["INFRA", "GRADING"].includes(item.kind)) continue;
-      const source = Object.freeze({ ...item, path: savedIssuesPage.path, identity: savedIssuesPage.identity });
+      if (item.state !== "OPEN" || !["INFRA", "GRADING"].includes(item.kind))
+        continue;
+      const source = Object.freeze({
+        ...item,
+        path: savedIssuesPage.path,
+        identity: savedIssuesPage.identity,
+      });
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary";
@@ -496,7 +564,8 @@
   /** 새 입력은 동의·후속 상세 관측만 무효화하며 이미 전송한 A의 본문과 B 입력은 교체하지 않는다. */
   function resolutionChanged() {
     ++resolutionInputEpoch;
-    if (resolutionOperation && !resolutionOperation.sent) AdminUI.cancelConfirmation();
+    if (resolutionOperation && !resolutionOperation.sent)
+      AdminUI.cancelConfirmation();
     const output = document.getElementById("issue-resolution-batch-detail");
     output.replaceChildren();
     output.hidden = true;
@@ -512,35 +581,95 @@
    * @returns {object} 검증된 상세이며 적격 판정이나 쓰기 권한은 아니다.
    */
   function resolutionBatch(data, key) {
-    const keys = ["batchKey", "purpose", "snapshotId", "runtimeConfigId", "runtimeEpoch",
-      "datasetHash", "state", "passed", "repeatCount", "totalJobs", "completedJobs",
-      "failedComparisons", "unresolvedJobs", "createdAt", "batchDeadline", "completedAt",
-      "validUntil", "items", "requestId"];
-    const integer = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 2147483647;
-    if (!cloneKeys(data, keys) || data.batchKey !== key || !resolutionUuid(data.batchKey) ||
-      !resolutionUuid(data.requestId) || !savedIssueDecimal(data.snapshotId) ||
-      !cloneDecimal(data.runtimeEpoch) || !/^[A-Z0-9_]{1,80}$/.test(data.runtimeConfigId) ||
-      typeof data.runtimeConfigId !== "string" || typeof data.datasetHash !== "string" ||
-      !/^[0-9a-f]{64}$/.test(data.datasetHash) || !["REVIEW", "AVAILABILITY"].includes(data.purpose) ||
+    const keys = [
+      "batchKey",
+      "purpose",
+      "snapshotId",
+      "runtimeConfigId",
+      "runtimeEpoch",
+      "datasetHash",
+      "state",
+      "passed",
+      "repeatCount",
+      "totalJobs",
+      "completedJobs",
+      "failedComparisons",
+      "unresolvedJobs",
+      "createdAt",
+      "batchDeadline",
+      "completedAt",
+      "validUntil",
+      "items",
+      "requestId",
+    ];
+    const integer = (value) =>
+      Number.isSafeInteger(value) && value >= 0 && value <= 2147483647;
+    if (
+      !cloneKeys(data, keys) ||
+      data.batchKey !== key ||
+      !resolutionUuid(data.batchKey) ||
+      !resolutionUuid(data.requestId) ||
+      !savedIssueDecimal(data.snapshotId) ||
+      !cloneDecimal(data.runtimeEpoch) ||
+      !/^[A-Z0-9_]{1,80}$/.test(data.runtimeConfigId) ||
+      typeof data.runtimeConfigId !== "string" ||
+      typeof data.datasetHash !== "string" ||
+      !/^[0-9a-f]{64}$/.test(data.datasetHash) ||
+      !["REVIEW", "AVAILABILITY"].includes(data.purpose) ||
       !["RUNNING", "COMPLETED", "FAILED", "CANCELLED"].includes(data.state) ||
       !(data.passed === null || typeof data.passed === "boolean") ||
-      !["repeatCount", "totalJobs", "completedJobs", "failedComparisons", "unresolvedJobs"].every((name) => integer(data[name])) ||
-      data.repeatCount < 1 || data.completedJobs > data.totalJobs ||
-      data.failedComparisons > data.totalJobs || data.unresolvedJobs > data.totalJobs ||
-      !resolutionTime(data.createdAt) || !resolutionTime(data.batchDeadline) ||
+      ![
+        "repeatCount",
+        "totalJobs",
+        "completedJobs",
+        "failedComparisons",
+        "unresolvedJobs",
+      ].every((name) => integer(data[name])) ||
+      data.repeatCount < 1 ||
+      data.completedJobs > data.totalJobs ||
+      data.failedComparisons > data.totalJobs ||
+      data.unresolvedJobs > data.totalJobs ||
+      !resolutionTime(data.createdAt) ||
+      !resolutionTime(data.batchDeadline) ||
       !(data.completedAt === null || resolutionTime(data.completedAt)) ||
       !(data.validUntil === null || resolutionTime(data.validUntil)) ||
-      !Array.isArray(data.items) || data.items.length !== data.totalJobs)
+      !Array.isArray(data.items) ||
+      data.items.length !== data.totalJobs
+    )
       throw { status: 503 };
     const seen = new Set();
     for (const item of data.items) {
-      if (!cloneKeys(item, ["sampleCode", "repeatNo", "jobKey", "state", "comparison", "errorCode"]) ||
-        typeof item.sampleCode !== "string" || !/^[A-Z0-9_]{1,32}$/.test(item.sampleCode) ||
-        !integer(item.repeatNo) || item.repeatNo < 1 || item.repeatNo > data.repeatCount ||
-        !resolutionUuid(item.jobKey) || seen.has(`${item.sampleCode}:${item.repeatNo}`) ||
-        !["STAGED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"].includes(item.state) ||
+      if (
+        !cloneKeys(item, [
+          "sampleCode",
+          "repeatNo",
+          "jobKey",
+          "state",
+          "comparison",
+          "errorCode",
+        ]) ||
+        typeof item.sampleCode !== "string" ||
+        !/^[A-Z0-9_]{1,32}$/.test(item.sampleCode) ||
+        !integer(item.repeatNo) ||
+        item.repeatNo < 1 ||
+        item.repeatNo > data.repeatCount ||
+        !resolutionUuid(item.jobKey) ||
+        seen.has(`${item.sampleCode}:${item.repeatNo}`) ||
+        ![
+          "STAGED",
+          "QUEUED",
+          "RUNNING",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED",
+        ].includes(item.state) ||
         !["PASS", "FAIL", "PENDING"].includes(item.comparison) ||
-        !(item.errorCode === null || (typeof item.errorCode === "string" && /^[A-Z0-9_]{1,80}$/.test(item.errorCode))))
+        !(
+          item.errorCode === null ||
+          (typeof item.errorCode === "string" &&
+            /^[A-Z0-9_]{1,80}$/.test(item.errorCode))
+        )
+      )
         throw { status: 503 };
       seen.add(`${item.sampleCode}:${item.repeatNo}`);
     }
@@ -550,32 +679,57 @@
   /** 명시한 키의 상세 한 건만 조회한다. 실패·형식 오류는 이전 영수증이나 쓰기 기준을 변경하지 않는다. */
   async function readResolutionBatch() {
     const key = document.getElementById("issue-resolution-batch").value;
-    if (resolutionOperation || !resolutionAuthority() || !resolutionUuid(key)) return;
-    const op = { kind: "read", identity: editorIdentity, path: editorPath(), generation,
-      permissions: permissionEpoch, epoch: resolutionInputEpoch, input: resolutionFingerprint(),
-      selection: savedSelection, readEpoch: savedReadEpoch };
+    if (resolutionOperation || !resolutionAuthority() || !resolutionUuid(key))
+      return;
+    const op = {
+      kind: "read",
+      identity: editorIdentity,
+      path: editorPath(),
+      generation,
+      permissions: permissionEpoch,
+      epoch: resolutionInputEpoch,
+      input: resolutionFingerprint(),
+      selection: savedSelection,
+      readEpoch: savedReadEpoch,
+    };
     resolutionOperation = op;
-    const owns = () => resolutionOperation === op && op.identity === editorIdentity &&
-      !editorIdentityRevoked && !editor.hidden && op.path === editorPath() &&
-      op.generation === generation && op.permissions === permissionEpoch &&
-      op.selection === savedSelection && op.readEpoch === savedReadEpoch &&
-      op.epoch === resolutionInputEpoch && op.input === resolutionFingerprint();
+    const owns = () =>
+      resolutionOperation === op &&
+      op.identity === editorIdentity &&
+      !editorIdentityRevoked &&
+      !editor.hidden &&
+      op.path === editorPath() &&
+      op.generation === generation &&
+      op.permissions === permissionEpoch &&
+      op.selection === savedSelection &&
+      op.readEpoch === savedReadEpoch &&
+      op.epoch === resolutionInputEpoch &&
+      op.input === resolutionFingerprint();
     const output = document.getElementById("issue-resolution-batch-detail");
     output.replaceChildren();
     output.hidden = true;
-    document.getElementById("issue-resolution-batch-status").textContent = "후속 BATCH 상세 조회 중";
+    document.getElementById("issue-resolution-batch-status").textContent =
+      "후속 BATCH 상세 조회 중";
     syncResolutionControls();
     syncReviewControls();
     try {
-      const data = await request("GET", `${op.path}/regressions/${key}`, undefined, false, undefined, owns);
+      const data = await request(
+        "GET",
+        `${op.path}/regressions/${key}`,
+        undefined,
+        false,
+        undefined,
+        owns,
+      );
       if (!owns()) return;
       output.textContent = JSON.stringify(resolutionBatch(data, key), null, 2);
       output.hidden = false;
       document.getElementById("issue-resolution-batch-status").textContent =
         "전체 비민감 상세 관측 완료 · 해소 적격·현재 runtime·품질·운영 효력은 추론하지 않습니다. POST만 최종 판단합니다.";
     } catch {
-      if (owns()) document.getElementById("issue-resolution-batch-status").textContent =
-        "후속 BATCH 상세 조회 실패 · 다른 사건의 근거·접근 불가·형식 오류를 성공으로 보정하지 않습니다.";
+      if (owns())
+        document.getElementById("issue-resolution-batch-status").textContent =
+          "후속 BATCH 상세 조회 실패 · 다른 사건의 근거·접근 불가·형식 오류를 성공으로 보정하지 않습니다.";
     } finally {
       if (resolutionOperation === op) resolutionOperation = undefined;
       syncResolutionControls();
@@ -590,27 +744,62 @@
    * @returns {object} 검증된 영수증. 현재 GET은 이 함수의 입력이 아니다.
    */
   function resolutionResult(data, intent) {
-    const keys = ["issueKey", "snapshotId", "editRev", "state", "targetBatchKey", "resolvedAt"];
-    if (!cloneKeys(data, ["action", "replayed", "changed", "original", "current", "requestId"]) ||
-      data.action !== "ISSUE_RESOLVE" || typeof data.replayed !== "boolean" ||
-      data.changed !== !data.replayed || !resolutionUuid(data.requestId))
+    const keys = [
+      "issueKey",
+      "snapshotId",
+      "editRev",
+      "state",
+      "targetBatchKey",
+      "resolvedAt",
+    ];
+    if (
+      !cloneKeys(data, [
+        "action",
+        "replayed",
+        "changed",
+        "original",
+        "current",
+        "requestId",
+      ]) ||
+      data.action !== "ISSUE_RESOLVE" ||
+      typeof data.replayed !== "boolean" ||
+      data.changed !== !data.replayed ||
+      !resolutionUuid(data.requestId)
+    )
       throw { status: 503 };
     for (const value of [data.original, data.current]) {
-      if (!cloneKeys(value, keys) || value.issueKey !== intent.issueKey ||
-        !resolutionUuid(value.issueKey) || value.snapshotId !== intent.snapshotId ||
-        !savedIssueDecimal(value.snapshotId) || !cloneDecimal(value.editRev) ||
-        value.state !== "RESOLVED" || value.targetBatchKey !== intent.body.targetBatchKey ||
-        !resolutionUuid(value.targetBatchKey) || !resolutionTime(value.resolvedAt))
+      if (
+        !cloneKeys(value, keys) ||
+        value.issueKey !== intent.issueKey ||
+        !resolutionUuid(value.issueKey) ||
+        value.snapshotId !== intent.snapshotId ||
+        !savedIssueDecimal(value.snapshotId) ||
+        !cloneDecimal(value.editRev) ||
+        value.state !== "RESOLVED" ||
+        value.targetBatchKey !== intent.body.targetBatchKey ||
+        !resolutionUuid(value.targetBatchKey) ||
+        !resolutionTime(value.resolvedAt)
+      )
         throw { status: 503 };
     }
-    if (data.original.editRev !== intent.body.expectedRev ||
+    if (
+      data.original.editRev !== intent.body.expectedRev ||
       BigInt(data.current.editRev) < BigInt(data.original.editRev) ||
       data.original.resolvedAt !== data.current.resolvedAt ||
-      (!data.replayed && keys.some((key) => data.original[key] !== data.current[key])) ||
-      (intent.receipt && (!data.replayed ||
-        keys.some((key) => data.original[key] !== intent.receipt.original[key]))))
+      (!data.replayed &&
+        keys.some((key) => data.original[key] !== data.current[key])) ||
+      (intent.receipt &&
+        (!data.replayed ||
+          keys.some(
+            (key) => data.original[key] !== intent.receipt.original[key],
+          )))
+    )
       throw { status: 503 };
-    return Object.freeze({ ...data, original: Object.freeze({ ...data.original }), current: Object.freeze({ ...data.current }) });
+    return Object.freeze({
+      ...data,
+      original: Object.freeze({ ...data.original }),
+      current: Object.freeze({ ...data.current }),
+    });
   }
 
   /** 보관 중인 미확인·거절·CSRF 상태를 표시하되 확정 영수증은 덮어쓰지 않는다. */
@@ -631,36 +820,92 @@
    */
   async function submitResolution(replay = false) {
     if (resolutionOperation || !resolutionAuthority()) return;
-    if (replay ? !resolutionIntent || resolutionIntent.state === "rejected" ||
-      resolutionIntent.identity !== editorIdentity || resolutionIntent.editorPath !== editorPath()
-      : resolutionIntent || !resolutionEligible()) return;
+    if (
+      replay
+        ? !resolutionIntent ||
+          resolutionIntent.state === "rejected" ||
+          resolutionIntent.identity !== editorIdentity ||
+          resolutionIntent.editorPath !== editorPath()
+        : resolutionIntent || !resolutionEligible()
+    )
+      return;
     const message = document.getElementById("issue-resolution-status");
     const batch = document.getElementById("issue-resolution-batch").value;
     const ref = document.getElementById("issue-resolution-ref").value;
-    if (!replay && (!resolutionUuid(batch) || !/^[A-Za-z0-9_-]{8,64}$/.test(ref))) {
-      message.textContent = "소문자 UUID v4와 비개인 ASCII 확인 참조 8~64자를 입력하세요. 전송하지 않았습니다.";
-      document.getElementById(!resolutionUuid(batch) ? "issue-resolution-batch" : "issue-resolution-ref").focus();
+    if (
+      !replay &&
+      (!resolutionUuid(batch) || !/^[A-Za-z0-9_-]{8,64}$/.test(ref))
+    ) {
+      message.textContent =
+        "소문자 UUID v4와 비개인 ASCII 확인 참조 8~64자를 입력하세요. 전송하지 않았습니다.";
+      document
+        .getElementById(
+          !resolutionUuid(batch)
+            ? "issue-resolution-batch"
+            : "issue-resolution-ref",
+        )
+        .focus();
       return;
     }
-    const intent = replay ? resolutionIntent : {
-      identity: editorIdentity, editorPath: editorPath(), issueKey: resolutionSource.issueKey,
-      snapshotId: resolutionSource.snapshotId, fingerprint: resolutionFingerprint(),
-      path: `${editorPath()}/execution-issues/${resolutionSource.issueKey}/resolve`,
-      body: Object.freeze({ expectedRev: detail.editRev, requestKey: crypto.randomUUID(),
-        reasonCode: resolutionSource.kind === "INFRA" ? "INFRA_RECOVERED" : "GRADING_FIX_VERIFIED",
-        verificationRef: ref, targetBatchKey: batch, targetReviewId: null }),
+    const intent = replay
+      ? resolutionIntent
+      : {
+          identity: editorIdentity,
+          editorPath: editorPath(),
+          issueKey: resolutionSource.issueKey,
+          snapshotId: resolutionSource.snapshotId,
+          fingerprint: resolutionFingerprint(),
+          path: `${editorPath()}/execution-issues/${resolutionSource.issueKey}/resolve`,
+          body: Object.freeze({
+            expectedRev: detail.editRev,
+            requestKey: crypto.randomUUID(),
+            reasonCode:
+              resolutionSource.kind === "INFRA"
+                ? "INFRA_RECOVERED"
+                : "GRADING_FIX_VERIFIED",
+            verificationRef: ref,
+            targetBatchKey: batch,
+            targetReviewId: null,
+          }),
+        };
+    const op = {
+      kind: "write",
+      intent,
+      replay,
+      sent: false,
+      priorUnknown: intent.state === "unknown",
+      generation,
+      permissions: permissionEpoch,
+      detail,
+      source: resolutionSource,
+      selection: savedSelection,
+      readEpoch: savedReadEpoch,
+      epoch: resolutionInputEpoch,
+      inputs: cloneInputs(),
+      drafts: cloneDraftState(),
     };
-    const op = { kind: "write", intent, replay, sent: false, priorUnknown: intent.state === "unknown", generation, permissions: permissionEpoch,
-      detail, source: resolutionSource, selection: savedSelection, readEpoch: savedReadEpoch,
-      epoch: resolutionInputEpoch, inputs: cloneInputs(), drafts: cloneDraftState() };
     resolutionOperation = op;
-    const owns = () => resolutionOperation === op && intent.identity === editorIdentity &&
-      !editorIdentityRevoked && !editor.hidden && intent.editorPath === editorPath() &&
-      op.generation === generation && op.permissions === permissionEpoch;
-    const fresh = () => owns() && resolutionAuthority() && op.detail === detail &&
-      op.source === resolutionSource && op.selection === savedSelection && op.readEpoch === savedReadEpoch &&
-      op.epoch === resolutionInputEpoch && op.inputs === cloneInputs() && op.drafts === cloneDraftState() &&
-      (replay ? resolutionIntent === intent : !resolutionIntent && resolutionEligible());
+    const owns = () =>
+      resolutionOperation === op &&
+      intent.identity === editorIdentity &&
+      !editorIdentityRevoked &&
+      !editor.hidden &&
+      intent.editorPath === editorPath() &&
+      op.generation === generation &&
+      op.permissions === permissionEpoch;
+    const fresh = () =>
+      owns() &&
+      resolutionAuthority() &&
+      op.detail === detail &&
+      op.source === resolutionSource &&
+      op.selection === savedSelection &&
+      op.readEpoch === savedReadEpoch &&
+      op.epoch === resolutionInputEpoch &&
+      op.inputs === cloneInputs() &&
+      op.drafts === cloneDraftState() &&
+      (replay
+        ? resolutionIntent === intent
+        : !resolutionIntent && resolutionEligible());
     syncResolutionControls();
     syncReviewControls();
     try {
@@ -671,40 +916,67 @@
         confirmLabel: replay ? "원래 본문으로 재확인" : "지적 해소 요청",
       });
       if (!(await observeEditorIdentity()) || !accepted || !fresh()) return;
-      const data = await request("POST", intent.path, intent.body, false, undefined, (phase) => {
-        if (phase === "response") return owns() && op.sent && resolutionIntent === intent;
-        if (!fresh()) return false;
-        resolutionIntent = intent;
-        op.sent = true;
-        // 전송 이후 세대가 교체되어도 확인 전에는 원래 의도가 미확인으로 남는다.
-        if (!intent.receipt && intent.state !== "unknown") intent.state = "unknown";
-        message.textContent = "해소 요청 전송 중 · 원래 키·본문 보관. 자동 재전송하지 않습니다.";
-        renderResolutionReceipt();
-        syncResolutionControls();
-        return true;
-      });
+      const data = await request(
+        "POST",
+        intent.path,
+        intent.body,
+        false,
+        undefined,
+        (phase) => {
+          if (phase === "response")
+            return owns() && op.sent && resolutionIntent === intent;
+          if (!fresh()) return false;
+          resolutionIntent = intent;
+          op.sent = true;
+          // 전송 이후 세대가 교체되어도 확인 전에는 원래 의도가 미확인으로 남는다.
+          if (!intent.receipt && intent.state !== "unknown")
+            intent.state = "unknown";
+          message.textContent =
+            "해소 요청 전송 중 · 원래 키·본문 보관. 자동 재전송하지 않습니다.";
+          renderResolutionReceipt();
+          syncResolutionControls();
+          return true;
+        },
+      );
       if (!owns()) return;
       intent.receipt = resolutionResult(data, intent);
       intent.state = "confirmed";
       resolutionAcknowledged = intent.fingerprint;
       renderResolutionReceipt();
-      message.textContent = "해소 영수증을 확인했습니다. 새 입력·쓰기 기준·필터·커서는 유지하며 자동 조회하지 않습니다.";
+      message.textContent =
+        "해소 영수증을 확인했습니다. 새 입력·쓰기 기준·필터·커서는 유지하며 자동 조회하지 않습니다.";
     } catch (error) {
       if (!owns() || !op.sent) return;
       const rejected = {
-        400: ["INVALID_REQUEST"], 409: ["REQUEST_KEY_CONFLICT", "EDIT_CONFLICT", "STATE_CONFLICT", "RUNTIME_UNAVAILABLE"],
-        422: ["EVIDENCE_INCOMPLETE", "ISSUE_NOT_RESOLVABLE"], 404: ["NOT_FOUND"],
+        400: ["INVALID_REQUEST"],
+        409: [
+          "REQUEST_KEY_CONFLICT",
+          "EDIT_CONFLICT",
+          "STATE_CONFLICT",
+          "RUNTIME_UNAVAILABLE",
+        ],
+        422: ["EVIDENCE_INCOMPLETE", "ISSUE_NOT_RESOLVABLE"],
+        404: ["NOT_FOUND"],
       }[error.status]?.includes(error.code);
-      if (!intent.receipt) intent.state = op.priorUnknown ? "unknown" :
-        error.status === 403 && error.code === "CSRF_INVALID" ? "csrf" : rejected ? "rejected" : "unknown";
+      if (!intent.receipt)
+        intent.state = op.priorUnknown
+          ? "unknown"
+          : error.status === 403 && error.code === "CSRF_INVALID"
+            ? "csrf"
+            : rejected
+              ? "rejected"
+              : "unknown";
       renderResolutionReceipt();
-      message.textContent = error.status === 403 && error.code === "CSRF_INVALID"
-        ? "CSRF 거절 · 토큰만 폐기했습니다. 사용자 동의로 원래 키·본문을 재확인할 수 있습니다."
-        : `이번 해소 ${rejected ? "요청 거절" : "결과 미확인"}${rejected ? ` · ${error.code}` : ""}. 이전 미확인·확정 영수증과 입력은 유지하며 자동 재전송하지 않습니다.`;
+      message.textContent =
+        error.status === 403 && error.code === "CSRF_INVALID"
+          ? "CSRF 거절 · 토큰만 폐기했습니다. 사용자 동의로 원래 키·본문을 재확인할 수 있습니다."
+          : `이번 해소 ${rejected ? "요청 거절" : "결과 미확인"}${rejected ? ` · ${error.code}` : ""}. 이전 미확인·확정 영수증과 입력은 유지하며 자동 재전송하지 않습니다.`;
     } finally {
       if (resolutionOperation === op) {
         resolutionOperation = undefined;
-        if (!op.sent) message.textContent = "동의 취소 또는 대상·입력·권한 변경으로 전송하지 않았습니다. 원래 의도와 입력은 유지됩니다.";
+        if (!op.sent)
+          message.textContent =
+            "동의 취소 또는 대상·입력·권한 변경으로 전송하지 않았습니다. 원래 의도와 입력은 유지됩니다.";
       }
       syncResolutionControls();
       syncReviewControls();
@@ -717,7 +989,9 @@
     ++resolutionInputEpoch;
     document.getElementById("issue-resolution-form")?.reset();
     document.getElementById("issue-resolution-receipt")?.replaceChildren();
-    document.getElementById("issue-resolution-receipt")?.removeAttribute("data-state");
+    document
+      .getElementById("issue-resolution-receipt")
+      ?.removeAttribute("data-state");
     document.getElementById("issue-resolution-batch-detail")?.replaceChildren();
     resolutionAcknowledged = resolutionFingerprint();
     syncResolutionControls();
@@ -725,7 +999,8 @@
 
   /** 같은 신원·세대·선택·입력에 대한 명시 동의만 메모리 폐기에 사용한다. */
   async function discardResolution() {
-    if (resolutionOperation || !resolutionContext() || resolutionOtherBusy()) return;
+    if (resolutionOperation || !resolutionContext() || resolutionOtherBusy())
+      return;
     const identity = editorIdentity;
     const current = generation;
     const permissions = permissionEpoch;
@@ -736,19 +1011,31 @@
     const selection = savedSelection;
     const readEpoch = savedReadEpoch;
     const drafts = cloneDraftState();
-    const fresh = () => !resolutionOperation && resolutionContext() && !resolutionOtherBusy() &&
-      identity === editorIdentity && current === generation && permissions === permissionEpoch &&
-      selection === savedSelection && readEpoch === savedReadEpoch && drafts === cloneDraftState() &&
-      input === cloneInputs() && epoch === resolutionInputEpoch && intent === resolutionIntent && path === editorPath();
+    const fresh = () =>
+      !resolutionOperation &&
+      resolutionContext() &&
+      !resolutionOtherBusy() &&
+      identity === editorIdentity &&
+      current === generation &&
+      permissions === permissionEpoch &&
+      selection === savedSelection &&
+      readEpoch === savedReadEpoch &&
+      drafts === cloneDraftState() &&
+      input === cloneInputs() &&
+      epoch === resolutionInputEpoch &&
+      intent === resolutionIntent &&
+      path === editorPath();
     if (!(await observeEditorIdentity()) || !fresh()) return;
     const accepted = await AdminUI.confirm({
       title: "해소 입력·원래 의도 폐기",
-      message: "입력과 원래 키·본문을 메모리에서 버립니까? 서버 해소는 취소되지 않으며 미확인도 실패로 확정되지 않습니다. 원래 요청 재확인은 불가능해집니다.",
+      message:
+        "입력과 원래 키·본문을 메모리에서 버립니까? 서버 해소는 취소되지 않으며 미확인도 실패로 확정되지 않습니다. 원래 요청 재확인은 불가능해집니다.",
       confirmLabel: "해소 입력·의도 폐기",
     });
     if (!(await observeEditorIdentity()) || !accepted || !fresh()) return;
     clearResolution();
-    document.getElementById("issue-resolution-status").textContent = "해소 입력·보관 의도를 명시 폐기했습니다. 서버 결과는 변경하지 않았습니다.";
+    document.getElementById("issue-resolution-status").textContent =
+      "해소 입력·보관 의도를 명시 폐기했습니다. 서버 결과는 변경하지 않았습니다.";
   }
 
   /**
@@ -1899,7 +2186,8 @@
    * @param {boolean} replay true이면 현재 폼으로 원래 본문을 재구성하지 않는다.
    */
   async function submitManual(replay = false) {
-    if (manualOperation || resolutionOperation || !detail || editor.hidden) return;
+    if (manualOperation || resolutionOperation || !detail || editor.hidden)
+      return;
     if (
       replay
         ? !manualIntent?.sent || manualIntent.rejected
@@ -2572,7 +2860,8 @@
    * @param {string} state 기본 stale, 새 상세는 unopened.
    */
   function clearSavedIssues(state = "stale") {
-    if (resolutionOperation && !resolutionOperation.sent) AdminUI.cancelConfirmation();
+    if (resolutionOperation && !resolutionOperation.sent)
+      AdminUI.cancelConfirmation();
     const op = savedReads.issues;
     if (op) op.detail = op.metadata = op.selection = op.identity = undefined;
     delete savedReads.issues;
@@ -4149,13 +4438,20 @@
       cloneIntent.body === body &&
       cloneSent;
     const resolutionPost =
-      method === "POST" && resolutionOperation?.kind === "write" &&
-      resolutionOperation.sent && resolutionOperation.intent === resolutionIntent &&
-      resolutionIntent.path === path && resolutionIntent.body === body &&
-      /^\/ST_[A-Z0-9_]+\/versions\/[1-9][0-9]*\/execution-issues\/[0-9a-f-]{36}\/resolve$/.test(path);
+      method === "POST" &&
+      resolutionOperation?.kind === "write" &&
+      resolutionOperation.sent &&
+      resolutionOperation.intent === resolutionIntent &&
+      resolutionIntent.path === path &&
+      resolutionIntent.body === body &&
+      /^\/ST_[A-Z0-9_]+\/versions\/[1-9][0-9]*\/execution-issues\/[0-9a-f-]{36}\/resolve$/.test(
+        path,
+      );
     const resolutionRead =
-      method === "GET" && resolutionOperation?.kind === "read" &&
-      path === `${resolutionOperation.path}/regressions/${document.getElementById("issue-resolution-batch")?.value}`;
+      method === "GET" &&
+      resolutionOperation?.kind === "read" &&
+      path ===
+        `${resolutionOperation.path}/regressions/${document.getElementById("issue-resolution-batch")?.value}`;
     if (malformed) {
       if ([401, 403, 404].includes(response.status)) {
         revoke("현재 작업 자격을 확인할 수 없습니다.", response.status);
@@ -4179,9 +4475,13 @@
       const cloneCsrfRejection =
         clonePost && response.status === 403 && data?.code === "CSRF_INVALID";
       const resolutionCsrfRejection =
-        resolutionPost && response.status === 403 && data?.code === "CSRF_INVALID";
+        resolutionPost &&
+        response.status === 403 &&
+        data?.code === "CSRF_INVALID";
       const resolutionMissing =
-        (resolutionPost || resolutionRead) && response.status === 404 && data?.code === "NOT_FOUND";
+        (resolutionPost || resolutionRead) &&
+        response.status === 404 &&
+        data?.code === "NOT_FOUND";
       if (
         [401, 403, 404].includes(response.status) &&
         (clonePost || data?.code !== "REAUTH_REQUIRED") &&
@@ -4241,7 +4541,11 @@
       }
       throw { status: response.status, code: data?.code };
     }
-    if ((clonePost || resolutionPost || resolutionRead) && response.status !== 200) throw { status: 503 };
+    if (
+      (clonePost || resolutionPost || resolutionRead) &&
+      response.status !== 200
+    )
+      throw { status: 503 };
     return manualJson !== undefined
       ? { data, status: response.status }
       : privateReadText
@@ -6592,6 +6896,9 @@
         summary.className = "muted";
         summary.textContent = `난이도 ${item.difficulty ?? "미정"} · 수정번호 ${item.editRev} · ${displayTime(item.updatedAt)}`;
         row.append(badges, heading, code, summary);
+        const actions = document.createElement("div");
+        actions.className = "button-row story-row-actions";
+        row.append(actions);
         const manage = document.createElement("button");
         manage.type = "button";
         manage.className = "secondary manage-open";
@@ -6600,13 +6907,13 @@
           item.ownerAccountKey !== viewer?.accountKey &&
           !viewer?.permissions?.includes("MANAGE");
         manage.addEventListener("click", () => openManage(item));
-        row.append(manage);
+        actions.append(manage);
         const ownership = document.createElement("button");
         ownership.type = "button";
         ownership.className = "secondary ownership-open";
         ownership.textContent = "소유권 인계 확인";
         ownership.addEventListener("click", () => openOwnership(item));
-        row.append(ownership);
+        actions.append(ownership);
         rows.append(row);
       }
       if (!rows.childElementCount) {
@@ -6772,19 +7079,30 @@
   }
 
   if (editor) {
-    document.getElementById("issue-resolution-form")?.addEventListener("submit", (event) => {
-      event.preventDefault();
-      submitResolution();
-    });
+    document
+      .getElementById("issue-resolution-form")
+      ?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        submitResolution();
+      });
     for (const eventName of ["input", "change"]) {
-      document.getElementById("issue-resolution-form")?.addEventListener(eventName, resolutionChanged);
+      document
+        .getElementById("issue-resolution-form")
+        ?.addEventListener(eventName, resolutionChanged);
       editor.addEventListener(eventName, () => {
-        if (resolutionOperation && !resolutionOperation.sent) AdminUI.cancelConfirmation();
+        if (resolutionOperation && !resolutionOperation.sent)
+          AdminUI.cancelConfirmation();
       });
     }
-    document.getElementById("issue-resolution-batch-read")?.addEventListener("click", readResolutionBatch);
-    document.getElementById("issue-resolution-replay")?.addEventListener("click", () => submitResolution(true));
-    document.getElementById("issue-resolution-discard")?.addEventListener("click", discardResolution);
+    document
+      .getElementById("issue-resolution-batch-read")
+      ?.addEventListener("click", readResolutionBatch);
+    document
+      .getElementById("issue-resolution-replay")
+      ?.addEventListener("click", () => submitResolution(true));
+    document
+      .getElementById("issue-resolution-discard")
+      ?.addEventListener("click", discardResolution);
     resolutionAcknowledged = resolutionFingerprint();
     document
       .getElementById("clone-submit")
@@ -7509,8 +7827,10 @@
   // 문서 경로 변경은 이력 출처만 폐기하며 같은 문서의 목차 이동은 유지한다.
   window.addEventListener("popstate", syncSavedIssueControls);
   window.addEventListener("popstate", () => {
-    if ((resolutionIntent && editorPath() !== resolutionIntent.editorPath) ||
-      (resolutionSource && editorPath() !== resolutionSource.path)) {
+    if (
+      (resolutionIntent && editorPath() !== resolutionIntent.editorPath) ||
+      (resolutionSource && editorPath() !== resolutionSource.path)
+    ) {
       AdminUI.cancelConfirmation();
       clearResolution();
     }

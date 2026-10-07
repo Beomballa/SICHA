@@ -15,6 +15,12 @@
   --color-border: #2b323d;
   --color-control-border: #9ca3af;
   --color-focus: #ffc700;
+  --color-navigation: #171b24;
+  --color-brand-surface: #342026;
+  --color-info: #a8baff;
+  --color-info-surface: #202c40;
+  --color-success: #86cbb6;
+  --color-success-surface: #1b3430;
   --font-ui: "Apple SD Gothic Neo", sans-serif;
   --font-code: ui-monospace, monospace;
   --font-size-caption: 0.875rem;
@@ -314,6 +320,147 @@ dialog::backdrop {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-label);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+.ui-badge-info {
+  color: var(--color-info);
+  background: var(--color-info-surface);
+}
+.ui-badge-success {
+  color: var(--color-success);
+  background: var(--color-success-surface);
+}
+.secondary-link {
+  display: inline-flex;
+  justify-content: center;
+  gap: var(--gap-label);
+  padding: var(--space-2) var(--gap-related);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.secondary-link:hover {
+  background: var(--color-surface-raised);
+}
+.admin-app {
+  min-height: 100dvh;
+}
+.admin-workspace {
+  min-width: 0;
+}
+.admin-sidebar {
+  padding: var(--gap-related) var(--page-gutter);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-navigation);
+}
+.admin-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-related);
+}
+.admin-brand {
+  display: inline-flex;
+  gap: var(--gap-related);
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: var(--font-size-section);
+  font-weight: 700;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  flex: none;
+  border-radius: var(--radius-card);
+  color: var(--color-on-brand);
+  background: var(--color-brand);
+}
+.brand-caption {
+  display: block;
+  font: var(--font-size-caption)/var(--line-height-body) var(--font-code);
+  color: var(--color-text-muted);
+}
+.nav-group-label {
+  margin: var(--gap-group) 0 var(--gap-label);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+.admin-nav-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-label);
+}
+.admin-nav-list a,
+.admin-nav-secondary a {
+  gap: var(--gap-related);
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+.admin-nav-list a:hover,
+.admin-nav-secondary a:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+.admin-nav-list a[aria-current="page"] {
+  background: var(--color-brand-surface);
+  color: var(--color-text);
+  box-shadow: inset var(--space-1) 0 var(--color-brand);
+}
+.admin-nav-list svg {
+  width: var(--gap-group);
+  height: var(--gap-group);
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.admin-nav-secondary {
+  display: grid;
+}
+.admin-nav-footer {
+  margin-top: var(--gap-group);
+  padding-top: var(--gap-group);
+  border-top: 1px solid var(--color-border);
+}
+.admin-nav-footer p {
+  margin-top: var(--gap-helper);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+.admin-app .skip-link {
+  z-index: 5;
+}
+.admin-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-label) var(--gap-related);
+  padding-bottom: var(--gap-related);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+.admin-breadcrumb a {
+  color: var(--color-text-muted);
+}
 [hidden] {
   display: none !important;
 }
@@ -329,6 +476,26 @@ dialog::backdrop {
 @media (min-width: 1200px) {
   :root {
     --page-gutter: 32px;
+  }
+  .admin-app {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    align-items: start;
+  }
+  .admin-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+    padding: var(--gap-group) var(--gap-related);
+    border-bottom: 0;
+    border-right: 1px solid var(--color-border);
+  }
+  .admin-nav-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .admin-nav-footer {
+    margin-top: var(--space-12);
   }
 }
 @media (forced-colors: active) {
