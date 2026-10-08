@@ -12,6 +12,13 @@ export async function exerciseAdminWorkspace(page, fixture, helpers) {
   try {
     await notice(page, "현재 세션을 확인했습니다");
     assert.equal(await text(page, "#page-title"), "대시보드");
+    assert.equal(
+      await page.$eval(
+        ".workspace-actions .primary-link",
+        (link) => getComputedStyle(link).backgroundColor,
+      ),
+      "rgb(201, 26, 26)",
+    );
     assert.deepEqual(
       await page.$$eval(".admin-nav-list a", (links) =>
         links.map((a) => a.textContent.trim()),
@@ -106,12 +113,83 @@ export async function exerciseAdminWorkspace(page, fixture, helpers) {
       true,
     );
     await layout(page, "player-home-preview");
+    assert.equal(
+      await page.$eval(
+        ".player-actions .primary-link",
+        (link) => getComputedStyle(link).backgroundColor,
+      ),
+      "rgb(255, 199, 0)",
+    );
+    assert.equal(
+      await page.$eval(
+        ".case-cover",
+        (cover) => getComputedStyle(cover).backgroundColor,
+      ),
+      "rgb(230, 223, 208)",
+    );
+    assert.equal(
+      await page.$eval(
+        "#player-heading",
+        (heading) => heading.querySelectorAll("br").length,
+      ),
+      0,
+    );
+    assert.equal(
+      await page.$eval(
+        "#cover-heading",
+        (heading) => getComputedStyle(heading).fontWeight,
+      ),
+      "600",
+    );
+    assert.equal(
+      await page
+        .$$(".role-identity svg[aria-hidden='true'][focusable='false']")
+        .then((nodes) => nodes.length),
+      2,
+    );
+    for (const width of [360, 720, 768, 1000, 1200, 1440]) {
+      await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+      const theme = await page.evaluate(() => ({
+        columns: getComputedStyle(
+          document.querySelector(".player-hero"),
+        ).gridTemplateColumns.split(" ").length,
+        wrapper: document.querySelector(".player-shell").getBoundingClientRect()
+          .width,
+        title: parseFloat(
+          getComputedStyle(document.getElementById("cover-heading")).fontSize,
+        ),
+        heading: parseFloat(
+          getComputedStyle(document.getElementById("player-heading")).fontSize,
+        ),
+        radius: getComputedStyle(
+          document.querySelector(".player-actions .primary-link"),
+        ).borderRadius,
+      }));
+      assert.equal(theme.columns, width <= 1000 ? 1 : 2);
+      assert.ok(theme.wrapper <= 1280);
+      assert.equal(theme.title, width <= 720 ? 32 : 36);
+      assert.equal(theme.heading, width < 768 ? 24 : 28);
+      assert.equal(theme.radius, "6px");
+    }
     for (const width of [900, 1200]) {
       await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
       await inspectLayout(page, "player-home-preview", `${width}px`);
     }
     await page.click('a[href="#guide"]');
     assert.equal(new URL(page.url()).hash, "#guide");
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".player-header nav [aria-current]")?.hash ===
+        "#guide",
+      { timeout: 5000 },
+    );
+    assert.equal(
+      await page.$eval(
+        ".player-header nav [aria-current]",
+        (link) => link.hash,
+      ),
+      "#guide",
+    );
     assert.equal(
       await page.$$(".guide-grid article").then((nodes) => nodes.length),
       3,

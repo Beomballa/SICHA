@@ -6,6 +6,7 @@
     <meta name="referrer" content="no-referrer" />
     <title>시차 · 플레이어 메인 디자인 시안</title>
     <link rel="stylesheet" href="/admin/player-home.css" />
+    <script defer src="/admin/shell.js"></script>
   </head>
   <body class="player-home">
     <a class="skip-link" href="#player-heading">메인 내용으로 바로 이동</a>
@@ -19,7 +20,7 @@
           ><span class="brand-mark" aria-hidden="true">시</span
           ><span>시차<span class="brand-caption">SI:CHA</span></span></a
         >
-        <nav aria-label="메인 화면 탐색">
+        <nav aria-label="메인 화면 탐색" data-section-navigation>
           <a href="#cases" aria-current="location">사건</a
           ><a href="#guide">플레이 안내</a>
         </nav>
@@ -30,11 +31,11 @@
           <div class="player-hero-copy">
             <p class="eyebrow">TWO PERSPECTIVES. ONE TRUTH.</p>
             <h1 id="player-heading" tabindex="-1">
-              서로 다른 단서,<br /><span>하나의 진실.</span>
+              서로 다른 단서, 하나의 진실.
             </h1>
             <p class="hero-description">
-              혼자서는 보이지 않던 이야기.<br />서로의 단서를 나누고, 함께
-              사건의 진상을 밝혀보세요.
+              혼자서는 보이지 않던 이야기. 서로의 단서를 나누고, 함께 사건의
+              진상을 밝혀보세요.
             </p>
             <div class="player-actions">
               <a class="primary-link" href="#cases">사건 살펴보기</a
@@ -43,70 +44,62 @@
             <div class="player-premise">
               <span>서로 다른 조사 관점</span><span>함께 완성하는 보고서</span>
             </div>
+            <div class="player-role-guide" aria-label="조사 관점 예시">
+              <div class="role-identity">
+                <svg viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+                  <rect x="7" y="8" width="25" height="36" rx="3" />
+                  <path d="M13 18h12M13 25h8M13 32h6" />
+                  <circle cx="36" cy="31" r="10" />
+                  <path d="m43 38 8 9" />
+                </svg>
+                <span
+                  >현장 조사관<span class="role-description"
+                    >수첩과 관찰</span
+                  ></span
+                >
+              </div>
+              <div class="role-identity">
+                <svg viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+                  <path
+                    d="M6 12h17l5 4 5-4h17v30H33l-5 4-5-4H6zM28 16v30M12 21h9M12 28h9"
+                  />
+                  <circle cx="39" cy="31" r="8" />
+                  <path d="M39 26v5l4 2" />
+                </svg>
+                <span
+                  >기록 조사관<span class="role-description"
+                    >장부와 대조</span
+                  ></span
+                >
+              </div>
+            </div>
+            <p class="role-preview-note">
+              관점 예시입니다. 실제 역할은 사건별로 다르며 아직 배정되지
+              않았습니다.
+            </p>
           </div>
           <div class="player-art">
-            <svg
-              viewBox="0 0 520 400"
-              role="img"
-              aria-labelledby="player-art-title"
-            >
-              <title id="player-art-title">
-                사건 파일과 서로 다른 두 관점의 단서를 표현한 일러스트
-              </title>
-              <rect
-                class="art-frame"
-                x="18"
-                y="18"
-                width="484"
-                height="364"
-                rx="16"
-              />
-              <path
-                class="art-rule"
-                d="M42 80h436M42 326h436M74 42v316M446 42v316"
-              />
-              <circle class="art-orbit" cx="260" cy="198" r="134" />
-              <path
-                class="art-connection"
-                d="m118 160 160 42 120-100M142 296l136-94 126 56"
-              />
-              <g transform="rotate(-9 242 202)">
-                <path class="art-folder" d="M138 104h76l18 20h132v172H138z" />
-                <path class="art-paper" d="M157 139h184v138H157z" />
-                <path
-                  class="art-ink"
-                  d="M181 168h120M181 188h94M181 233h112M181 251h68"
-                />
-                <text class="art-title" x="181" y="216">SI:CHA</text>
-              </g>
-              <g transform="rotate(8 408 118)">
-                <rect
-                  class="art-card"
-                  x="350"
-                  y="68"
-                  width="108"
-                  height="100"
-                  rx="8"
-                />
-                <circle class="art-signal" cx="379" cy="101" r="9" />
-                <path class="art-ink" d="M366 130h73M366 146h42" />
-              </g>
-              <g transform="rotate(-6 114 290)">
-                <rect
-                  class="art-card"
-                  x="53"
-                  y="246"
-                  width="122"
-                  height="88"
-                  rx="8"
-                />
-                <path class="art-signal-line" d="m76 278 13 13 23-24" />
-                <path class="art-ink" d="M75 313h76" />
-              </g>
-              <circle class="art-pin" cx="121" cy="159" r="7" />
-              <circle class="art-pin" cx="401" cy="256" r="7" />
-            </svg>
-            <p>흩어진 기록이 만나는 순간, 사건의 새로운 면이 드러납니다.</p>
+            <div class="case-cover" aria-labelledby="cover-heading">
+              <p class="eyebrow">SI:CHA · DESIGN PREVIEW</p>
+              <span class="cover-state">공개 사건 연결 전</span>
+              <h2 id="cover-heading">기록을 읽고, 서로의 관점을 맞추세요.</h2>
+              <p>
+                사건 자료는 밝은 기록지에서, 관찰과 대조는 어두운 조사 공간에서.
+                두 사람이 같은 진상을 함께 설명하는 추리 경험을 준비합니다.
+              </p>
+              <dl>
+                <dt>화면 유형</dt>
+                <dd>플레이어 메인 HTML 시안</dd>
+                <dt>연결 범위</dt>
+                <dd>공개 사건·게임 API 미연동</dd>
+                <dt>열람 상태</dt>
+                <dd>디자인 검토 · 실제 게임 실행 전</dd>
+              </dl>
+            </div>
+            <p>
+              실제 사건명·발견 시각·단서는 연결된 공개 자료가 있을 때만
+              표시합니다.
+            </p>
           </div>
         </section>
         <section
@@ -122,17 +115,14 @@
             <span class="ui-badge">공개 사건 API 미연동</span>
           </div>
           <div class="case-empty">
-            <div class="case-symbol" aria-hidden="true">?</div>
-            <div>
-              <h3>아직 사건 목록이 연결되지 않았습니다.</h3>
-              <p class="muted">
-                이 화면은 메인 디자인 시안입니다. 승인된 공개 사건과 플레이
-                API가 연결되면 실제 참여 가능한 사건을 표시합니다.
-              </p>
-              <div class="player-actions">
-                <button type="button" disabled>게임 시작 · 연결 전</button
-                ><a class="secondary-link" href="#guide">플레이 방식 보기</a>
-              </div>
+            <h3>아직 사건 목록이 연결되지 않았습니다.</h3>
+            <p class="muted">
+              이 화면은 메인 디자인 시안입니다. 승인된 공개 사건과 플레이 API가
+              연결되면 실제 참여 가능한 사건을 표시합니다.
+            </p>
+            <div class="player-actions">
+              <button type="button" disabled>게임 시작 · 연결 전</button
+              ><a class="secondary-link" href="#guide">플레이 방식 보기</a>
             </div>
           </div>
         </section>

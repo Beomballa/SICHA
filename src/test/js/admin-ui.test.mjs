@@ -27,7 +27,10 @@ test("SP05 and PT-A12 reuse shared panels and exactly twenty first-party confirm
     "utf8",
   );
   assert.equal([...script.matchAll(/\bAdminUI\.confirm\s*\(/g)].length, 20);
-  assert.match(script, /title: replay \? "원래 해소 요청 재확인" : "현재 BATCH 지적 해소"/);
+  assert.match(
+    script,
+    /title: replay \? "원래 해소 요청 재확인" : "현재 BATCH 지적 해소"/,
+  );
   assert.match(script, /title: "해소 입력·원래 의도 폐기"/);
   assert.equal([...authScript.matchAll(/\bAdminUI\.confirm\s*\(/g)].length, 2);
   assert.equal([...editor.matchAll(/src="\/admin\/ui\.js"/g)].length, 1);
@@ -140,13 +143,19 @@ async function geometry(page) {
       ...document.querySelectorAll("button,a,input,select,summary"),
     ];
     const select = getComputedStyle(document.getElementById("long-select"));
+    const touchRect = (node) => {
+      const label = node.matches('input[type="checkbox"]')
+        ? node.closest("label")
+        : null;
+      return (label?.control === node ? label : node).getBoundingClientRect();
+    };
     return {
       width: innerWidth,
       scroll: document.documentElement.scrollWidth,
       targets: targets.map((node) => ({
         id: node.id || node.tagName,
-        height: node.getBoundingClientRect().height,
-        width: node.getBoundingClientRect().width,
+        height: touchRect(node).height,
+        width: touchRect(node).width,
         opacity: getComputedStyle(node).opacity,
         contrast: contrast(node),
       })),
@@ -284,6 +293,30 @@ test("shared UI gallery geometry, interaction, contrast and native forced colors
         `${width}px 긴 내용 경계`,
       );
     }
+    const beforeApproval = await page.$eval(
+      "#approval",
+      (node) => node.checked,
+    );
+    const approvalLabel = "label:has(#approval)";
+    const labelBox = await page.$eval(approvalLabel, (node) => ({
+      width: node.getBoundingClientRect().width,
+      height: node.getBoundingClientRect().height,
+    }));
+    await page.click(approvalLabel, {
+      offset: { x: labelBox.width - 4, y: labelBox.height - 4 },
+    });
+    assert.equal(
+      await page.$eval("#approval", (node) => node.checked),
+      !beforeApproval,
+      "glyph 밖 native label의 실제 클릭",
+    );
+    await page.focus("#approval");
+    await page.keyboard.press("Space");
+    assert.equal(
+      await page.$eval("#approval", (node) => node.checked),
+      beforeApproval,
+      "키보드 체크 전환",
+    );
     await page.mouse.move(0, 0);
     const normal = await state(page, "#primary");
     await page.hover("#primary");

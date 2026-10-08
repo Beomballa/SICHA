@@ -140,6 +140,7 @@ textarea {
   color: var(--color-text);
   padding: var(--space-2) var(--space-3);
   font: inherit;
+  font-size: var(--font-size-body);
 }
 select {
   appearance: none;

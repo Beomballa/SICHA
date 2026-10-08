@@ -1,5 +1,21 @@
 (() => {
   "use strict";
+  for (const navigation of document.querySelectorAll(
+    "[data-section-navigation]",
+  )) {
+    const links = [...navigation.querySelectorAll('a[href^="#"]')];
+    /** 같은 문서의 실제 해시만 탐색 표시로 사용하며 입력·업무 요청은 변경하지 않는다. */
+    function currentSection() {
+      const current =
+        links.find((link) => link.hash === location.hash) ?? links[0];
+      for (const link of links) {
+        if (link === current) link.setAttribute("aria-current", "location");
+        else link.removeAttribute("aria-current");
+      }
+    }
+    addEventListener("hashchange", currentSection);
+    currentSection();
+  }
   const toggle = document.getElementById("admin-nav-toggle");
   const menu = document.getElementById("admin-menu");
   if (!toggle || !menu) return;

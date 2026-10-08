@@ -179,16 +179,13 @@ section {
   margin: 0;
   color: var(--color-text-muted);
 }
-.field-head select {
-  font-size: var(--font-size-caption);
-}
 .report-value {
   padding: var(--gap-related);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-background);
   white-space: pre-wrap;
-  line-height: 1.75;
+  line-height: 1.8;
 }
 .report-value[data-empty="true"] {
   color: var(--color-text-muted);
@@ -262,10 +259,6 @@ section {
 #child-state {
   font-size: var(--font-size-caption);
   color: var(--color-text-muted);
-}
-.impact-confirm input {
-  width: var(--touch-target-min);
-  min-height: var(--touch-target-min);
 }
 .child-toolbar {
   display: flex;
@@ -400,7 +393,10 @@ dd {
 }
 .version-panel h2 {
   margin-block: var(--gap-related);
-  font-size: var(--font-size-title-mobile);
+  font-size: var(--font-size-section);
+}
+.report-document > .version-panel h2 {
+  font-size: 2rem;
 }
 .report-status {
   display: flex;
@@ -438,6 +434,9 @@ dd {
 }
 .chapter-head .eyebrow {
   margin-bottom: var(--gap-helper);
+}
+.chapter-head h2 {
+  font-size: var(--font-size-title-mobile);
 }
 .section-guide {
   color: var(--color-text-muted);
@@ -558,11 +557,38 @@ form:not([data-section]) > button,
     padding: var(--gap-related);
     background: var(--color-background);
   }
-  .version-panel h2 {
-    font-size: var(--font-size-title-desktop);
+  .report-document > .version-panel h2 {
+    font-size: 2.5rem;
+  }
+  .report-value:not([data-empty="true"]) {
+    font-size: 1.125rem;
   }
 }
 @media (min-width: 1200px) {
+  .workbench {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    align-items: start;
+  }
+  .workbench > .section-nav {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: column;
+    border-bottom: 0;
+  }
+  .workbench > .manuscript {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    border-left: 1px solid var(--color-border);
+  }
+  .workbench > .report-notes {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .report-notes dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .child-layout {
     display: grid;
     grid-template-columns: 240px minmax(0, 1fr);

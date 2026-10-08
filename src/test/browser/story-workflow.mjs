@@ -230,6 +230,35 @@ async function inspectEditorNavigation(page) {
       Math.max(...widths) - Math.min(...widths) <= 1,
       `${width}px 영역 외곽 폭 동일`,
     );
+    const workbench = await page.evaluate(() => {
+      const nav = document
+        .querySelector(".workbench > .section-nav")
+        .getBoundingClientRect();
+      const manuscript = document
+        .querySelector(".workbench > .manuscript")
+        .getBoundingClientRect();
+      return {
+        navRight: nav.right,
+        navBottom: nav.bottom,
+        manuscriptLeft: manuscript.left,
+        manuscriptTop: manuscript.top,
+        font: parseFloat(
+          getComputedStyle(document.getElementById("answer-culpritCode-mode"))
+            .fontSize,
+        ),
+      };
+    });
+    if (width >= 1200)
+      assert.ok(
+        workbench.navRight <= workbench.manuscriptLeft,
+        "목차와 원고의 좌우 구획",
+      );
+    else
+      assert.ok(
+        workbench.navBottom <= workbench.manuscriptTop,
+        "작은 폭은 목차 다음 원고",
+      );
+    assert.ok(workbench.font >= 16, "입력 선택기는 본문 글자 크기 유지");
   }
   assert.equal(await page.$eval("#policy-details", (node) => node.open), false);
   await page.click('#editor-nav a[href="#policy-heading"]');

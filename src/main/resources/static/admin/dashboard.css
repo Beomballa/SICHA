@@ -53,7 +53,7 @@
 }
 .workspace-hero h2 {
   margin: var(--gap-related) 0;
-  font-size: var(--font-size-title-mobile);
+  font-size: var(--font-size-section);
 }
 .workspace-hero p,
 .workspace-card p {
