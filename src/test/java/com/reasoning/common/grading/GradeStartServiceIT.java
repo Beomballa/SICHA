@@ -4,11 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.reasoning.common.auth.TestKeys;
+import com.reasoning.common.auth.service.AuthProperties;
+import com.reasoning.common.auth.service.CryptoService;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier.InstalledProfile;
 import com.reasoning.common.grading.engine.LocalSemanticEngine;
 import com.reasoning.common.grading.model.GradeDictionary;
 import com.reasoning.common.grading.model.GradeDictionary.Term;
+import com.reasoning.common.grading.model.SnapshotJson;
 import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.grading.security.GradeWorkerCredentials;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.Action;
@@ -67,6 +71,148 @@ class GradeStartServiceIT {
     private UUID jobKey;
     private String workerKey;
     private String header;
+
+    /** A physical accepted report, not a BATCH grading sample or a fabricated worker response. */
+    static TestJob acceptedTestJob(
+            JdbcTemplate db,
+            CryptoService cipher,
+            FrozenSnapshot snapshotPayload,
+            long version,
+            long snapshot,
+            long runtime,
+            long creator,
+            String configHash) {
+        for (String role : List.of("R1", "R2")) {
+            db.update(
+                    "INSERT INTO public.story_role(version_id,code,name) VALUES (?,?,?)",
+                    version,
+                    role,
+                    role);
+        }
+        db.update(
+                "INSERT INTO public.story_pair(version_id,role_a,role_b) VALUES (?,'R1','R2')",
+                version);
+        long test =
+                db.queryForObject(
+                        """
+                        WITH t AS MATERIALIZED (SELECT clock_timestamp() n)
+                        INSERT INTO public.play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,
+                            runtime_epoch,role_a,role_b,mode,state,invite_until,started_at,deadline_at,
+                            created_by,created_at,updated_at)
+                        SELECT ?,?,?,?,?,0,'R1','R2','FUNCTIONAL','RUNNING',t.n+interval '7 days',
+                            t.n,t.n+interval '15 minutes',?,t.n,t.n FROM t
+                        RETURNING id
+                        """,
+                        Long.class,
+                        UUID.randomUUID(),
+                        version,
+                        snapshot,
+                        runtime,
+                        configHash,
+                        creator);
+        long proposer =
+                db.queryForObject(
+                        "INSERT INTO public.member_account(member_key,state) VALUES (?,'ACTIVE')"
+                                + " RETURNING id",
+                        Long.class,
+                        UUID.randomUUID());
+        long acceptor =
+                db.queryForObject(
+                        "INSERT INTO public.member_account(member_key,state) VALUES (?,'ACTIVE')"
+                                + " RETURNING id",
+                        Long.class,
+                        UUID.randomUUID());
+        db.update(
+                "INSERT INTO public.test_member(test_id,member_id,slot) VALUES (?,?,1),(?,?,2)",
+                test,
+                proposer,
+                test,
+                acceptor);
+        var typed =
+                new com.reasoning.common.grading.model.GradeModels.Report(
+                        "P1", "H5_TEST_REPORT_PRIVATE", "", "", "");
+        var selected =
+                com.fasterxml.jackson.databind.node.JsonNodeFactory.instance
+                        .objectNode()
+                        .put("culpritCode", typed.culpritCode())
+                        .put("method", typed.method())
+                        .put("time", typed.time())
+                        .put("motive", typed.motive())
+                        .put("evidence", typed.evidence());
+        String reportJson = new String(SnapshotJson.encode(selected), StandardCharsets.UTF_8);
+        String payloadHash = SnapshotJson.hash(selected);
+        String hash = snapshotPayload.reportHash(typed);
+        UUID reportKey = UUID.randomUUID();
+        long reportId =
+                db.queryForObject(
+                        "SELECT nextval(pg_get_serial_sequence('public.test_report','id'))",
+                        Long.class);
+        String aad =
+                "test_report/"
+                        + reportId
+                        + "/test/"
+                        + test
+                        + "/snapshot/"
+                        + snapshot
+                        + "/draft/0/payload/v1";
+        byte[] encrypted = cipher.encrypt(reportJson, aad).getBytes(StandardCharsets.UTF_8);
+        db.update(
+                """
+                INSERT INTO public.test_report(id,report_key,test_id,snapshot_id,runtime_id,config_hash,
+                    runtime_epoch,source_draft_rev,proposer_id,payload_cipher,payload_hash)
+                OVERRIDING SYSTEM VALUE VALUES (?,?,?,?,?,?,0,0,?,?,?)
+                """,
+                reportId,
+                reportKey,
+                test,
+                snapshot,
+                runtime,
+                configHash,
+                proposer,
+                encrypted,
+                payloadHash);
+        db.update(
+                "WITH t AS MATERIALIZED (SELECT clock_timestamp() n)"
+                        + " UPDATE public.test_report SET state='ACCEPTED',accepted_by=?,"
+                        + " accepted_at=t.n,submit_no=1,updated_at=t.n FROM t WHERE id=?",
+                acceptor,
+                reportId);
+        return new TestJob(test, reportId, reportKey, hash, reportJson, aad, encrypted);
+    }
+
+    record TestJob(
+            long testId,
+            long reportId,
+            UUID reportKey,
+            String hash,
+            String reportJson,
+            String aad,
+            byte[] encrypted) {}
+
+    static long queuedTestJob(
+            JdbcTemplate db,
+            TestJob report,
+            long snapshot,
+            long runtime,
+            String configHash,
+            String rubricHash) {
+        return db.queryForObject(
+                """
+                INSERT INTO public.grade_job(job_key,snapshot_id,runtime_id,report_id,report_hash,
+                    state,input_hash,config_hash,rubric_hash,accepted_at,deadline_at)
+                SELECT ?,?,?,r.id,?,'QUEUED',NULL,?,?,r.accepted_at,
+                    r.accepted_at+interval '120 seconds' FROM public.test_report r WHERE r.id=?
+                RETURNING id
+                """,
+                Long.class,
+                UUID.randomUUID(),
+                snapshot,
+                runtime,
+                report.hash(),
+                configHash,
+                rubricHash,
+                report.reportId());
+    }
 
     /** 폐기형 고정 DB와 실제 설치 엔진을 생성하며 모든 설치 지문 계산은 SQL TX 밖에서 수행한다. */
     @BeforeAll
@@ -264,6 +410,105 @@ class GradeStartServiceIT {
     }
 
     @Test
+    void physicalTestReportUsesItsOwnFkCanonicalHashAndAuthenticatedAad() {
+        var keys = new AuthProperties();
+        keys.setCryptoKeyFile(TestKeys.create((byte) 54));
+        keys.setSearchKeyFile(TestKeys.create((byte) 55));
+        keys.setLimitKeyFile(TestKeys.create((byte) 56));
+        var cipher = new CryptoService(keys);
+        TestJob report =
+                acceptedTestJob(
+                        jdbc,
+                        cipher,
+                        frozen,
+                        version,
+                        snapshot,
+                        runtime,
+                        creator,
+                        installation.configHash());
+        long testJobId =
+                queuedTestJob(
+                        jdbc,
+                        report,
+                        snapshot,
+                        runtime,
+                        installation.configHash(),
+                        frozen.rubricHash());
+        var stored = jdbc.queryForMap("SELECT * FROM public.grade_job WHERE id=?", testJobId);
+        assertThat(stored)
+                .containsEntry("report_id", report.reportId())
+                .containsEntry("report_hash", report.hash())
+                .containsEntry("batch_id", null)
+                .containsEntry("input_hash", null);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT payload_hash FROM public.test_report WHERE id=?",
+                                String.class,
+                                report.reportId()))
+                .isEqualTo(
+                        SnapshotJson.hash(
+                                SnapshotJson.parse(
+                                        report.reportJson().getBytes(StandardCharsets.UTF_8))))
+                .isNotEqualTo(report.hash());
+        assertThatThrownBy(
+                        () ->
+                                jdbc.update(
+                                        "UPDATE public.grade_job SET report_id=? WHERE id=?",
+                                        report.reportId() + 1,
+                                        testJobId))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT report_id FROM public.grade_job WHERE id=?",
+                                Long.class,
+                                testJobId))
+                .isEqualTo(report.reportId());
+        assertThat(
+                        cipher.decrypt(
+                                new String(
+                                        (byte[])
+                                                jdbc.queryForObject(
+                                                        "SELECT payload_cipher FROM"
+                                                                + " public.test_report WHERE id=?",
+                                                        byte[].class,
+                                                        report.reportId()),
+                                        StandardCharsets.UTF_8),
+                                report.aad()))
+                .isEqualTo(report.reportJson());
+        assertThatThrownBy(
+                        () ->
+                                cipher.decrypt(
+                                        new String(report.encrypted(), StandardCharsets.UTF_8),
+                                        report.aad()
+                                                .replace(
+                                                        "/test/" + report.testId() + "/",
+                                                        "/test/" + (report.testId() + 1) + "/")))
+                .hasMessage("AUTH_UNAVAILABLE");
+        assertThatThrownBy(
+                        () ->
+                                cipher.decrypt(
+                                        new String(report.encrypted(), StandardCharsets.UTF_8),
+                                        report.aad()
+                                                .replace(
+                                                        "/" + report.reportId() + "/test/",
+                                                        "/" + (report.reportId() + 1) + "/test/")))
+                .hasMessage("AUTH_UNAVAILABLE");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT call_count FROM public.grade_job WHERE id=?",
+                                Integer.class,
+                                testJobId))
+                .isZero();
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM public.grade_attempt WHERE job_id=?",
+                                Integer.class,
+                                testJobId))
+                .isZero();
+        assertThat(requests.get()).isZero();
+    }
+
+    @Test
     void twoServiceInstancesSerializeOneReservationAndOneReplay() throws Exception {
         var other = service(jdbc, credentials);
         var gate = new CountDownLatch(1);
@@ -320,7 +565,7 @@ class GradeStartServiceIT {
         for (String state : List.of("QUEUED", "FAILED", "CANCELLED", "COMPLETED")) {
             jdbc.update(
                     "UPDATE public.grade_job SET state=?,worker_key=NULL,lease_until=NULL WHERE"
-                        + " id=?",
+                            + " id=?",
                     state,
                     job);
             unchangedRejection(() -> start(), "START_NOT_CURRENT");
@@ -420,12 +665,12 @@ class GradeStartServiceIT {
     void missingEnrollmentAndMfaReadinessBlockReservation() {
         jdbc.update(
                 "UPDATE public.admin_credential SET enrolled_at=NULL,mfa_state='PENDING' WHERE"
-                    + " account_id=?",
+                        + " account_id=?",
                 creator);
         unchangedRejection(() -> start(), "SOURCE_NOT_CURRENT");
         jdbc.update(
                 "UPDATE public.admin_credential SET"
-                    + " enrolled_at=clock_timestamp(),mfa_state='RECOVERY' WHERE account_id=?",
+                        + " enrolled_at=clock_timestamp(),mfa_state='RECOVERY' WHERE account_id=?",
                 creator);
         unchangedRejection(() -> start(), "SOURCE_NOT_CURRENT");
     }
@@ -458,7 +703,7 @@ class GradeStartServiceIT {
         unchangedRejection(() -> start(), "SOURCE_NOT_CURRENT");
         jdbc.update(
                 "UPDATE public.story_version SET status='DRAFT',current_snapshot_id=NULL WHERE"
-                    + " id=?",
+                        + " id=?",
                 version);
         unchangedRejection(() -> start(), "SOURCE_NOT_CURRENT");
     }
@@ -485,8 +730,8 @@ class GradeStartServiceIT {
         try {
             jdbc.update(
                     "UPDATE public.grade_runtime SET"
-                        + " config_data=jsonb_set(config_data,'{engineVersion}','\"changed\"')"
-                        + " WHERE id=?",
+                            + " config_data=jsonb_set(config_data,'{engineVersion}','\"changed\"')"
+                            + " WHERE id=?",
                     runtime);
             unchangedRejection(() -> start(), "INSTALLED_RUNTIME_MISMATCH");
             jdbc.update(
@@ -629,7 +874,7 @@ class GradeStartServiceIT {
     void expiredLeaseDeadlineAndBatchEachBlockReservation() {
         jdbc.update(
                 "UPDATE public.grade_job SET lease_until=clock_timestamp()-interval '1 second'"
-                    + " WHERE id=?",
+                        + " WHERE id=?",
                 job);
         unchangedRejection(() -> start(), "START_NOT_CURRENT");
         jdbc.update(
@@ -650,7 +895,7 @@ class GradeStartServiceIT {
                 job);
         jdbc.update(
                 "UPDATE public.grade_batch SET created_at=clock_timestamp()-interval '24 hours'"
-                    + " WHERE id=?",
+                        + " WHERE id=?",
                 batch);
         unchangedRejection(() -> start(), "BATCH_EXPIRED");
     }
@@ -660,7 +905,7 @@ class GradeStartServiceIT {
         start();
         jdbc.update(
                 "UPDATE public.grade_job SET lease_until=clock_timestamp()-interval '1 second'"
-                    + " WHERE id=?",
+                        + " WHERE id=?",
                 job);
         unchangedRejection(() -> start(), "START_NOT_CURRENT");
     }
@@ -687,7 +932,7 @@ class GradeStartServiceIT {
                 try (var expire =
                         holder.prepareStatement(
                                 "UPDATE public.grade_job SET lease_until=clock_timestamp()+interval"
-                                    + " '0.3 seconds' WHERE id=?")) {
+                                        + " '0.3 seconds' WHERE id=?")) {
                     expire.setLong(1, job);
                     expire.executeUpdate();
                 }
@@ -731,7 +976,7 @@ class GradeStartServiceIT {
     void sqlDelayDuringInsertCrossesLeaseBoundaryAndGuardedUpdateRollsBack() {
         jdbc.update(
                 "UPDATE public.grade_job SET lease_until=clock_timestamp()+interval '0.8 seconds'"
-                    + " WHERE id=?",
+                        + " WHERE id=?",
                 job);
         trigger("grade_attempt", "INSERT", "PERFORM pg_sleep(1.0);");
         try {
@@ -746,7 +991,7 @@ class GradeStartServiceIT {
     void sqlDelayDuringUpdateCrossesLeaseBoundaryAndReturningGuardRollsBack() {
         jdbc.update(
                 "UPDATE public.grade_job SET lease_until=clock_timestamp()+interval '0.8 seconds'"
-                    + " WHERE id=?",
+                        + " WHERE id=?",
                 job);
         trigger("grade_job", "UPDATE", "PERFORM pg_sleep(1.0);");
         try {
@@ -800,7 +1045,7 @@ class GradeStartServiceIT {
     private void terminalAndAdvance(long generation) {
         jdbc.update(
                 "UPDATE public.grade_attempt SET state='FAILED',ended_at=clock_timestamp() WHERE"
-                    + " job_id=? AND state='RUNNING'",
+                        + " job_id=? AND state='RUNNING'",
                 job);
         jdbc.update("UPDATE public.grade_job SET lease_gen=? WHERE id=?", generation, job);
     }
@@ -818,7 +1063,7 @@ class GradeStartServiceIT {
     private void trigger(String table, String event, String body) {
         jdbc.execute(
                 "CREATE FUNCTION public.start_test_trigger() RETURNS trigger LANGUAGE plpgsql AS $$"
-                    + " BEGIN "
+                        + " BEGIN "
                         + body
                         + " RETURN NEW; END $$");
         jdbc.execute(

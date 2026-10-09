@@ -37,7 +37,7 @@ class GradeEvidenceSchemaIT {
     private long nextBatch;
     private long set;
 
-    /** 공유 시험의 max 버전 가정에 의존하지 않고 embedded 19를 적용한다. */
+    /** 공유 시험의 max 버전 가정에 의존하지 않고 embedded V22를 적용한다. */
     @BeforeAll
     static void open() {
         postgres =
@@ -46,7 +46,7 @@ class GradeEvidenceSchemaIT {
         postgres.start();
         jdbc = jdbc(postgres);
         var flyway = flyway(postgres, null);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
     }

@@ -76,7 +76,21 @@ public final class OriginalSqlCatalog {
                     Map.entry(
                             "V18__h3_grade_evidence.sql",
                             "b030e65b4f3f6a229d95d17c89dd01fbfe29cea79a13b1637334c58216c195c2"),
-                    Map.entry("V19__h4_local_member_auth.sql", "5adb2c16378f7dc8fa01a237d431f05a6fc3e12d968b9a0a87a07be28ad34919"));
+                    Map.entry(
+                            "V19__h4_local_member_auth.sql",
+                            "5adb2c16378f7dc8fa01a237d431f05a6fc3e12d968b9a0a87a07be28ad34919"),
+                    Map.entry(
+                            "V20__h5_playtest_invitations.sql",
+                            "79232e8dfe5b5ac83369ba8ac9a1a7b009090cb31dad2def463982f76d60a8bc"),
+                    Map.entry(
+                            "V21__h5_test_hints.sql",
+                            "911236943b2e10fac1189a501a02b1dd65b039227634291b8c4f0e77b1b11d9a"),
+                    Map.entry(
+                            "V22__h5_report_result.sql",
+                            "bb1852bf9d9cbe150355f678843a128eb293092224b4f50226c26cd9f07e600b"),
+                    Map.entry(
+                            "V23__h5_test_job_guard_scope.sql",
+                            "3d793c8cf4b11865af878bc3a31afe7a0e4e060346c255a25efc418cd4288d0d"));
 
     private static final List<Entry> ENTRIES =
             validate(
@@ -99,12 +113,16 @@ public final class OriginalSqlCatalog {
                             new Entry("V16__h3_review_records.sql", sql16()),
                             new Entry("V17__h2_batch_action_audit_issues.sql", sql17()),
                             new Entry("V18__h3_grade_evidence.sql", sql18()),
-                            new Entry("V19__h4_local_member_auth.sql", sql19())));
+                            new Entry("V19__h4_local_member_auth.sql", sql19()),
+                            new Entry("V20__h5_playtest_invitations.sql", sql20()),
+                            new Entry("V21__h5_test_hints.sql", sql21()),
+                            new Entry("V22__h5_report_result.sql", sql22()),
+                            new Entry("V23__h5_test_job_guard_scope.sql", sql23())));
 
     /**
      * 완전성과 이름·바이트 해시가 검증된 원본 전체를 반환한다.
      *
-     * @return 수정 불가능한 전체 19개 원본 목록
+     * @return 수정 불가능한 전체 23개 원본 목록
      */
     public static List<Entry> entries() {
         return ENTRIES;
@@ -2434,349 +2452,958 @@ public final class OriginalSqlCatalog {
     /** V19 LOCAL 회원 인증 원본의 마지막 LF까지 그대로 반환한다. */
     private static String sql19() {
         return "CREATE TABLE public.member_account (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  member_key uuid NOT NULL,\n"
-                + "  state varchar(24) NOT NULL,\n"
-                + "  auth_rev bigint DEFAULT 0 NOT NULL,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  updated_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  deleted_at timestamptz,\n"
-                + "  CONSTRAINT pk_member_account PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_member_key UNIQUE (member_key),\n"
-                + "  CONSTRAINT ck_member_state CHECK (state IN ('ACTIVE','BLOCKED','DELETED')),\n"
-                + "  CONSTRAINT ck_member_rev CHECK (auth_rev >= 0),\n"
-                + "  CONSTRAINT ck_member_deleted CHECK ((state='DELETED')=(deleted_at IS NOT NULL))\n"
-                + ");\n"
-                + "\n"
-                + "CREATE TABLE public.privacy_policy (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  code varchar(60) NOT NULL,\n"
-                + "  env_code varchar(40) NOT NULL,\n"
-                + "  scope varchar(24) NOT NULL,\n"
-                + "  state varchar(24) NOT NULL,\n"
-                + "  notice_hash char(64) NOT NULL,\n"
-                + "  policy_data jsonb NOT NULL,\n"
-                + "  owner_id bigint NOT NULL,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  CONSTRAINT pk_privacy_policy PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_privacy_policy_code UNIQUE (env_code,code),\n"
-                + "  CONSTRAINT fk_pp_owner FOREIGN KEY (owner_id) REFERENCES public.admin_account(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT ck_pp_scope CHECK (scope='MEMBER_AUTH'),\n"
-                + "  CONSTRAINT ck_pp_state CHECK (state IN ('DRAFT','ACTIVE','RETIRED','SUSPENDED')),\n"
-                + "  CONSTRAINT ck_pp_code CHECK (code ~ '[^[:space:]]' AND env_code ~ '[^[:space:]]'),\n"
-                + "  CONSTRAINT ck_privacy_policy_notice_hash CHECK (notice_hash ~ '^[0-9a-f]{64}$'),\n"
-                + "  CONSTRAINT ck_privacy_policy_policy_data CHECK (jsonb_typeof(policy_data)='object' AND octet_length(policy_data::text)<=131072)\n"
-                + ");\n"
-                + "CREATE UNIQUE INDEX uk_pp_active ON public.privacy_policy(env_code,scope) WHERE state='ACTIVE';\n"
-                + "\n"
-                + "CREATE TABLE public.member_profile (\n"
-                + "  member_id bigint NOT NULL,\n"
-                + "  nickname_cipher bytea NOT NULL,\n"
-                + "  policy_id bigint NOT NULL,\n"
-                + "  accepted_at timestamptz NOT NULL,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  updated_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  CONSTRAINT pk_member_profile PRIMARY KEY (member_id),\n"
-                + "  CONSTRAINT fk_mp_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT fk_mp_policy FOREIGN KEY (policy_id) REFERENCES public.privacy_policy(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT ck_member_profile_nickname_cipher CHECK (octet_length(nickname_cipher) BETWEEN 32 AND 524288)\n"
-                + ");\n"
-                + "\n"
-                + "CREATE TABLE public.member_identity (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  identity_key uuid NOT NULL,\n"
-                + "  member_id bigint NOT NULL,\n"
-                + "  provider varchar(24) NOT NULL,\n"
-                + "  realm varchar(160) NOT NULL,\n"
-                + "  lookup_hash char(64) NOT NULL,\n"
-                + "  lookup_ver smallint DEFAULT 1 NOT NULL,\n"
-                + "  subject_cipher bytea NOT NULL,\n"
-                + "  password_hash varchar(512) NOT NULL,\n"
-                + "  active_yn boolean DEFAULT true NOT NULL,\n"
-                + "  proof_at timestamptz NOT NULL,\n"
-                + "  bound_at timestamptz NOT NULL,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  updated_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  CONSTRAINT pk_member_identity PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_mi_key UNIQUE (identity_key),\n"
-                + "  CONSTRAINT uk_mi_member_id UNIQUE (member_id,id),\n"
-                + "  CONSTRAINT fk_mi_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT ck_mi_provider CHECK (provider='LOCAL' AND realm='LOCAL'),\n"
-                + "  CONSTRAINT ck_mi_ver CHECK (lookup_ver=1),\n"
-                + "  CONSTRAINT ck_mi_password CHECK (password_hash ~ '[^[:space:]]'),\n"
-                + "  CONSTRAINT ck_member_identity_lookup_hash CHECK (lookup_hash ~ '^[0-9a-f]{64}$'),\n"
-                + "  CONSTRAINT ck_member_identity_subject_cipher CHECK (octet_length(subject_cipher) BETWEEN 32 AND 524288)\n"
-                + ");\n"
-                + "CREATE UNIQUE INDEX uk_mi_subject ON public.member_identity(provider,realm,lookup_hash) WHERE active_yn;\n"
-                + "CREATE UNIQUE INDEX uk_mi_member_provider ON public.member_identity(member_id,provider) WHERE active_yn;\n"
-                + "\n"
-                + "CREATE TABLE public.member_session (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  session_key uuid NOT NULL,\n"
-                + "  member_id bigint NOT NULL,\n"
-                + "  identity_id bigint NOT NULL,\n"
-                + "  auth_rev bigint NOT NULL,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  last_refresh_at timestamptz NOT NULL,\n"
-                + "  idle_until timestamptz NOT NULL,\n"
-                + "  absolute_until timestamptz NOT NULL,\n"
-                + "  revoked_at timestamptz,\n"
-                + "  revoke_code varchar(40),\n"
-                + "  CONSTRAINT pk_member_session PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_ms_key UNIQUE (session_key),\n"
-                + "  CONSTRAINT uk_ms_member_id UNIQUE (member_id,id),\n"
-                + "  CONSTRAINT fk_ms_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT fk_ms_identity FOREIGN KEY (member_id,identity_id) REFERENCES public.member_identity(member_id,id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT ck_ms_clock CHECK (auth_rev>=0 AND last_refresh_at>=created_at AND idle_until>last_refresh_at AND idle_until<=absolute_until AND absolute_until=created_at+interval '2160 hours' AND idle_until=LEAST(last_refresh_at+interval '720 hours',absolute_until)),\n"
-                + "  CONSTRAINT ck_ms_revoke CHECK ((revoked_at IS NULL)=(revoke_code IS NULL) AND (revoke_code IS NULL OR revoke_code ~ '^[A-Z0-9_]{1,40}$'))\n"
-                + ");\n"
-                + "\n"
-                + "CREATE TABLE public.member_token (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  session_id bigint NOT NULL,\n"
-                + "  kind varchar(24) NOT NULL,\n"
-                + "  generation bigint NOT NULL,\n"
-                + "  token_hash char(64) NOT NULL,\n"
-                + "  state varchar(24) NOT NULL,\n"
-                + "  issued_at timestamptz NOT NULL,\n"
-                + "  expires_at timestamptz NOT NULL,\n"
-                + "  used_at timestamptz,\n"
-                + "  CONSTRAINT pk_member_token PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_mt_hash UNIQUE (token_hash),\n"
-                + "  CONSTRAINT uk_mt_generation UNIQUE (session_id,kind,generation),\n"
-                + "  CONSTRAINT fk_mt_session FOREIGN KEY (session_id) REFERENCES public.member_session(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT ck_mt_kind CHECK (kind IN ('ACCESS','REFRESH')),\n"
-                + "  CONSTRAINT ck_mt_state CHECK (state IN ('ISSUED','USED','REVOKED')),\n"
-                + "  CONSTRAINT ck_mt_time CHECK (generation>=0 AND expires_at>issued_at AND expires_at<=issued_at+CASE WHEN kind='ACCESS' THEN interval '5 minutes' ELSE interval '720 hours' END),\n"
-                + "  CONSTRAINT ck_mt_used CHECK ((state='USED' AND kind='REFRESH' AND used_at IS NOT NULL AND used_at>=issued_at AND used_at<expires_at) OR (state<>'USED' AND used_at IS NULL)),\n"
-                + "  CONSTRAINT ck_member_token_token_hash CHECK (token_hash ~ '^[0-9a-f]{64}$')\n"
-                + ");\n"
-                + "CREATE UNIQUE INDEX uk_mt_current_refresh ON public.member_token(session_id) WHERE kind='REFRESH' AND state='ISSUED';\n"
-                + "\n"
-                + "CREATE TABLE public.member_flow (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  flow_key uuid NOT NULL,\n"
-                + "  binder_hash char(64) NOT NULL,\n"
-                + "  purpose varchar(24) NOT NULL,\n"
-                + "  state varchar(24) NOT NULL,\n"
-                + "  provider varchar(24) NOT NULL,\n"
-                + "  lookup_hash char(64),\n"
-                + "  code_hash char(64),\n"
-                + "  proof_cipher bytea,\n"
-                + "  attempt_count smallint DEFAULT 0 NOT NULL,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  expires_at timestamptz NOT NULL,\n"
-                + "  verified_at timestamptz,\n"
-                + "  consumed_at timestamptz,\n"
-                + "  CONSTRAINT pk_member_flow PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_mf_key UNIQUE (flow_key),\n"
-                + "  CONSTRAINT ck_mf_purpose CHECK (purpose='SIGNUP'),\n"
-                + "  CONSTRAINT ck_mf_provider CHECK (provider='LOCAL'),\n"
-                + "  CONSTRAINT ck_mf_state CHECK (state IN ('PENDING','VERIFIED','CONSUMED','FAILED')),\n"
-                + "  CONSTRAINT ck_mf_clock CHECK (attempt_count BETWEEN 0 AND 5 AND expires_at=created_at+interval '10 minutes'),\n"
-                + "  CONSTRAINT ck_mf_consume CHECK ((state='CONSUMED')=(consumed_at IS NOT NULL)),\n"
-                + "  CONSTRAINT ck_mf_shape CHECK (\n"
-                + "    (state='PENDING' AND verified_at IS NULL AND consumed_at IS NULL AND attempt_count<5 AND lookup_hash IS NOT NULL AND code_hash IS NOT NULL AND proof_cipher IS NOT NULL) OR\n"
-                + "    (state='VERIFIED' AND verified_at IS NOT NULL AND consumed_at IS NULL AND attempt_count<5 AND lookup_hash IS NOT NULL AND code_hash IS NULL AND proof_cipher IS NOT NULL) OR\n"
-                + "    (state='CONSUMED' AND verified_at IS NOT NULL AND consumed_at IS NOT NULL AND lookup_hash IS NULL AND code_hash IS NULL AND proof_cipher IS NULL) OR\n"
-                + "    (state='FAILED' AND consumed_at IS NULL AND lookup_hash IS NULL AND code_hash IS NULL AND proof_cipher IS NULL)),\n"
-                + "  CONSTRAINT ck_mf_chronology CHECK ((verified_at IS NULL OR (verified_at>=created_at AND verified_at<expires_at)) AND (consumed_at IS NULL OR (verified_at IS NOT NULL AND consumed_at>=verified_at AND consumed_at<expires_at))),\n"
-                + "  CONSTRAINT ck_member_flow_binder_hash CHECK (binder_hash ~ '^[0-9a-f]{64}$'),\n"
-                + "  CONSTRAINT ck_member_flow_lookup_hash CHECK (lookup_hash IS NULL OR lookup_hash ~ '^[0-9a-f]{64}$'),\n"
-                + "  CONSTRAINT ck_member_flow_code_hash CHECK (code_hash IS NULL OR code_hash ~ '^[0-9a-f]{64}$'),\n"
-                + "  CONSTRAINT ck_member_flow_proof_cipher CHECK (proof_cipher IS NULL OR octet_length(proof_cipher) BETWEEN 32 AND 524288)\n"
-                + ");\n"
-                + "CREATE INDEX ix_mf_expiry ON public.member_flow(expires_at,id);\n"
-                + "\n"
-                + "CREATE TABLE public.member_auth_audit (\n"
-                + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
-                + "  event_key uuid NOT NULL,\n"
-                + "  member_id bigint,\n"
-                + "  request_id uuid NOT NULL,\n"
-                + "  action varchar(40) NOT NULL,\n"
-                + "  result_code varchar(40) NOT NULL,\n"
-                + "  http_status smallint,\n"
-                + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
-                + "  purge_at timestamptz NOT NULL,\n"
-                + "  auth_rev bigint,\n"
-                + "  CONSTRAINT pk_member_auth_audit PRIMARY KEY (id),\n"
-                + "  CONSTRAINT uk_maa_event UNIQUE (event_key),\n"
-                + "  CONSTRAINT fk_maa_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE,\n"
-                + "  CONSTRAINT ck_maa_status CHECK (http_status IS NULL OR http_status BETWEEN 100 AND 599),\n"
-                + "  CONSTRAINT ck_maa_purge CHECK (purge_at>created_at AND purge_at<=created_at+interval '2160 hours'),\n"
-                + "  CONSTRAINT ck_maa_rev CHECK ((member_id IS NULL AND auth_rev IS NULL) OR (member_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0)),\n"
-                + "  CONSTRAINT ck_maa_action CHECK (action IN ('SIGNUP_START','EMAIL_VERIFY','SIGNUP_COMPLETE','LOGIN_LOCAL','REFRESH','LOGOUT','ME_READ')),\n"
-                + "  CONSTRAINT ck_maa_result CHECK (result_code IN ('STARTED','VERIFIED','CREATED','AUTHENTICATED','ROTATED','LOGGED_OUT','DENIED','RATE_LIMITED','FLOW_EXPIRED','FLOW_LOCKED','IDENTITY_CONFLICT','REFRESH_REUSED','DEPENDENCY_UNAVAILABLE'))\n"
-                + ");\n"
-                + "\n"
-                + "CREATE TABLE public.member_auth_limit (\n"
-                + "  scope varchar(40) NOT NULL,\n"
-                + "  bucket_hash char(64) NOT NULL,\n"
-                + "  window_at timestamptz NOT NULL,\n"
-                + "  hit_count integer NOT NULL,\n"
-                + "  blocked_until timestamptz,\n"
-                + "  purge_at timestamptz NOT NULL,\n"
-                + "  CONSTRAINT pk_member_auth_limit PRIMARY KEY (scope,bucket_hash),\n"
-                + "  CONSTRAINT ck_mal_scope CHECK (scope IN ('SIGNUP_EMAIL_15M','SIGNUP_EMAIL_24H','SIGNUP_SOURCE_15M','LOGIN_EMAIL_15M','LOGIN_SOURCE_15M','VERIFY_SOURCE_15M')),\n"
-                + "  CONSTRAINT ck_mal_hits CHECK (hit_count>=0),\n"
-                + "  CONSTRAINT ck_member_auth_limit_bucket_hash CHECK (bucket_hash ~ '^[0-9a-f]{64}$'),\n"
-                + "  CONSTRAINT ck_mal_clock CHECK (purge_at>window_at AND purge_at<=window_at+interval '24 hours' AND (blocked_until IS NULL OR (blocked_until>=window_at AND blocked_until<=purge_at)))\n"
-                + ");\n"
-                + "\n"
-                + "CREATE FUNCTION public.valid_local_policy_document(data jsonb, environment text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$\n"
-                + "DECLARE\n"
-                + "  item jsonb;\n"
-                + "  field text;\n"
-                + "  start_at timestamptz;\n"
-                + "  end_at timestamptz;\n"
-                + "  evidence_start timestamptz;\n"
-                + "  evidence_end timestamptz;\n"
-                + "BEGIN\n"
-                + "  IF data IS NULL OR jsonb_typeof(data) IS DISTINCT FROM 'object'\n"
-                + "    OR NOT data ?& ARRAY['formatNo','notice','validFrom','validUntil','authProviders','retention','evidence']\n"
-                + "    OR data - ARRAY['formatNo','notice','validFrom','validUntil','authProviders','retention','evidence'] <> '{}'::jsonb\n"
-                + "    OR data->'formatNo' IS DISTINCT FROM '1'::jsonb OR (data->'formatNo')::text IS DISTINCT FROM '1'\n"
-                + "    OR data->'authProviders' IS DISTINCT FROM '[\"LOCAL\"]'::jsonb THEN RETURN false; END IF;\n"
-                + "  item := data->'notice';\n"
-                + "  IF jsonb_typeof(item) IS DISTINCT FROM 'object'\n"
-                + "    OR NOT item ?& ARRAY['version','body','contact']\n"
-                + "    OR item - ARRAY['version','body','contact'] <> '{}'::jsonb THEN RETURN false; END IF;\n"
-                + "  FOREACH field IN ARRAY ARRAY['version','body','contact'] LOOP\n"
-                + "    IF jsonb_typeof(item->field) IS DISTINCT FROM 'string' OR NOT (item->>field ~ '[^[:space:]]')\n"
-                + "      OR (field='body' AND (octet_length(item->>field)>32768 OR replace(item->>field,chr(10),'') ~ '[[:cntrl:]]'))\n"
-                + "      OR (field='contact' AND (octet_length(item->>field)>512 OR item->>field ~ '[[:cntrl:]]'))\n"
-                + "      OR (field='version' AND (char_length(item->>field)>60 OR item->>field ~ '[[:cntrl:]]'))\n"
-                + "      OR item->>field IS DISTINCT FROM normalize(item->>field, NFC) THEN RETURN false; END IF;\n"
-                + "  END LOOP;\n"
-                + "  FOREACH field IN ARRAY ARRAY['validFrom','validUntil'] LOOP\n"
-                + "    IF jsonb_typeof(data->field) IS DISTINCT FROM 'string'\n"
-                + "      OR NOT (data->>field ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$') THEN RETURN false; END IF;\n"
-                + "  END LOOP;\n"
-                + "  start_at := (data->>'validFrom')::timestamptz;\n"
-                + "  end_at := (data->>'validUntil')::timestamptz;\n"
-                + "  IF start_at>=end_at THEN RETURN false; END IF;\n"
-                + "  IF data->'retention' IS DISTINCT FROM '{\"flowTtlSeconds\":600,\"flowCleanupGraceSeconds\":3600,\"accessTtlSeconds\":300,\"accessCleanupGraceSeconds\":3600,\"refreshIdleSeconds\":2592000,\"sessionAbsoluteSeconds\":7776000,\"familyCleanupGraceSeconds\":86400,\"limitMaxSeconds\":86400,\"accessHistoryMaxSeconds\":2592000,\"securityAuditMaxSeconds\":7776000,\"backupMaxSeconds\":3024000}'::jsonb THEN RETURN false; END IF;\n"
-                + "  FOR item IN SELECT value FROM jsonb_each(data->'retention') LOOP\n"
-                + "    IF item::text !~ '^[0-9]+$' THEN RETURN false; END IF;\n"
-                + "  END LOOP;\n"
-                + "  item := data->'evidence';\n"
-                + "  IF jsonb_typeof(item) IS DISTINCT FROM 'object'\n"
-                + "    OR NOT item ?& ARRAY['responsibility','access','keys','processors','copies','verification']\n"
-                + "    OR item - ARRAY['responsibility','access','keys','processors','copies','verification'] <> '{}'::jsonb THEN RETURN false; END IF;\n"
-                + "  FOR item IN SELECT value FROM jsonb_each(item) LOOP\n"
-                + "    IF jsonb_typeof(item) IS DISTINCT FROM 'object'\n"
-                + "      OR NOT item ?& ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil']\n"
-                + "      OR item - ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil'] <> '{}'::jsonb THEN RETURN false; END IF;\n"
-                + "    FOREACH field IN ARRAY ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil'] LOOP\n"
-                + "      IF jsonb_typeof(item->field) IS DISTINCT FROM 'string' THEN RETURN false; END IF;\n"
-                + "    END LOOP;\n"
-                + "    IF NOT (item->>'ref' ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$')\n"
-                + "      OR NOT (item->>'sha256' ~ '^[0-9a-f]{64}$')\n"
-                + "      OR item->>'envCode' IS DISTINCT FROM environment OR item->>'scope' IS DISTINCT FROM 'MEMBER_AUTH' THEN RETURN false; END IF;\n"
-                + "    FOREACH field IN ARRAY ARRAY['verifiedAt','validUntil'] LOOP\n"
-                + "      IF NOT (item->>field ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$') THEN RETURN false; END IF;\n"
-                + "    END LOOP;\n"
-                + "    evidence_start := (item->>'verifiedAt')::timestamptz;\n"
-                + "    evidence_end := (item->>'validUntil')::timestamptz;\n"
-                + "    IF evidence_start>=evidence_end OR evidence_start>start_at OR evidence_end<end_at THEN RETURN false; END IF;\n"
-                + "  END LOOP;\n"
-                + "  RETURN true;\n"
-                + "EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN\n"
-                + "  RETURN false;\n"
-                + "END;\n"
-                + "$$;\n"
-                + "ALTER TABLE public.privacy_policy ADD CONSTRAINT ck_pp_local_document CHECK (public.valid_local_policy_document(policy_data,env_code) IS TRUE);\n"
-                + "\n"
-                + "CREATE FUNCTION public.guard_local_policy() RETURNS trigger LANGUAGE plpgsql AS $$\n"
-                + "BEGIN\n"
-                + "  IF TG_OP IN ('DELETE','TRUNCATE') THEN\n"
-                + "    RAISE EXCEPTION 'privacy_policy immutable' USING ERRCODE='23514';\n"
-                + "  END IF;\n"
-                + "  IF TG_OP='INSERT' THEN\n"
-                + "    IF NEW.state IS DISTINCT FROM 'DRAFT' THEN\n"
-                + "      RAISE EXCEPTION 'privacy_policy DRAFT insert only' USING ERRCODE='23514';\n"
-                + "    END IF;\n"
-                + "  ELSE\n"
-                + "    IF (to_jsonb(NEW)-'state') IS DISTINCT FROM (to_jsonb(OLD)-'state') OR NOT (\n"
-                + "      NEW.state=OLD.state OR (OLD.state='DRAFT' AND NEW.state IN ('ACTIVE','RETIRED')) OR\n"
-                + "      (OLD.state='ACTIVE' AND NEW.state IN ('SUSPENDED','RETIRED')) OR\n"
-                + "      (OLD.state='SUSPENDED' AND NEW.state='RETIRED')) THEN\n"
-                + "      RAISE EXCEPTION 'privacy_policy immutable transition' USING ERRCODE='23514';\n"
-                + "    END IF;\n"
-                + "  END IF;\n"
-                + "  IF NEW.state='ACTIVE' THEN\n"
-                + "    PERFORM id FROM public.admin_account WHERE id=NEW.owner_id AND active_yn FOR SHARE;\n"
-                + "    IF NOT FOUND THEN\n"
-                + "      RAISE EXCEPTION 'privacy_policy active owner required' USING ERRCODE='23514';\n"
-                + "    END IF;\n"
-                + "  END IF;\n"
-                + "  RETURN NEW;\n"
-                + "END;\n"
-                + "$$;\n"
-                + "CREATE TRIGGER trg_local_policy_row BEFORE INSERT OR UPDATE OR DELETE ON public.privacy_policy FOR EACH ROW EXECUTE FUNCTION public.guard_local_policy();\n"
-                + "CREATE TRIGGER trg_local_policy_truncate BEFORE TRUNCATE ON public.privacy_policy FOR EACH STATEMENT EXECUTE FUNCTION public.guard_local_policy();\n"
-                + "\n"
-                + "CREATE FUNCTION public.guard_local_profile_consent() RETURNS trigger LANGUAGE plpgsql AS $$\n"
-                + "BEGIN\n"
-                + "  IF ROW(NEW.member_id,NEW.policy_id,NEW.accepted_at,NEW.created_at) IS DISTINCT FROM ROW(OLD.member_id,OLD.policy_id,OLD.accepted_at,OLD.created_at) THEN\n"
-                + "    RAISE EXCEPTION 'member_profile consent immutable' USING ERRCODE='23514';\n"
-                + "  END IF;\n"
-                + "  RETURN NEW;\n"
-                + "END;\n"
-                + "$$;\n"
-                + "CREATE TRIGGER trg_local_profile_consent BEFORE UPDATE ON public.member_profile FOR EACH ROW EXECUTE FUNCTION public.guard_local_profile_consent();\n"
-                + "\n"
-                + "CREATE FUNCTION public.guard_local_session() RETURNS trigger LANGUAGE plpgsql AS $$\n"
-                + "BEGIN\n"
-                + "  IF ROW(NEW.id,NEW.session_key,NEW.member_id,NEW.identity_id,NEW.auth_rev,NEW.created_at,NEW.absolute_until) IS DISTINCT FROM ROW(OLD.id,OLD.session_key,OLD.member_id,OLD.identity_id,OLD.auth_rev,OLD.created_at,OLD.absolute_until)\n"
-                + "    OR NEW.last_refresh_at<OLD.last_refresh_at\n"
-                + "    OR (NEW.revoked_at IS NOT NULL AND ROW(NEW.last_refresh_at,NEW.idle_until) IS DISTINCT FROM ROW(OLD.last_refresh_at,OLD.idle_until))\n"
-                + "    OR (OLD.revoked_at IS NOT NULL AND ROW(NEW.revoked_at,NEW.revoke_code,NEW.last_refresh_at,NEW.idle_until) IS DISTINCT FROM ROW(OLD.revoked_at,OLD.revoke_code,OLD.last_refresh_at,OLD.idle_until)) THEN\n"
-                + "    RAISE EXCEPTION 'member_session stable family and first revocation' USING ERRCODE='23514';\n"
-                + "  END IF;\n"
-                + "  RETURN NEW;\n"
-                + "END;\n"
-                + "$$;\n"
-                + "CREATE TRIGGER trg_local_session BEFORE UPDATE ON public.member_session FOR EACH ROW EXECUTE FUNCTION public.guard_local_session();\n"
-                + "\n"
-                + "CREATE FUNCTION public.guard_local_token() RETURNS trigger LANGUAGE plpgsql AS $$\n"
-                + "BEGIN\n"
-                + "  IF ROW(NEW.id,NEW.session_id,NEW.kind,NEW.generation,NEW.token_hash,NEW.issued_at,NEW.expires_at) IS DISTINCT FROM ROW(OLD.id,OLD.session_id,OLD.kind,OLD.generation,OLD.token_hash,OLD.issued_at,OLD.expires_at)\n"
-                + "    OR (OLD.state<>'ISSUED' AND ROW(NEW.state,NEW.used_at) IS DISTINCT FROM ROW(OLD.state,OLD.used_at)) THEN\n"
-                + "    RAISE EXCEPTION 'member_token immutable issuance and terminal evidence' USING ERRCODE='23514';\n"
-                + "  END IF;\n"
-                + "  RETURN NEW;\n"
-                + "END;\n"
-                + "$$;\n"
-                + "CREATE TRIGGER trg_local_token BEFORE UPDATE ON public.member_token FOR EACH ROW EXECUTE FUNCTION public.guard_local_token();\n"
-                + "\n"
-                + "CREATE FUNCTION public.guard_local_signup_flow() RETURNS trigger LANGUAGE plpgsql AS $$\n"
-                + "BEGIN\n"
-                + "  IF ROW(NEW.id,NEW.flow_key,NEW.binder_hash,NEW.purpose,NEW.provider,NEW.created_at,NEW.expires_at) IS DISTINCT FROM ROW(OLD.id,OLD.flow_key,OLD.binder_hash,OLD.purpose,OLD.provider,OLD.created_at,OLD.expires_at)\n"
-                + "    OR NEW.attempt_count<OLD.attempt_count\n"
-                + "    OR NOT (NEW.state=OLD.state OR (OLD.state='PENDING' AND NEW.state IN ('VERIFIED','FAILED')) OR (OLD.state='VERIFIED' AND NEW.state IN ('CONSUMED','FAILED')))\n"
-                + "    OR (OLD.verified_at IS NOT NULL AND NEW.verified_at IS DISTINCT FROM OLD.verified_at)\n"
-                + "    OR (OLD.verified_at IS NULL AND NEW.verified_at IS NOT NULL AND NOT (OLD.state='PENDING' AND NEW.state='VERIFIED'))\n"
-                + "    OR (OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM OLD.consumed_at)\n"
-                + "    OR (NEW.lookup_hash IS NOT NULL AND NEW.lookup_hash IS DISTINCT FROM OLD.lookup_hash)\n"
-                + "    OR (NEW.code_hash IS NOT NULL AND NEW.code_hash IS DISTINCT FROM OLD.code_hash)\n"
-                + "    OR (NEW.proof_cipher IS NOT NULL AND NEW.proof_cipher IS DISTINCT FROM OLD.proof_cipher)\n"
-                + "    OR (OLD.state IN ('FAILED','CONSUMED') AND NEW IS DISTINCT FROM OLD) THEN\n"
-                + "    RAISE EXCEPTION 'member_flow stable signup and monotonic cleanup' USING ERRCODE='23514';\n"
-                + "  END IF;\n"
-                + "  RETURN NEW;\n"
-                + "END;\n"
-                + "$$;\n"
-                + "CREATE TRIGGER trg_local_signup_flow BEFORE UPDATE ON public.member_flow FOR EACH ROW EXECUTE FUNCTION public.guard_local_signup_flow();\n"
-                + "\n"
-                + "CREATE FUNCTION public.guard_local_auth_audit() RETURNS trigger LANGUAGE plpgsql AS $$\n"
-                + "BEGIN\n"
-                + "  RAISE EXCEPTION 'member_auth_audit append only' USING ERRCODE='23514';\n"
-                + "END;\n"
-                + "$$;\n"
-                + "CREATE TRIGGER trg_local_auth_audit_row BEFORE UPDATE OR DELETE ON public.member_auth_audit FOR EACH ROW EXECUTE FUNCTION public.guard_local_auth_audit();\n"
-                + "CREATE TRIGGER trg_local_auth_audit_truncate BEFORE TRUNCATE ON public.member_auth_audit FOR EACH STATEMENT EXECUTE FUNCTION public.guard_local_auth_audit();\n"
-                + "REVOKE ALL ON public.privacy_policy FROM PUBLIC;\n"
-                + "REVOKE UPDATE, DELETE, TRUNCATE ON public.member_auth_audit FROM PUBLIC;\n";
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  member_key uuid NOT NULL,\n"
+                   + "  state varchar(24) NOT NULL,\n"
+                   + "  auth_rev bigint DEFAULT 0 NOT NULL,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  updated_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  deleted_at timestamptz,\n"
+                   + "  CONSTRAINT pk_member_account PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_member_key UNIQUE (member_key),\n"
+                   + "  CONSTRAINT ck_member_state CHECK (state IN"
+                   + " ('ACTIVE','BLOCKED','DELETED')),\n"
+                   + "  CONSTRAINT ck_member_rev CHECK (auth_rev >= 0),\n"
+                   + "  CONSTRAINT ck_member_deleted CHECK ((state='DELETED')=(deleted_at IS NOT"
+                   + " NULL))\n"
+                   + ");\n"
+                   + "\n"
+                   + "CREATE TABLE public.privacy_policy (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  code varchar(60) NOT NULL,\n"
+                   + "  env_code varchar(40) NOT NULL,\n"
+                   + "  scope varchar(24) NOT NULL,\n"
+                   + "  state varchar(24) NOT NULL,\n"
+                   + "  notice_hash char(64) NOT NULL,\n"
+                   + "  policy_data jsonb NOT NULL,\n"
+                   + "  owner_id bigint NOT NULL,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  CONSTRAINT pk_privacy_policy PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_privacy_policy_code UNIQUE (env_code,code),\n"
+                   + "  CONSTRAINT fk_pp_owner FOREIGN KEY (owner_id) REFERENCES"
+                   + " public.admin_account(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_pp_scope CHECK (scope='MEMBER_AUTH'),\n"
+                   + "  CONSTRAINT ck_pp_state CHECK (state IN"
+                   + " ('DRAFT','ACTIVE','RETIRED','SUSPENDED')),\n"
+                   + "  CONSTRAINT ck_pp_code CHECK (code ~ '[^[:space:]]' AND env_code ~"
+                   + " '[^[:space:]]'),\n"
+                   + "  CONSTRAINT ck_privacy_policy_notice_hash CHECK (notice_hash ~"
+                   + " '^[0-9a-f]{64}$'),\n"
+                   + "  CONSTRAINT ck_privacy_policy_policy_data CHECK"
+                   + " (jsonb_typeof(policy_data)='object' AND"
+                   + " octet_length(policy_data::text)<=131072)\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_pp_active ON public.privacy_policy(env_code,scope)"
+                   + " WHERE state='ACTIVE';\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_profile (\n"
+                   + "  member_id bigint NOT NULL,\n"
+                   + "  nickname_cipher bytea NOT NULL,\n"
+                   + "  policy_id bigint NOT NULL,\n"
+                   + "  accepted_at timestamptz NOT NULL,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  updated_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  CONSTRAINT pk_member_profile PRIMARY KEY (member_id),\n"
+                   + "  CONSTRAINT fk_mp_member FOREIGN KEY (member_id) REFERENCES"
+                   + " public.member_account(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_mp_policy FOREIGN KEY (policy_id) REFERENCES"
+                   + " public.privacy_policy(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_member_profile_nickname_cipher CHECK"
+                   + " (octet_length(nickname_cipher) BETWEEN 32 AND 524288)\n"
+                   + ");\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_identity (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  identity_key uuid NOT NULL,\n"
+                   + "  member_id bigint NOT NULL,\n"
+                   + "  provider varchar(24) NOT NULL,\n"
+                   + "  realm varchar(160) NOT NULL,\n"
+                   + "  lookup_hash char(64) NOT NULL,\n"
+                   + "  lookup_ver smallint DEFAULT 1 NOT NULL,\n"
+                   + "  subject_cipher bytea NOT NULL,\n"
+                   + "  password_hash varchar(512) NOT NULL,\n"
+                   + "  active_yn boolean DEFAULT true NOT NULL,\n"
+                   + "  proof_at timestamptz NOT NULL,\n"
+                   + "  bound_at timestamptz NOT NULL,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  updated_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  CONSTRAINT pk_member_identity PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_mi_key UNIQUE (identity_key),\n"
+                   + "  CONSTRAINT uk_mi_member_id UNIQUE (member_id,id),\n"
+                   + "  CONSTRAINT fk_mi_member FOREIGN KEY (member_id) REFERENCES"
+                   + " public.member_account(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_mi_provider CHECK (provider='LOCAL' AND realm='LOCAL'),\n"
+                   + "  CONSTRAINT ck_mi_ver CHECK (lookup_ver=1),\n"
+                   + "  CONSTRAINT ck_mi_password CHECK (password_hash ~ '[^[:space:]]'),\n"
+                   + "  CONSTRAINT ck_member_identity_lookup_hash CHECK (lookup_hash ~"
+                   + " '^[0-9a-f]{64}$'),\n"
+                   + "  CONSTRAINT ck_member_identity_subject_cipher CHECK"
+                   + " (octet_length(subject_cipher) BETWEEN 32 AND 524288)\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_mi_subject ON"
+                   + " public.member_identity(provider,realm,lookup_hash) WHERE active_yn;\n"
+                   + "CREATE UNIQUE INDEX uk_mi_member_provider ON"
+                   + " public.member_identity(member_id,provider) WHERE active_yn;\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_session (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  session_key uuid NOT NULL,\n"
+                   + "  member_id bigint NOT NULL,\n"
+                   + "  identity_id bigint NOT NULL,\n"
+                   + "  auth_rev bigint NOT NULL,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  last_refresh_at timestamptz NOT NULL,\n"
+                   + "  idle_until timestamptz NOT NULL,\n"
+                   + "  absolute_until timestamptz NOT NULL,\n"
+                   + "  revoked_at timestamptz,\n"
+                   + "  revoke_code varchar(40),\n"
+                   + "  CONSTRAINT pk_member_session PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_ms_key UNIQUE (session_key),\n"
+                   + "  CONSTRAINT uk_ms_member_id UNIQUE (member_id,id),\n"
+                   + "  CONSTRAINT fk_ms_member FOREIGN KEY (member_id) REFERENCES"
+                   + " public.member_account(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_ms_identity FOREIGN KEY (member_id,identity_id) REFERENCES"
+                   + " public.member_identity(member_id,id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_ms_clock CHECK (auth_rev>=0 AND last_refresh_at>=created_at"
+                   + " AND idle_until>last_refresh_at AND idle_until<=absolute_until AND"
+                   + " absolute_until=created_at+interval '2160 hours' AND"
+                   + " idle_until=LEAST(last_refresh_at+interval '720 hours',absolute_until)),\n"
+                   + "  CONSTRAINT ck_ms_revoke CHECK ((revoked_at IS NULL)=(revoke_code IS NULL)"
+                   + " AND (revoke_code IS NULL OR revoke_code ~ '^[A-Z0-9_]{1,40}$'))\n"
+                   + ");\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_token (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  session_id bigint NOT NULL,\n"
+                   + "  kind varchar(24) NOT NULL,\n"
+                   + "  generation bigint NOT NULL,\n"
+                   + "  token_hash char(64) NOT NULL,\n"
+                   + "  state varchar(24) NOT NULL,\n"
+                   + "  issued_at timestamptz NOT NULL,\n"
+                   + "  expires_at timestamptz NOT NULL,\n"
+                   + "  used_at timestamptz,\n"
+                   + "  CONSTRAINT pk_member_token PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_mt_hash UNIQUE (token_hash),\n"
+                   + "  CONSTRAINT uk_mt_generation UNIQUE (session_id,kind,generation),\n"
+                   + "  CONSTRAINT fk_mt_session FOREIGN KEY (session_id) REFERENCES"
+                   + " public.member_session(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_mt_kind CHECK (kind IN ('ACCESS','REFRESH')),\n"
+                   + "  CONSTRAINT ck_mt_state CHECK (state IN ('ISSUED','USED','REVOKED')),\n"
+                   + "  CONSTRAINT ck_mt_time CHECK (generation>=0 AND expires_at>issued_at AND"
+                   + " expires_at<=issued_at+CASE WHEN kind='ACCESS' THEN interval '5 minutes' ELSE"
+                   + " interval '720 hours' END),\n"
+                   + "  CONSTRAINT ck_mt_used CHECK ((state='USED' AND kind='REFRESH' AND used_at"
+                   + " IS NOT NULL AND used_at>=issued_at AND used_at<expires_at) OR (state<>'USED'"
+                   + " AND used_at IS NULL)),\n"
+                   + "  CONSTRAINT ck_member_token_token_hash CHECK (token_hash ~"
+                   + " '^[0-9a-f]{64}$')\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_mt_current_refresh ON public.member_token(session_id)"
+                   + " WHERE kind='REFRESH' AND state='ISSUED';\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_flow (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  flow_key uuid NOT NULL,\n"
+                   + "  binder_hash char(64) NOT NULL,\n"
+                   + "  purpose varchar(24) NOT NULL,\n"
+                   + "  state varchar(24) NOT NULL,\n"
+                   + "  provider varchar(24) NOT NULL,\n"
+                   + "  lookup_hash char(64),\n"
+                   + "  code_hash char(64),\n"
+                   + "  proof_cipher bytea,\n"
+                   + "  attempt_count smallint DEFAULT 0 NOT NULL,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  expires_at timestamptz NOT NULL,\n"
+                   + "  verified_at timestamptz,\n"
+                   + "  consumed_at timestamptz,\n"
+                   + "  CONSTRAINT pk_member_flow PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_mf_key UNIQUE (flow_key),\n"
+                   + "  CONSTRAINT ck_mf_purpose CHECK (purpose='SIGNUP'),\n"
+                   + "  CONSTRAINT ck_mf_provider CHECK (provider='LOCAL'),\n"
+                   + "  CONSTRAINT ck_mf_state CHECK (state IN"
+                   + " ('PENDING','VERIFIED','CONSUMED','FAILED')),\n"
+                   + "  CONSTRAINT ck_mf_clock CHECK (attempt_count BETWEEN 0 AND 5 AND"
+                   + " expires_at=created_at+interval '10 minutes'),\n"
+                   + "  CONSTRAINT ck_mf_consume CHECK ((state='CONSUMED')=(consumed_at IS NOT"
+                   + " NULL)),\n"
+                   + "  CONSTRAINT ck_mf_shape CHECK (\n"
+                   + "    (state='PENDING' AND verified_at IS NULL AND consumed_at IS NULL AND"
+                   + " attempt_count<5 AND lookup_hash IS NOT NULL AND code_hash IS NOT NULL AND"
+                   + " proof_cipher IS NOT NULL) OR\n"
+                   + "    (state='VERIFIED' AND verified_at IS NOT NULL AND consumed_at IS NULL AND"
+                   + " attempt_count<5 AND lookup_hash IS NOT NULL AND code_hash IS NULL AND"
+                   + " proof_cipher IS NOT NULL) OR\n"
+                   + "    (state='CONSUMED' AND verified_at IS NOT NULL AND consumed_at IS NOT NULL"
+                   + " AND lookup_hash IS NULL AND code_hash IS NULL AND proof_cipher IS NULL) OR\n"
+                   + "    (state='FAILED' AND consumed_at IS NULL AND lookup_hash IS NULL AND"
+                   + " code_hash IS NULL AND proof_cipher IS NULL)),\n"
+                   + "  CONSTRAINT ck_mf_chronology CHECK ((verified_at IS NULL OR"
+                   + " (verified_at>=created_at AND verified_at<expires_at)) AND (consumed_at IS"
+                   + " NULL OR (verified_at IS NOT NULL AND consumed_at>=verified_at AND"
+                   + " consumed_at<expires_at))),\n"
+                   + "  CONSTRAINT ck_member_flow_binder_hash CHECK (binder_hash ~"
+                   + " '^[0-9a-f]{64}$'),\n"
+                   + "  CONSTRAINT ck_member_flow_lookup_hash CHECK (lookup_hash IS NULL OR"
+                   + " lookup_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  CONSTRAINT ck_member_flow_code_hash CHECK (code_hash IS NULL OR code_hash ~"
+                   + " '^[0-9a-f]{64}$'),\n"
+                   + "  CONSTRAINT ck_member_flow_proof_cipher CHECK (proof_cipher IS NULL OR"
+                   + " octet_length(proof_cipher) BETWEEN 32 AND 524288)\n"
+                   + ");\n"
+                   + "CREATE INDEX ix_mf_expiry ON public.member_flow(expires_at,id);\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_auth_audit (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n"
+                   + "  event_key uuid NOT NULL,\n"
+                   + "  member_id bigint,\n"
+                   + "  request_id uuid NOT NULL,\n"
+                   + "  action varchar(40) NOT NULL,\n"
+                   + "  result_code varchar(40) NOT NULL,\n"
+                   + "  http_status smallint,\n"
+                   + "  created_at timestamptz DEFAULT now() NOT NULL,\n"
+                   + "  purge_at timestamptz NOT NULL,\n"
+                   + "  auth_rev bigint,\n"
+                   + "  CONSTRAINT pk_member_auth_audit PRIMARY KEY (id),\n"
+                   + "  CONSTRAINT uk_maa_event UNIQUE (event_key),\n"
+                   + "  CONSTRAINT fk_maa_member FOREIGN KEY (member_id) REFERENCES"
+                   + " public.member_account(id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_maa_status CHECK (http_status IS NULL OR http_status BETWEEN"
+                   + " 100 AND 599),\n"
+                   + "  CONSTRAINT ck_maa_purge CHECK (purge_at>created_at AND"
+                   + " purge_at<=created_at+interval '2160 hours'),\n"
+                   + "  CONSTRAINT ck_maa_rev CHECK ((member_id IS NULL AND auth_rev IS NULL) OR"
+                   + " (member_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0)),\n"
+                   + "  CONSTRAINT ck_maa_action CHECK (action IN"
+                   + " ('SIGNUP_START','EMAIL_VERIFY','SIGNUP_COMPLETE','LOGIN_LOCAL','REFRESH','LOGOUT','ME_READ')),\n"
+                   + "  CONSTRAINT ck_maa_result CHECK (result_code IN"
+                   + " ('STARTED','VERIFIED','CREATED','AUTHENTICATED','ROTATED','LOGGED_OUT','DENIED','RATE_LIMITED','FLOW_EXPIRED','FLOW_LOCKED','IDENTITY_CONFLICT','REFRESH_REUSED','DEPENDENCY_UNAVAILABLE'))\n"
+                   + ");\n"
+                   + "\n"
+                   + "CREATE TABLE public.member_auth_limit (\n"
+                   + "  scope varchar(40) NOT NULL,\n"
+                   + "  bucket_hash char(64) NOT NULL,\n"
+                   + "  window_at timestamptz NOT NULL,\n"
+                   + "  hit_count integer NOT NULL,\n"
+                   + "  blocked_until timestamptz,\n"
+                   + "  purge_at timestamptz NOT NULL,\n"
+                   + "  CONSTRAINT pk_member_auth_limit PRIMARY KEY (scope,bucket_hash),\n"
+                   + "  CONSTRAINT ck_mal_scope CHECK (scope IN"
+                   + " ('SIGNUP_EMAIL_15M','SIGNUP_EMAIL_24H','SIGNUP_SOURCE_15M','LOGIN_EMAIL_15M','LOGIN_SOURCE_15M','VERIFY_SOURCE_15M')),\n"
+                   + "  CONSTRAINT ck_mal_hits CHECK (hit_count>=0),\n"
+                   + "  CONSTRAINT ck_member_auth_limit_bucket_hash CHECK (bucket_hash ~"
+                   + " '^[0-9a-f]{64}$'),\n"
+                   + "  CONSTRAINT ck_mal_clock CHECK (purge_at>window_at AND"
+                   + " purge_at<=window_at+interval '24 hours' AND (blocked_until IS NULL OR"
+                   + " (blocked_until>=window_at AND blocked_until<=purge_at)))\n"
+                   + ");\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.valid_local_policy_document(data jsonb, environment"
+                   + " text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$\n"
+                   + "DECLARE\n"
+                   + "  item jsonb;\n"
+                   + "  field text;\n"
+                   + "  start_at timestamptz;\n"
+                   + "  end_at timestamptz;\n"
+                   + "  evidence_start timestamptz;\n"
+                   + "  evidence_end timestamptz;\n"
+                   + "BEGIN\n"
+                   + "  IF data IS NULL OR jsonb_typeof(data) IS DISTINCT FROM 'object'\n"
+                   + "    OR NOT data ?&"
+                   + " ARRAY['formatNo','notice','validFrom','validUntil','authProviders','retention','evidence']\n"
+                   + "    OR data -"
+                   + " ARRAY['formatNo','notice','validFrom','validUntil','authProviders','retention','evidence']"
+                   + " <> '{}'::jsonb\n"
+                   + "    OR data->'formatNo' IS DISTINCT FROM '1'::jsonb OR"
+                   + " (data->'formatNo')::text IS DISTINCT FROM '1'\n"
+                   + "    OR data->'authProviders' IS DISTINCT FROM '[\"LOCAL\"]'::jsonb THEN"
+                   + " RETURN false; END IF;\n"
+                   + "  item := data->'notice';\n"
+                   + "  IF jsonb_typeof(item) IS DISTINCT FROM 'object'\n"
+                   + "    OR NOT item ?& ARRAY['version','body','contact']\n"
+                   + "    OR item - ARRAY['version','body','contact'] <> '{}'::jsonb THEN RETURN"
+                   + " false; END IF;\n"
+                   + "  FOREACH field IN ARRAY ARRAY['version','body','contact'] LOOP\n"
+                   + "    IF jsonb_typeof(item->field) IS DISTINCT FROM 'string' OR NOT"
+                   + " (item->>field ~ '[^[:space:]]')\n"
+                   + "      OR (field='body' AND (octet_length(item->>field)>32768 OR"
+                   + " replace(item->>field,chr(10),'') ~ '[[:cntrl:]]'))\n"
+                   + "      OR (field='contact' AND (octet_length(item->>field)>512 OR item->>field"
+                   + " ~ '[[:cntrl:]]'))\n"
+                   + "      OR (field='version' AND (char_length(item->>field)>60 OR item->>field ~"
+                   + " '[[:cntrl:]]'))\n"
+                   + "      OR item->>field IS DISTINCT FROM normalize(item->>field, NFC) THEN"
+                   + " RETURN false; END IF;\n"
+                   + "  END LOOP;\n"
+                   + "  FOREACH field IN ARRAY ARRAY['validFrom','validUntil'] LOOP\n"
+                   + "    IF jsonb_typeof(data->field) IS DISTINCT FROM 'string'\n"
+                   + "      OR NOT (data->>field ~"
+                   + " '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$')"
+                   + " THEN RETURN false; END IF;\n"
+                   + "  END LOOP;\n"
+                   + "  start_at := (data->>'validFrom')::timestamptz;\n"
+                   + "  end_at := (data->>'validUntil')::timestamptz;\n"
+                   + "  IF start_at>=end_at THEN RETURN false; END IF;\n"
+                   + "  IF data->'retention' IS DISTINCT FROM"
+                   + " '{\"flowTtlSeconds\":600,\"flowCleanupGraceSeconds\":3600,\"accessTtlSeconds\":300,\"accessCleanupGraceSeconds\":3600,\"refreshIdleSeconds\":2592000,\"sessionAbsoluteSeconds\":7776000,\"familyCleanupGraceSeconds\":86400,\"limitMaxSeconds\":86400,\"accessHistoryMaxSeconds\":2592000,\"securityAuditMaxSeconds\":7776000,\"backupMaxSeconds\":3024000}'::jsonb"
+                   + " THEN RETURN false; END IF;\n"
+                   + "  FOR item IN SELECT value FROM jsonb_each(data->'retention') LOOP\n"
+                   + "    IF item::text !~ '^[0-9]+$' THEN RETURN false; END IF;\n"
+                   + "  END LOOP;\n"
+                   + "  item := data->'evidence';\n"
+                   + "  IF jsonb_typeof(item) IS DISTINCT FROM 'object'\n"
+                   + "    OR NOT item ?&"
+                   + " ARRAY['responsibility','access','keys','processors','copies','verification']\n"
+                   + "    OR item -"
+                   + " ARRAY['responsibility','access','keys','processors','copies','verification']"
+                   + " <> '{}'::jsonb THEN RETURN false; END IF;\n"
+                   + "  FOR item IN SELECT value FROM jsonb_each(item) LOOP\n"
+                   + "    IF jsonb_typeof(item) IS DISTINCT FROM 'object'\n"
+                   + "      OR NOT item ?&"
+                   + " ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil']\n"
+                   + "      OR item -"
+                   + " ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil'] <>"
+                   + " '{}'::jsonb THEN RETURN false; END IF;\n"
+                   + "    FOREACH field IN ARRAY"
+                   + " ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil'] LOOP\n"
+                   + "      IF jsonb_typeof(item->field) IS DISTINCT FROM 'string' THEN RETURN"
+                   + " false; END IF;\n"
+                   + "    END LOOP;\n"
+                   + "    IF NOT (item->>'ref' ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$')\n"
+                   + "      OR NOT (item->>'sha256' ~ '^[0-9a-f]{64}$')\n"
+                   + "      OR item->>'envCode' IS DISTINCT FROM environment OR item->>'scope' IS"
+                   + " DISTINCT FROM 'MEMBER_AUTH' THEN RETURN false; END IF;\n"
+                   + "    FOREACH field IN ARRAY ARRAY['verifiedAt','validUntil'] LOOP\n"
+                   + "      IF NOT (item->>field ~"
+                   + " '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$')"
+                   + " THEN RETURN false; END IF;\n"
+                   + "    END LOOP;\n"
+                   + "    evidence_start := (item->>'verifiedAt')::timestamptz;\n"
+                   + "    evidence_end := (item->>'validUntil')::timestamptz;\n"
+                   + "    IF evidence_start>=evidence_end OR evidence_start>start_at OR"
+                   + " evidence_end<end_at THEN RETURN false; END IF;\n"
+                   + "  END LOOP;\n"
+                   + "  RETURN true;\n"
+                   + "EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN\n"
+                   + "  RETURN false;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "ALTER TABLE public.privacy_policy ADD CONSTRAINT ck_pp_local_document CHECK"
+                   + " (public.valid_local_policy_document(policy_data,env_code) IS TRUE);\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_local_policy() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP IN ('DELETE','TRUNCATE') THEN\n"
+                   + "    RAISE EXCEPTION 'privacy_policy immutable' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF TG_OP='INSERT' THEN\n"
+                   + "    IF NEW.state IS DISTINCT FROM 'DRAFT' THEN\n"
+                   + "      RAISE EXCEPTION 'privacy_policy DRAFT insert only' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  ELSE\n"
+                   + "    IF (to_jsonb(NEW)-'state') IS DISTINCT FROM (to_jsonb(OLD)-'state') OR"
+                   + " NOT (\n"
+                   + "      NEW.state=OLD.state OR (OLD.state='DRAFT' AND NEW.state IN"
+                   + " ('ACTIVE','RETIRED')) OR\n"
+                   + "      (OLD.state='ACTIVE' AND NEW.state IN ('SUSPENDED','RETIRED')) OR\n"
+                   + "      (OLD.state='SUSPENDED' AND NEW.state='RETIRED')) THEN\n"
+                   + "      RAISE EXCEPTION 'privacy_policy immutable transition' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  IF NEW.state='ACTIVE' THEN\n"
+                   + "    PERFORM id FROM public.admin_account WHERE id=NEW.owner_id AND active_yn"
+                   + " FOR SHARE;\n"
+                   + "    IF NOT FOUND THEN\n"
+                   + "      RAISE EXCEPTION 'privacy_policy active owner required' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "CREATE TRIGGER trg_local_policy_row BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.privacy_policy FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_local_policy();\n"
+                   + "CREATE TRIGGER trg_local_policy_truncate BEFORE TRUNCATE ON"
+                   + " public.privacy_policy FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_local_policy();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_local_profile_consent() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF ROW(NEW.member_id,NEW.policy_id,NEW.accepted_at,NEW.created_at) IS"
+                   + " DISTINCT FROM"
+                   + " ROW(OLD.member_id,OLD.policy_id,OLD.accepted_at,OLD.created_at) THEN\n"
+                   + "    RAISE EXCEPTION 'member_profile consent immutable' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "CREATE TRIGGER trg_local_profile_consent BEFORE UPDATE ON"
+                   + " public.member_profile FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_local_profile_consent();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_local_session() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF ROW(NEW.id,NEW.session_key,NEW.member_id,NEW.identity_id,NEW.auth_rev,NEW.created_at,NEW.absolute_until)"
+                   + " IS DISTINCT FROM"
+                   + " ROW(OLD.id,OLD.session_key,OLD.member_id,OLD.identity_id,OLD.auth_rev,OLD.created_at,OLD.absolute_until)\n"
+                   + "    OR NEW.last_refresh_at<OLD.last_refresh_at\n"
+                   + "    OR (NEW.revoked_at IS NOT NULL AND"
+                   + " ROW(NEW.last_refresh_at,NEW.idle_until) IS DISTINCT FROM"
+                   + " ROW(OLD.last_refresh_at,OLD.idle_until))\n"
+                   + "    OR (OLD.revoked_at IS NOT NULL AND"
+                   + " ROW(NEW.revoked_at,NEW.revoke_code,NEW.last_refresh_at,NEW.idle_until) IS"
+                   + " DISTINCT FROM"
+                   + " ROW(OLD.revoked_at,OLD.revoke_code,OLD.last_refresh_at,OLD.idle_until))"
+                   + " THEN\n"
+                   + "    RAISE EXCEPTION 'member_session stable family and first revocation' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "CREATE TRIGGER trg_local_session BEFORE UPDATE ON public.member_session FOR"
+                   + " EACH ROW EXECUTE FUNCTION public.guard_local_session();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_local_token() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF ROW(NEW.id,NEW.session_id,NEW.kind,NEW.generation,NEW.token_hash,NEW.issued_at,NEW.expires_at)"
+                   + " IS DISTINCT FROM"
+                   + " ROW(OLD.id,OLD.session_id,OLD.kind,OLD.generation,OLD.token_hash,OLD.issued_at,OLD.expires_at)\n"
+                   + "    OR (OLD.state<>'ISSUED' AND ROW(NEW.state,NEW.used_at) IS DISTINCT FROM"
+                   + " ROW(OLD.state,OLD.used_at)) THEN\n"
+                   + "    RAISE EXCEPTION 'member_token immutable issuance and terminal evidence'"
+                   + " USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "CREATE TRIGGER trg_local_token BEFORE UPDATE ON public.member_token FOR EACH"
+                   + " ROW EXECUTE FUNCTION public.guard_local_token();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_local_signup_flow() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF ROW(NEW.id,NEW.flow_key,NEW.binder_hash,NEW.purpose,NEW.provider,NEW.created_at,NEW.expires_at)"
+                   + " IS DISTINCT FROM"
+                   + " ROW(OLD.id,OLD.flow_key,OLD.binder_hash,OLD.purpose,OLD.provider,OLD.created_at,OLD.expires_at)\n"
+                   + "    OR NEW.attempt_count<OLD.attempt_count\n"
+                   + "    OR NOT (NEW.state=OLD.state OR (OLD.state='PENDING' AND NEW.state IN"
+                   + " ('VERIFIED','FAILED')) OR (OLD.state='VERIFIED' AND NEW.state IN"
+                   + " ('CONSUMED','FAILED')))\n"
+                   + "    OR (OLD.verified_at IS NOT NULL AND NEW.verified_at IS DISTINCT FROM"
+                   + " OLD.verified_at)\n"
+                   + "    OR (OLD.verified_at IS NULL AND NEW.verified_at IS NOT NULL AND NOT"
+                   + " (OLD.state='PENDING' AND NEW.state='VERIFIED'))\n"
+                   + "    OR (OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM"
+                   + " OLD.consumed_at)\n"
+                   + "    OR (NEW.lookup_hash IS NOT NULL AND NEW.lookup_hash IS DISTINCT FROM"
+                   + " OLD.lookup_hash)\n"
+                   + "    OR (NEW.code_hash IS NOT NULL AND NEW.code_hash IS DISTINCT FROM"
+                   + " OLD.code_hash)\n"
+                   + "    OR (NEW.proof_cipher IS NOT NULL AND NEW.proof_cipher IS DISTINCT FROM"
+                   + " OLD.proof_cipher)\n"
+                   + "    OR (OLD.state IN ('FAILED','CONSUMED') AND NEW IS DISTINCT FROM OLD)"
+                   + " THEN\n"
+                   + "    RAISE EXCEPTION 'member_flow stable signup and monotonic cleanup' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "CREATE TRIGGER trg_local_signup_flow BEFORE UPDATE ON public.member_flow FOR"
+                   + " EACH ROW EXECUTE FUNCTION public.guard_local_signup_flow();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_local_auth_audit() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  RAISE EXCEPTION 'member_auth_audit append only' USING ERRCODE='23514';\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "CREATE TRIGGER trg_local_auth_audit_row BEFORE UPDATE OR DELETE ON"
+                   + " public.member_auth_audit FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_local_auth_audit();\n"
+                   + "CREATE TRIGGER trg_local_auth_audit_truncate BEFORE TRUNCATE ON"
+                   + " public.member_auth_audit FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_local_auth_audit();\n"
+                   + "REVOKE ALL ON public.privacy_policy FROM PUBLIC;\n"
+                   + "REVOKE UPDATE, DELETE, TRUNCATE ON public.member_auth_audit FROM PUBLIC;\n";
+    }
+
+    /** V20 초대 저장 원본의 마지막 LF까지 그대로 반환한다. */
+    private static String sql20() {
+        return """
+        -- 첫 초대 저장 단위. 수집은 운영 정책과 회원 자격이 준비될 때까지 비활성이다.
+        ALTER TABLE public.privacy_policy DROP CONSTRAINT ck_pp_scope;
+        ALTER TABLE public.privacy_policy ADD CONSTRAINT ck_pp_scope CHECK (scope IN ('MEMBER_AUTH','PLAYTEST'));
+        ALTER TABLE public.privacy_policy DROP CONSTRAINT ck_pp_local_document;
+
+        CREATE TABLE public.play_test (
+          id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+          test_key uuid NOT NULL,
+          version_id bigint NOT NULL,
+          snapshot_id bigint NOT NULL,
+          runtime_id bigint NOT NULL,
+          config_hash char(64) NOT NULL,
+          runtime_epoch bigint NOT NULL,
+          role_a varchar(32) NOT NULL,
+          role_b varchar(32) NOT NULL,
+          mode varchar(24) NOT NULL,
+          state varchar(24) DEFAULT 'WAITING' NOT NULL,
+          outcome varchar(24),
+          rev bigint DEFAULT 0 NOT NULL,
+          draft_rev bigint DEFAULT 0 NOT NULL,
+          invite_until timestamptz NOT NULL,
+          ready_until timestamptz,
+          started_at timestamptz,
+          deadline_at timestamptz,
+          ended_at timestamptz,
+          result_until timestamptz,
+          attempt_count smallint DEFAULT 0 NOT NULL,
+          wrong_count smallint DEFAULT 0 NOT NULL,
+          final_score smallint,
+          created_by bigint NOT NULL,
+          created_at timestamptz DEFAULT now() NOT NULL,
+          updated_at timestamptz DEFAULT now() NOT NULL,
+          cancel_reason varchar(40),
+          CONSTRAINT pk_play_test PRIMARY KEY (id),
+          CONSTRAINT uk_play_test_key UNIQUE (test_key),
+          CONSTRAINT uk_play_test_snapshot UNIQUE (snapshot_id,id),
+          CONSTRAINT fk_test_version FOREIGN KEY (version_id) REFERENCES public.story_version(id) NOT DEFERRABLE,
+          CONSTRAINT fk_test_snapshot FOREIGN KEY (version_id,snapshot_id) REFERENCES public.review_snapshot(version_id,id) NOT DEFERRABLE,
+          CONSTRAINT fk_test_runtime FOREIGN KEY (runtime_id) REFERENCES public.grade_runtime(id) NOT DEFERRABLE,
+          CONSTRAINT fk_test_pair FOREIGN KEY (version_id,role_a,role_b) REFERENCES public.story_pair(version_id,role_a,role_b) NOT DEFERRABLE,
+          CONSTRAINT fk_test_admin FOREIGN KEY (created_by) REFERENCES public.admin_account(id) NOT DEFERRABLE,
+          CONSTRAINT ck_test_mode CHECK (mode IN ('BLIND','FUNCTIONAL')),
+          CONSTRAINT ck_test_config_hash CHECK (config_hash ~ '^[0-9a-f]{64}$'),
+          CONSTRAINT ck_test_state CHECK (state IN ('WAITING','RUNNING','ENDED','EXPIRED','CANCELLED')),
+          CONSTRAINT ck_test_outcome CHECK (outcome IS NULL OR outcome IN ('SUCCESS','ATTEMPTS_EXHAUSTED','TIME_LIMIT','FORFEIT','SYSTEM_ERROR')),
+          CONSTRAINT ck_test_counters CHECK (rev>=0 AND draft_rev>=0 AND runtime_epoch>=0 AND attempt_count BETWEEN 0 AND 5 AND wrong_count BETWEEN 0 AND attempt_count),
+          CONSTRAINT ck_test_invite_clock CHECK (invite_until=created_at+interval '7 days' AND updated_at>=created_at AND (ready_until IS NULL OR (ready_until>created_at AND ready_until<=invite_until))),
+          CONSTRAINT ck_test_start_clock CHECK ((started_at IS NULL AND deadline_at IS NULL) OR (started_at IS NOT NULL AND deadline_at IS NOT NULL AND deadline_at>started_at)),
+          CONSTRAINT ck_test_end CHECK ((state='ENDED')=(outcome IS NOT NULL) AND (state IN ('ENDED','EXPIRED','CANCELLED'))=(ended_at IS NOT NULL) AND (ended_at IS NULL OR ended_at>=created_at)),
+          CONSTRAINT ck_test_score CHECK ((state='ENDED' AND outcome IN ('SUCCESS','ATTEMPTS_EXHAUSTED','TIME_LIMIT') AND final_score BETWEEN 0 AND 100 AND final_score IS NOT NULL) OR (final_score IS NULL AND NOT (state='ENDED' AND outcome IN ('SUCCESS','ATTEMPTS_EXHAUSTED','TIME_LIMIT')))),
+          CONSTRAINT ck_test_result_clock CHECK ((result_until IS NULL AND ended_at IS NULL) OR (result_until IS NOT NULL AND ended_at IS NOT NULL AND result_until=ended_at+interval '24 hours') OR (result_until IS NULL AND ended_at IS NOT NULL)),
+          CONSTRAINT ck_test_cancel_reason CHECK (cancel_reason IS NULL OR cancel_reason IN ('TESTER_REQUEST','ACCESS_REVOKED','CONTENT_REVIEW','OPERATIONAL'))
+        );
+
+        CREATE TABLE public.test_member (
+          test_id bigint NOT NULL,
+          member_id bigint NOT NULL,
+          slot smallint NOT NULL,
+          invite_gen integer DEFAULT 1 NOT NULL,
+          invite_state varchar(24) DEFAULT 'SENT' NOT NULL,
+          accepted_at timestamptz,
+          accepted_policy_id bigint,
+          accepted_notice_hash char(64),
+          ready_yn boolean DEFAULT false NOT NULL,
+          role_code varchar(32),
+          last_seen_at timestamptz,
+          blind_declared boolean DEFAULT false NOT NULL,
+          revoked_at timestamptz,
+          created_at timestamptz DEFAULT now() NOT NULL,
+          updated_at timestamptz DEFAULT now() NOT NULL,
+          CONSTRAINT pk_test_member PRIMARY KEY (test_id,member_id),
+          CONSTRAINT uk_test_member_slot UNIQUE (test_id,slot),
+          CONSTRAINT uk_test_member_role UNIQUE (test_id,role_code),
+          CONSTRAINT fk_tm_test FOREIGN KEY (test_id) REFERENCES public.play_test(id) NOT DEFERRABLE,
+          CONSTRAINT fk_tm_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE,
+          CONSTRAINT fk_tm_policy FOREIGN KEY (accepted_policy_id) REFERENCES public.privacy_policy(id) NOT DEFERRABLE,
+          CONSTRAINT ck_tm_slot CHECK (slot IN (1,2) AND invite_gen>=1),
+          CONSTRAINT ck_tm_invite_state CHECK (invite_state IN ('SENT','ACCEPTED','DECLINED','REVOKED')),
+          CONSTRAINT ck_tm_accept CHECK ((accepted_at IS NOT NULL)=(accepted_policy_id IS NOT NULL) AND (accepted_at IS NOT NULL)=(accepted_notice_hash IS NOT NULL) AND (invite_state='ACCEPTED' OR accepted_at IS NULL OR invite_state='REVOKED') AND (invite_state<>'ACCEPTED' OR accepted_at IS NOT NULL) AND (NOT ready_yn OR invite_state='ACCEPTED') AND (invite_state='REVOKED')=(revoked_at IS NOT NULL)),
+          CONSTRAINT ck_tm_notice_hash CHECK (accepted_notice_hash IS NULL OR accepted_notice_hash ~ '^[0-9a-f]{64}$'),
+          CONSTRAINT ck_tm_clock CHECK (updated_at>=created_at AND (accepted_at IS NULL OR accepted_at>=created_at) AND (revoked_at IS NULL OR revoked_at>=created_at))
+        );
+        CREATE INDEX ix_tm_member_invite ON public.test_member(member_id,invite_state,test_id);
+
+        -- A prior material view permanently disqualifies this member from BLIND for the story.
+        -- Creator/reviewer administrator access is a separate authorization check, not a member exposure.
+        CREATE TABLE public.test_exposure (
+          story_id bigint NOT NULL,
+          member_id bigint NOT NULL,
+          first_exposed_at timestamptz DEFAULT now() NOT NULL,
+          CONSTRAINT pk_test_exposure PRIMARY KEY (story_id,member_id),
+          CONSTRAINT fk_tex_story FOREIGN KEY (story_id) REFERENCES public.story(id) NOT DEFERRABLE,
+          CONSTRAINT fk_tex_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE
+        );
+
+        CREATE TABLE public.test_retention (
+          test_id bigint NOT NULL,
+          policy_id bigint NOT NULL,
+          raw_until timestamptz,
+          max_until timestamptz,
+          selected_at timestamptz,
+          CONSTRAINT pk_test_retention PRIMARY KEY (test_id),
+          CONSTRAINT fk_tret_test FOREIGN KEY (test_id) REFERENCES public.play_test(id) NOT DEFERRABLE,
+          CONSTRAINT fk_tret_policy FOREIGN KEY (policy_id) REFERENCES public.privacy_policy(id) NOT DEFERRABLE,
+          CONSTRAINT ck_tret_clock CHECK ((raw_until IS NULL AND max_until IS NULL AND selected_at IS NULL) OR (raw_until IS NOT NULL AND max_until IS NOT NULL AND raw_until<=max_until AND (selected_at IS NULL OR (selected_at<=raw_until AND raw_until=max_until))))
+        );
+        CREATE INDEX ix_tret_due ON public.test_retention(raw_until,test_id) WHERE raw_until IS NOT NULL;
+
+        ALTER TABLE public.test_action ALTER COLUMN admin_id DROP NOT NULL;
+        ALTER TABLE public.test_action ADD COLUMN member_id bigint;
+        ALTER TABLE public.test_action ADD CONSTRAINT fk_ta_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE;
+        ALTER TABLE public.test_action ADD CONSTRAINT ck_ta_actor CHECK ((admin_id IS NOT NULL) <> (member_id IS NOT NULL));
+        ALTER TABLE public.test_audit DROP CONSTRAINT ck_audit_actor_kind;
+        ALTER TABLE public.test_audit ADD CONSTRAINT ck_audit_actor_kind CHECK (actor_kind IN ('ADMIN','MEMBER','WORKER','SYSTEM'));
+
+        CREATE FUNCTION public.valid_playtest_policy_document(data jsonb, environment text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+        DECLARE
+          item jsonb;
+          field text;
+          start_at timestamptz;
+          end_at timestamptz;
+          evidence_start timestamptz;
+          evidence_end timestamptz;
+        BEGIN
+          IF data IS NULL OR jsonb_typeof(data) IS DISTINCT FROM 'object'
+            OR NOT data ?& ARRAY['formatNo','notice','validFrom','validUntil','retention','evidence']
+            OR data - ARRAY['formatNo','notice','validFrom','validUntil','retention','evidence'] <> '{}'::jsonb
+            OR data->'formatNo' IS DISTINCT FROM '1'::jsonb OR (data->'formatNo')::text IS DISTINCT FROM '1' THEN RETURN false; END IF;
+          item := data->'notice';
+          IF jsonb_typeof(item) IS DISTINCT FROM 'object'
+            OR NOT item ?& ARRAY['version','body','contact']
+            OR item - ARRAY['version','body','contact'] <> '{}'::jsonb THEN RETURN false; END IF;
+          FOREACH field IN ARRAY ARRAY['version','body','contact'] LOOP
+            IF jsonb_typeof(item->field) IS DISTINCT FROM 'string' OR NOT (item->>field ~ '[^[:space:]]')
+              OR (field='body' AND (octet_length(item->>field)>32768 OR replace(item->>field,chr(10),'') ~ '[[:cntrl:]]'))
+              OR (field='contact' AND (octet_length(item->>field)>512 OR item->>field ~ '[[:cntrl:]]'))
+              OR (field='version' AND (char_length(item->>field)>60 OR item->>field ~ '[[:cntrl:]]'))
+              OR item->>field IS DISTINCT FROM normalize(item->>field, NFC) THEN RETURN false; END IF;
+          END LOOP;
+          FOREACH field IN ARRAY ARRAY['validFrom','validUntil'] LOOP
+            IF jsonb_typeof(data->field) IS DISTINCT FROM 'string'
+              OR NOT (data->>field ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$') THEN RETURN false; END IF;
+          END LOOP;
+          start_at := (data->>'validFrom')::timestamptz;
+          end_at := (data->>'validUntil')::timestamptz;
+          IF start_at>=end_at THEN RETURN false; END IF;
+          IF data->'retention' IS DISTINCT FROM '{"inviteSeconds":604800,"lobbySeconds":1800,"resultSeconds":86400,"rawSeconds":7776000,"selectedSeconds":31536000,"backupMaxSeconds":3024000}'::jsonb THEN RETURN false; END IF;
+          FOR item IN SELECT value FROM jsonb_each(data->'retention') LOOP
+            IF item::text !~ '^[0-9]+$' THEN RETURN false; END IF;
+          END LOOP;
+          item := data->'evidence';
+          IF jsonb_typeof(item) IS DISTINCT FROM 'object'
+            OR NOT item ?& ARRAY['responsibility','access','keys','processors','copies','verification']
+            OR item - ARRAY['responsibility','access','keys','processors','copies','verification'] <> '{}'::jsonb THEN RETURN false; END IF;
+          FOR item IN SELECT value FROM jsonb_each(item) LOOP
+            IF jsonb_typeof(item) IS DISTINCT FROM 'object'
+              OR NOT item ?& ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil']
+              OR item - ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil'] <> '{}'::jsonb THEN RETURN false; END IF;
+            FOREACH field IN ARRAY ARRAY['ref','sha256','envCode','scope','verifiedAt','validUntil'] LOOP
+              IF jsonb_typeof(item->field) IS DISTINCT FROM 'string' THEN RETURN false; END IF;
+            END LOOP;
+            IF NOT (item->>'ref' ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$')
+              OR NOT (item->>'sha256' ~ '^[0-9a-f]{64}$')
+              OR item->>'envCode' IS DISTINCT FROM environment OR item->>'scope' IS DISTINCT FROM 'PLAYTEST' THEN RETURN false; END IF;
+            FOREACH field IN ARRAY ARRAY['verifiedAt','validUntil'] LOOP
+              IF NOT (item->>field ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$') THEN RETURN false; END IF;
+            END LOOP;
+            evidence_start := (item->>'verifiedAt')::timestamptz;
+            evidence_end := (item->>'validUntil')::timestamptz;
+            IF evidence_start>=evidence_end OR evidence_start>start_at OR evidence_end<end_at THEN RETURN false; END IF;
+          END LOOP;
+          RETURN true;
+        EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN
+          RETURN false;
+        END;
+        $$;
+
+        ALTER TABLE public.privacy_policy ADD CONSTRAINT ck_pp_document CHECK (
+          (scope='MEMBER_AUTH' AND public.valid_local_policy_document(policy_data,env_code) IS TRUE)
+          OR (scope='PLAYTEST' AND public.valid_playtest_policy_document(policy_data,env_code) IS TRUE)
+        );
+
+        CREATE FUNCTION public.guard_playtest_retention_policy() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM public.privacy_policy WHERE id=NEW.policy_id AND scope='PLAYTEST') THEN
+            RAISE EXCEPTION 'PLAYTEST policy required' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_playtest_retention_policy BEFORE INSERT OR UPDATE ON public.test_retention FOR EACH ROW EXECUTE FUNCTION public.guard_playtest_retention_policy();
+
+        CREATE FUNCTION public.guard_playtest_pins() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+          pinned_hash char(64);
+          pinned_epoch bigint;
+        BEGIN
+          IF TG_OP='INSERT' THEN
+            SELECT config_hash,epoch INTO pinned_hash,pinned_epoch FROM public.grade_runtime
+              WHERE id=NEW.runtime_id FOR SHARE;
+            IF NOT FOUND OR ROW(NEW.config_hash,NEW.runtime_epoch) IS DISTINCT FROM ROW(pinned_hash,pinned_epoch) THEN
+              RAISE EXCEPTION 'play_test runtime pin mismatch' USING ERRCODE='23514';
+            END IF;
+          ELSIF ROW(NEW.id,NEW.test_key,NEW.version_id,NEW.snapshot_id,NEW.runtime_id,NEW.config_hash,NEW.runtime_epoch,NEW.role_a,NEW.role_b,NEW.mode,NEW.created_by,NEW.created_at,NEW.invite_until)
+            IS DISTINCT FROM ROW(OLD.id,OLD.test_key,OLD.version_id,OLD.snapshot_id,OLD.runtime_id,OLD.config_hash,OLD.runtime_epoch,OLD.role_a,OLD.role_b,OLD.mode,OLD.created_by,OLD.created_at,OLD.invite_until) THEN
+            RAISE EXCEPTION 'play_test pinned provenance immutable' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_playtest_pins BEFORE INSERT OR UPDATE ON public.play_test FOR EACH ROW EXECUTE FUNCTION public.guard_playtest_pins();
+
+        CREATE FUNCTION public.guard_playtest_acceptance() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+          policy_hash char(64);
+        BEGIN
+          IF TG_OP='DELETE' THEN
+            IF OLD.accepted_at IS NOT NULL THEN
+              RAISE EXCEPTION 'accepted PLAYTEST consent cannot be deleted' USING ERRCODE='23514';
+            END IF;
+            RETURN OLD;
+          ELSIF TG_OP='UPDATE' THEN
+            IF ROW(NEW.test_id,NEW.member_id,NEW.slot,NEW.created_at) IS DISTINCT FROM ROW(OLD.test_id,OLD.member_id,OLD.slot,OLD.created_at)
+              OR (OLD.accepted_at IS NOT NULL AND ROW(NEW.accepted_at,NEW.accepted_policy_id,NEW.accepted_notice_hash) IS DISTINCT FROM ROW(OLD.accepted_at,OLD.accepted_policy_id,OLD.accepted_notice_hash)) THEN
+              RAISE EXCEPTION 'test_member identity and consent immutable' USING ERRCODE='23514';
+            END IF;
+            IF OLD.accepted_at IS NOT NULL OR NEW.accepted_at IS NULL THEN RETURN NEW; END IF;
+          ELSIF NEW.accepted_at IS NULL THEN
+            RETURN NEW;
+          END IF;
+          SELECT notice_hash INTO policy_hash FROM public.privacy_policy
+            WHERE id=NEW.accepted_policy_id AND scope='PLAYTEST' AND state='ACTIVE' FOR SHARE;
+          IF NOT FOUND OR policy_hash IS DISTINCT FROM NEW.accepted_notice_hash THEN
+            RAISE EXCEPTION 'active PLAYTEST notice required at acceptance' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_playtest_acceptance BEFORE INSERT OR UPDATE OR DELETE ON public.test_member FOR EACH ROW EXECUTE FUNCTION public.guard_playtest_acceptance();
+
+        CREATE FUNCTION public.guard_test_exposure() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          RAISE EXCEPTION 'test_exposure is append only' USING ERRCODE='23514';
+        END;
+        $$;
+        CREATE TRIGGER trg_test_exposure_row BEFORE UPDATE OR DELETE ON public.test_exposure FOR EACH ROW EXECUTE FUNCTION public.guard_test_exposure();
+        CREATE TRIGGER trg_test_exposure_truncate BEFORE TRUNCATE ON public.test_exposure FOR EACH STATEMENT EXECUTE FUNCTION public.guard_test_exposure();
+        REVOKE ALL ON public.play_test, public.test_member, public.test_exposure, public.test_retention FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.valid_playtest_policy_document(jsonb,text), public.guard_playtest_retention_policy(), public.guard_playtest_pins(), public.guard_playtest_acceptance(), public.guard_test_exposure() FROM PUBLIC;
+        """;
+    }
+
+    /** V21 회원별 힌트 열람 원본의 마지막 LF까지 그대로 반환한다. */
+    private static String sql21() {
+        return """
+        CREATE TABLE public.test_hint (
+          test_id bigint NOT NULL,
+          member_id bigint NOT NULL,
+          level smallint NOT NULL,
+          opened_at timestamptz DEFAULT now() NOT NULL,
+          CONSTRAINT pk_test_hint PRIMARY KEY (test_id,member_id,level),
+          CONSTRAINT fk_hint_member FOREIGN KEY (test_id,member_id) REFERENCES public.test_member(test_id,member_id) NOT DEFERRABLE,
+          CONSTRAINT ck_hint_level CHECK (level BETWEEN 1 AND 3)
+        );
+        """;
+    }
+
+    /** V22 공동 보고서 저장 원본의 마지막 LF까지 그대로 반환한다. */
+    private static String sql22() {
+        return """
+        -- H5 공동 보고서 저장 구조. 접수·권한·암호화/AAD·canonical 해시 검사는 서비스 책임이다.
+        ALTER TABLE public.play_test ADD COLUMN draft_cipher bytea;
+        ALTER TABLE public.play_test ADD COLUMN draft_hash char(64);
+        ALTER TABLE public.play_test ADD COLUMN next_submit_no integer DEFAULT 1 NOT NULL;
+        ALTER TABLE public.play_test ADD CONSTRAINT ck_test_draft_cipher CHECK (draft_cipher IS NULL OR octet_length(draft_cipher) BETWEEN 32 AND 524288);
+        ALTER TABLE public.play_test ADD CONSTRAINT ck_test_draft_hash CHECK (draft_hash IS NULL OR draft_hash ~ '^[0-9a-f]{64}$');
+        ALTER TABLE public.play_test ADD CONSTRAINT ck_test_draft_pair CHECK ((draft_cipher IS NULL) = (draft_hash IS NULL));
+        ALTER TABLE public.play_test ADD CONSTRAINT ck_test_submit_ordinal CHECK (next_submit_no >= 1);
+        ALTER TABLE public.play_test ADD CONSTRAINT uk_test_report_pins UNIQUE (snapshot_id,runtime_id,id);
+
+        ALTER TABLE public.test_member ADD COLUMN feedback_cipher bytea;
+        ALTER TABLE public.test_member ADD COLUMN feedback_at timestamptz;
+        ALTER TABLE public.test_member ADD CONSTRAINT ck_tm_feedback CHECK ((feedback_cipher IS NULL) = (feedback_at IS NULL) AND (feedback_cipher IS NULL OR octet_length(feedback_cipher) BETWEEN 32 AND 524288));
+
+        CREATE TABLE public.test_report (
+          id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+          report_key uuid NOT NULL,
+          test_id bigint NOT NULL,
+          snapshot_id bigint NOT NULL,
+          runtime_id bigint NOT NULL,
+          config_hash char(64) NOT NULL,
+          runtime_epoch bigint NOT NULL,
+          source_draft_rev bigint NOT NULL,
+          proposer_id bigint NOT NULL,
+          payload_cipher bytea,
+          payload_hash char(64),
+          state varchar(24) DEFAULT 'PROPOSED' NOT NULL,
+          accepted_by bigint,
+          accepted_at timestamptz,
+          submit_no integer,
+          purged_at timestamptz,
+          created_at timestamptz DEFAULT now() NOT NULL,
+          updated_at timestamptz DEFAULT now() NOT NULL,
+          CONSTRAINT pk_test_report PRIMARY KEY (id),
+          CONSTRAINT uk_report_key UNIQUE (report_key),
+          CONSTRAINT uk_report_pins UNIQUE (snapshot_id,runtime_id,id),
+          CONSTRAINT uk_report_submit UNIQUE (test_id,submit_no),
+          CONSTRAINT fk_report_test FOREIGN KEY (snapshot_id,runtime_id,test_id) REFERENCES public.play_test(snapshot_id,runtime_id,id) NOT DEFERRABLE,
+          CONSTRAINT fk_report_proposer FOREIGN KEY (test_id,proposer_id) REFERENCES public.test_member(test_id,member_id) NOT DEFERRABLE,
+          CONSTRAINT fk_report_acceptor FOREIGN KEY (test_id,accepted_by) REFERENCES public.test_member(test_id,member_id) NOT DEFERRABLE,
+          CONSTRAINT ck_report_state CHECK (state IN ('PROPOSED','REJECTED','WITHDRAWN','INVALIDATED','ACCEPTED','GRADED','UNGRADABLE','CANCELLED')),
+          CONSTRAINT ck_report_hash CHECK (payload_hash IS NULL OR payload_hash ~ '^[0-9a-f]{64}$'),
+          CONSTRAINT ck_report_config CHECK (config_hash ~ '^[0-9a-f]{64}$' AND runtime_epoch>=0 AND source_draft_rev>=0),
+          CONSTRAINT ck_report_payload CHECK ((payload_cipher IS NULL)=(payload_hash IS NULL) AND (purged_at IS NULL)=(payload_cipher IS NOT NULL) AND (state NOT IN ('PROPOSED','ACCEPTED') OR payload_cipher IS NOT NULL) AND (payload_cipher IS NULL OR octet_length(payload_cipher) BETWEEN 32 AND 524288)),
+          CONSTRAINT ck_report_accept CHECK ((state IN ('ACCEPTED','GRADED','UNGRADABLE') OR (state='CANCELLED' AND accepted_at IS NOT NULL))=(accepted_at IS NOT NULL) AND (accepted_at IS NOT NULL)=(accepted_by IS NOT NULL) AND (accepted_at IS NOT NULL)=(submit_no IS NOT NULL) AND (submit_no IS NULL OR submit_no>=1) AND (accepted_by IS NULL OR accepted_by<>proposer_id) AND (accepted_at IS NULL OR accepted_at>=created_at) AND updated_at>=created_at)
+        );
+        CREATE UNIQUE INDEX uk_report_live ON public.test_report(test_id) WHERE state IN ('PROPOSED','ACCEPTED');
+
+        ALTER TABLE public.grade_job ADD COLUMN report_id bigint;
+        ALTER TABLE public.grade_job ADD COLUMN report_hash char(64);
+        ALTER TABLE public.grade_job ALTER COLUMN batch_id DROP NOT NULL;
+        ALTER TABLE public.grade_job ALTER COLUMN sample_code DROP NOT NULL;
+        ALTER TABLE public.grade_job ALTER COLUMN repeat_no DROP NOT NULL;
+        ALTER TABLE public.grade_job ALTER COLUMN input_hash DROP NOT NULL;
+        ALTER TABLE public.grade_job DROP CONSTRAINT ck_gj_source;
+        ALTER TABLE public.grade_job ADD CONSTRAINT ck_gj_source CHECK (
+          (batch_id IS NOT NULL AND sample_code IS NOT NULL AND repeat_no IS NOT NULL AND repeat_no BETWEEN 1 AND 3 AND input_hash IS NOT NULL AND report_id IS NULL AND report_hash IS NULL)
+          OR (batch_id IS NULL AND sample_code IS NULL AND repeat_no IS NULL AND input_hash IS NULL AND report_id IS NOT NULL AND report_hash IS NOT NULL)
+        );
+        ALTER TABLE public.grade_job ADD CONSTRAINT ck_gj_report_hash CHECK (report_hash IS NULL OR report_hash ~ '^[0-9a-f]{64}$');
+        ALTER TABLE public.grade_job ADD CONSTRAINT fk_gj_report FOREIGN KEY (snapshot_id,runtime_id,report_id) REFERENCES public.test_report(snapshot_id,runtime_id,id) NOT DEFERRABLE;
+        ALTER TABLE public.grade_job ADD CONSTRAINT uk_gj_report UNIQUE (report_id);
+
+        -- 두 부모의 pin은 행 자체와 함께 고정한다. 초안/feedback 원문은 정해진 보관 경로에서만 파기한다.
+        CREATE FUNCTION public.guard_test_report() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+          pinned record;
+        BEGIN
+          IF TG_OP='DELETE' THEN
+            RAISE EXCEPTION 'test_report history cannot be deleted' USING ERRCODE='23514';
+          END IF;
+          IF TG_OP='INSERT' THEN
+            SELECT config_hash,runtime_epoch,draft_rev INTO pinned FROM public.play_test WHERE id=NEW.test_id FOR SHARE;
+            IF NOT FOUND OR ROW(NEW.config_hash,NEW.runtime_epoch) IS DISTINCT FROM ROW(pinned.config_hash,pinned.runtime_epoch)
+              OR NEW.source_draft_rev>pinned.draft_rev OR NEW.state<>'PROPOSED' OR NEW.accepted_at IS NOT NULL
+              OR NEW.payload_cipher IS NULL THEN
+              RAISE EXCEPTION 'test_report proposal pins invalid' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF ROW(NEW.id,NEW.report_key,NEW.test_id,NEW.snapshot_id,NEW.runtime_id,NEW.config_hash,NEW.runtime_epoch,NEW.source_draft_rev,NEW.proposer_id,NEW.created_at)
+            IS DISTINCT FROM ROW(OLD.id,OLD.report_key,OLD.test_id,OLD.snapshot_id,OLD.runtime_id,OLD.config_hash,OLD.runtime_epoch,OLD.source_draft_rev,OLD.proposer_id,OLD.created_at)
+            OR (OLD.purged_at IS NOT NULL AND ROW(NEW.payload_cipher,NEW.payload_hash,NEW.purged_at) IS DISTINCT FROM ROW(OLD.payload_cipher,OLD.payload_hash,OLD.purged_at))
+            OR (OLD.accepted_at IS NOT NULL AND ROW(NEW.accepted_by,NEW.accepted_at,NEW.submit_no) IS DISTINCT FROM ROW(OLD.accepted_by,OLD.accepted_at,OLD.submit_no))
+            OR (NEW.payload_cipher IS DISTINCT FROM OLD.payload_cipher AND NEW.payload_cipher IS NOT NULL)
+            OR (NEW.payload_hash IS DISTINCT FROM OLD.payload_hash AND NEW.payload_hash IS NOT NULL)
+            OR (OLD.accepted_at IS NOT NULL AND NEW.state NOT IN ('ACCEPTED','GRADED','UNGRADABLE','CANCELLED'))
+            OR (OLD.state IN ('REJECTED','WITHDRAWN','INVALIDATED','GRADED','UNGRADABLE','CANCELLED') AND NEW.state<>OLD.state)
+            OR (OLD.state='PROPOSED' AND NEW.state NOT IN ('PROPOSED','REJECTED','WITHDRAWN','INVALIDATED','ACCEPTED','CANCELLED'))
+            OR (OLD.state='ACCEPTED' AND NEW.state NOT IN ('ACCEPTED','GRADED','UNGRADABLE','CANCELLED'))
+            OR (OLD.accepted_at IS NULL AND NEW.accepted_at IS NOT NULL AND OLD.state<>'PROPOSED') THEN
+            RAISE EXCEPTION 'test_report provenance or transition immutable' USING ERRCODE='23514';
+          END IF;
+          IF OLD.accepted_at IS NULL AND NEW.accepted_at IS NOT NULL THEN
+            SELECT draft_rev,next_submit_no INTO pinned FROM public.play_test WHERE id=NEW.test_id FOR SHARE;
+            IF NEW.source_draft_rev<>pinned.draft_rev OR NEW.submit_no<>pinned.next_submit_no OR OLD.payload_cipher IS NULL OR NEW.payload_cipher IS DISTINCT FROM OLD.payload_cipher OR NEW.payload_hash IS DISTINCT FROM OLD.payload_hash OR NEW.purged_at IS NOT NULL THEN
+              RAISE EXCEPTION 'test_report acceptance pin mismatch' USING ERRCODE='23514';
+            END IF;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_test_report BEFORE INSERT OR UPDATE OR DELETE ON public.test_report FOR EACH ROW EXECUTE FUNCTION public.guard_test_report();
+        CREATE FUNCTION public.reject_test_report_truncate() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          RAISE EXCEPTION 'test_report history cannot be truncated' USING ERRCODE='23514';
+        END;
+        $$;
+        CREATE TRIGGER trg_test_report_truncate BEFORE TRUNCATE ON public.test_report FOR EACH STATEMENT EXECUTE FUNCTION public.reject_test_report_truncate();
+
+        CREATE FUNCTION public.guard_test_job_source() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+          pinned record;
+        BEGIN
+          IF TG_OP='UPDATE' AND ROW(NEW.snapshot_id,NEW.runtime_id,NEW.batch_id,NEW.sample_code,NEW.repeat_no,NEW.report_id,NEW.report_hash,NEW.input_hash,NEW.config_hash,NEW.rubric_hash,NEW.accepted_at,NEW.deadline_at)
+            IS DISTINCT FROM ROW(OLD.snapshot_id,OLD.runtime_id,OLD.batch_id,OLD.sample_code,OLD.repeat_no,OLD.report_id,OLD.report_hash,OLD.input_hash,OLD.config_hash,OLD.rubric_hash,OLD.accepted_at,OLD.deadline_at)
+            AND (OLD.report_id IS NOT NULL OR OLD.accepted_at IS NOT NULL) THEN
+            RAISE EXCEPTION 'accepted grade_job source immutable' USING ERRCODE='23514';
+          END IF;
+          IF NEW.report_id IS NOT NULL THEN
+            SELECT r.payload_hash,r.config_hash,r.accepted_at,r.state,t.runtime_epoch
+              INTO pinned FROM public.test_report r JOIN public.play_test t ON t.id=r.test_id
+              WHERE r.id=NEW.report_id FOR SHARE OF r,t;
+            IF NOT FOUND OR pinned.accepted_at IS NULL OR pinned.state NOT IN ('ACCEPTED','GRADED','UNGRADABLE','CANCELLED')
+              OR (TG_OP='INSERT' AND (pinned.payload_hash IS NULL OR NEW.state<>'QUEUED'))
+              OR NEW.config_hash IS DISTINCT FROM pinned.config_hash
+              OR NEW.accepted_at IS DISTINCT FROM pinned.accepted_at
+              OR NEW.deadline_at IS DISTINCT FROM pinned.accepted_at+interval '120 seconds'
+              OR NEW.state='STAGED' THEN
+              RAISE EXCEPTION 'grade_job TEST report pin mismatch' USING ERRCODE='23514';
+            END IF;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_test_job_source BEFORE INSERT OR UPDATE ON public.grade_job FOR EACH ROW EXECUTE FUNCTION public.guard_test_job_source();
+        CREATE FUNCTION public.guard_test_submit_ordinal() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.next_submit_no<OLD.next_submit_no OR NEW.next_submit_no>OLD.next_submit_no+1
+            OR (NEW.next_submit_no=OLD.next_submit_no+1 AND NOT EXISTS (
+              SELECT 1 FROM public.test_report WHERE test_id=NEW.id AND submit_no=OLD.next_submit_no AND accepted_at IS NOT NULL
+            )) THEN
+            RAISE EXCEPTION 'play_test submission ordinal must advance after acceptance' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_test_submit_ordinal BEFORE UPDATE ON public.play_test FOR EACH ROW EXECUTE FUNCTION public.guard_test_submit_ordinal();
+        REVOKE ALL ON public.test_report FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.guard_test_report(),public.reject_test_report_truncate(),public.guard_test_job_source(),public.guard_test_submit_ordinal() FROM PUBLIC;
+        COMMENT ON TABLE public.test_report IS '공동 보고서 제안·접수 이력; 원문은 행/필드/포맷 AAD로 암호화하며 접수 출처는 불변. 암호·canonical hash 및 권한·원자 접수는 서비스 책임';
+        COMMENT ON COLUMN public.play_test.next_submit_no IS '접수마다 증가하는 다음 순번. 정상 판정 횟수와 다름';
+        COMMENT ON COLUMN public.grade_job.report_hash IS 'H({formatNo:1,payloadHash:H(P),rubricHash,report}) canonical SHA-256; payload_hash/input_hash와 다름. 암호화 REPORT-1 검증은 신뢰한 서비스 책임';
+        COMMENT ON COLUMN public.test_report.payload_hash IS '고정 REPORT-1 canonical UTF-8 SHA-256; 파기 때 암호문과 함께 제거';
+
+        -- 임대/시도 없는 TEST QUEUED 마감은 임대 회수 사건과 구분한다.
+        ALTER TABLE public.grade_event DROP CONSTRAINT ck_grade_event_shape;
+        ALTER TABLE public.grade_event ADD CONSTRAINT ck_grade_event_shape CHECK (
+            (actor_kind = 'WORKER' AND event_kind IN ('COMPLETE_APPLIED','COMPLETE_REJECTED') AND attempt_no IS NOT NULL AND request_id IS NOT NULL)
+            OR (actor_kind = 'SYSTEM' AND event_kind = 'RECOVERY_EXPIRED' AND attempt_no IS NOT NULL AND request_id IS NULL)
+            OR (actor_kind = 'SYSTEM' AND event_kind IN ('JOB_ACTIVATED','JOB_INPUT_REJECTED','JOB_SOURCE_CANCELLED','JOB_LEASE_RECLAIMED','JOB_DEADLINE_EXPIRED') AND attempt_no IS NULL AND request_id IS NULL)
+        );
+        COMMENT ON CONSTRAINT ck_grade_event_shape ON public.grade_event IS 'V15 기존 주체·사건·시도 조합 보존; 시도 없는 TEST 마감은 SYSTEM JOB_DEADLINE_EXPIRED로 구분';
+        """;
+    }
+
+    /** V23 TEST 작업 출처 보호 범위 수정 원본의 마지막 LF까지 그대로 반환한다. */
+    private static String sql23() {
+        return """
+        -- TEST 출처의 불변성은 유지하고 보고서 없는 BATCH 갱신 계약은 보존한다.
+        CREATE OR REPLACE FUNCTION public.guard_test_job_source() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+          pinned record;
+        BEGIN
+          IF TG_OP='UPDATE' AND ROW(NEW.snapshot_id,NEW.runtime_id,NEW.batch_id,NEW.sample_code,NEW.repeat_no,NEW.report_id,NEW.report_hash,NEW.input_hash,NEW.config_hash,NEW.rubric_hash,NEW.accepted_at,NEW.deadline_at)
+            IS DISTINCT FROM ROW(OLD.snapshot_id,OLD.runtime_id,OLD.batch_id,OLD.sample_code,OLD.repeat_no,OLD.report_id,OLD.report_hash,OLD.input_hash,OLD.config_hash,OLD.rubric_hash,OLD.accepted_at,OLD.deadline_at)
+            AND (OLD.report_id IS NOT NULL OR NEW.report_id IS NOT NULL) THEN
+            RAISE EXCEPTION 'accepted grade_job source immutable' USING ERRCODE='23514';
+          END IF;
+          IF NEW.report_id IS NOT NULL THEN
+            SELECT r.payload_hash,r.config_hash,r.accepted_at,r.state,t.runtime_epoch
+              INTO pinned FROM public.test_report r JOIN public.play_test t ON t.id=r.test_id
+              WHERE r.id=NEW.report_id FOR SHARE OF r,t;
+            IF NOT FOUND OR pinned.accepted_at IS NULL OR pinned.state NOT IN ('ACCEPTED','GRADED','UNGRADABLE','CANCELLED')
+              OR (TG_OP='INSERT' AND (pinned.payload_hash IS NULL OR NEW.state<>'QUEUED'))
+              OR NEW.config_hash IS DISTINCT FROM pinned.config_hash
+              OR NEW.accepted_at IS DISTINCT FROM pinned.accepted_at
+              OR NEW.deadline_at IS DISTINCT FROM pinned.accepted_at+interval '120 seconds'
+              OR NEW.state='STAGED' THEN
+              RAISE EXCEPTION 'grade_job TEST report pin mismatch' USING ERRCODE='23514';
+            END IF;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        """;
     }
 }

@@ -49,7 +49,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/** 실제 고정 PG16.10·V14·전체 사본·설치·합성 토큰·실제 AES-GCM 완료 원자성을 검사한다. 모델 품질·HTTP·복구 구현 증거가 아니다. */
+/** 실제 고정 PG16.10·V21·전체 사본·설치·합성 토큰·실제 AES-GCM 완료 원자성을 검사한다. 모델 품질·HTTP·복구 구현 증거가 아니다. */
 class GradeCompletionServiceIT {
     private static PostgreSQLContainer<?> postgres;
     private static JdbcTemplate jdbc;
@@ -86,7 +86,7 @@ class GradeCompletionServiceIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
         var dictionary = new GradeDictionary(CODE, List.of(new Term("ONE", "개념", "합성")));
         var settings =
                 new LocalSemanticEngine.Settings(
@@ -586,6 +586,29 @@ class GradeCompletionServiceIT {
     void epochChangeRejectsWithAuditOnly() {
         jdbc.update("UPDATE public.grade_runtime SET epoch=1 WHERE id=?", runtime);
         rejection("RUNTIME_EPOCH_CHANGED");
+    }
+
+    /** TEST epoch 분류 추가가 기존 BATCH의 stale 우선순위를 바꾸지 않는다. */
+    @Test
+    void epochChangeDoesNotOverrideStaleBatchLease() {
+        jdbc.update("UPDATE public.grade_runtime SET epoch=1 WHERE id=?", runtime);
+        jdbc.update("UPDATE public.grade_job SET lease_gen=2 WHERE id=?", job);
+        rejection("STALE_LEASE");
+    }
+
+    /** 이미 종료한 BATCH는 epoch 변경에도 신규 실행 결과로 재분류하지 않는다. */
+    @Test
+    void epochChangeDoesNotOverrideTerminalBatchReservation() {
+        jdbc.update("UPDATE public.grade_runtime SET epoch=1 WHERE id=?", runtime);
+        jdbc.update(
+                "UPDATE public.grade_attempt SET state='EXPIRED',ended_at=clock_timestamp() WHERE"
+                        + " job_id=?",
+                job);
+        jdbc.update(
+                "UPDATE public.grade_job SET state='FAILED',worker_key=NULL,lease_until=NULL WHERE"
+                        + " id=?",
+                job);
+        rejection("TERMINAL");
     }
 
     @Test

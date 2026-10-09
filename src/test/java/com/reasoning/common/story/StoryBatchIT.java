@@ -549,6 +549,35 @@ class StoryBatchIT extends DatabaseContextTest {
         assertThat(count("grade_batch", "snapshot_id=?", parent.snapshot())).isZero();
     }
 
+    /** 회원 소유 키는 관리자 생성·해소의 영수증이 아니며 새 업무 행도 만들지 않는다. */
+    @Test
+    void memberReceiptCannotAuthorizeAdministrativeCommands() {
+        Fixture f = fixture();
+        long member = receiptMember();
+        UUID key = UUID.randomUUID();
+        db.update(
+                "INSERT INTO"
+                    + " test_action(request_key,member_id,action,scope_key,request_hash,result_data)"
+                    + " VALUES (?,?,'INVITATION_ACCEPT',?,repeat('a',64),'{}'::jsonb)",
+                key,
+                member,
+                "test:" + UUID.randomUUID());
+        assertThatThrownBy(() -> create(f, key)).hasMessage("REQUEST_KEY_CONFLICT");
+        assertThat(count("grade_batch", "snapshot_id=?", f.snapshot())).isZero();
+        ResolutionFixture resolution = resolutionFixture("INFRA", true);
+        String before = issueState(resolution);
+        assertThatThrownBy(() -> resolve(resolution, key, "0", UUID.randomUUID()))
+                .hasMessage("REQUEST_KEY_CONFLICT");
+        assertThat(issueState(resolution)).isEqualTo(before);
+    }
+
+    /** 키 충돌 음성 fixture의 FK만 구성하며 가입·실제 회원 인증 증거로 사용하지 않는다. */
+    private long receiptMember() {
+        return id(
+                "INSERT INTO member_account(member_key,state) VALUES (?,'ACTIVE') RETURNING id",
+                UUID.randomUUID());
+    }
+
     /** 서로 다른 관리자·부모의 전역 키 경쟁은 실패 거래 롤백 뒤 현재 인가로 재진입한다. */
     @Test
     void concurrentGlobalParentRaceCommitsExactlyOneWholeBatch() throws Exception {
@@ -2740,7 +2769,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             count(
                                     "grade_job",
                                     "batch_id=? AND sample_code IN ('FULL','ZERO') AND"
-                                        + " result_data->>?='true'",
+                                            + " result_data->>?='true'",
                                     batchId(batch),
                                     flag))
                     .isEqualTo(6);
@@ -2918,13 +2947,13 @@ class StoryBatchIT extends DatabaseContextTest {
         if ("future".equals(clock))
             db.update(
                     "UPDATE grade_batch SET ended_at=clock_timestamp()+interval '1 hour' WHERE"
-                        + " id=?",
+                            + " id=?",
                     batchId(batch));
         if ("historical".equals(clock)) {
             // 집합 보관 나이만 이동한다. 실제 완료·GCM·이벤트·영수증은 그대로 검증한다.
             db.update(
                     "UPDATE grade_batch SET created_at=created_at-interval '2"
-                        + " days',ended_at=ended_at-interval '2 days' WHERE id=?",
+                            + " days',ended_at=ended_at-interval '2 days' WHERE id=?",
                     batchId(batch));
             assertThat(
                             grade(
@@ -2993,34 +3022,34 @@ class StoryBatchIT extends DatabaseContextTest {
                     case "record" -> "NEW.evidence := 'changed';";
                     case "receipt" ->
                             "NEW.result_data :="
-                                + " jsonb_set(NEW.result_data,'{original,editRev}','\"1\"');";
+                                    + " jsonb_set(NEW.result_data,'{original,editRev}','\"1\"');";
                     case "result" ->
                             "IF NEW.action='EVIDENCE_CREATE' THEN NEW.detail := '{}'::jsonb; END"
-                                + " IF;";
+                                    + " IF;";
                     case "readDelete" ->
                             "DELETE FROM test_audit WHERE action='CONTENT_READ' AND"
-                                + " scope_key='batch:"
+                                    + " scope_key='batch:"
                                     + batch.original().batchKey()
                                     + "';";
                     case "readMutate" ->
                             "UPDATE test_audit SET detail='{}' WHERE action='CONTENT_READ' AND"
-                                + " scope_key='batch:"
+                                    + " scope_key='batch:"
                                     + batch.original().batchKey()
                                     + "';";
                     case "attempt" ->
                             "UPDATE grade_attempt SET provider_ref='changed' WHERE job_id IN"
-                                + " (SELECT id FROM grade_job WHERE batch_id="
+                                    + " (SELECT id FROM grade_job WHERE batch_id="
                                     + batchId(batch)
                                     + ");";
                     case "completion" ->
                             "UPDATE grade_attempt SET"
-                                + " completion_data=jsonb_set(completion_data,'{extra}','true')"
-                                + " WHERE job_id IN (SELECT id FROM grade_job WHERE batch_id="
+                                    + " completion_data=jsonb_set(completion_data,'{extra}','true')"
+                                    + " WHERE job_id IN (SELECT id FROM grade_job WHERE batch_id="
                                     + batchId(batch)
                                     + ");";
                     case "event" ->
                             "UPDATE grade_event SET detail='{}' WHERE job_id IN (SELECT id FROM"
-                                + " grade_job WHERE batch_id="
+                                    + " grade_job WHERE batch_id="
                                     + batchId(batch)
                                     + ");";
                     default ->
@@ -3142,7 +3171,7 @@ class StoryBatchIT extends DatabaseContextTest {
         String records =
                 db.queryForObject(
                         "SELECT jsonb_agg(to_jsonb(r) ORDER BY id)::text FROM review_record r WHERE"
-                            + " snapshot_id=?",
+                                + " snapshot_id=?",
                         String.class,
                         f.snapshot());
         var failure = create(f, UUID.randomUUID());
@@ -3169,7 +3198,7 @@ class StoryBatchIT extends DatabaseContextTest {
                 parse(
                         db.queryForObject(
                                 "SELECT detail::text FROM test_audit WHERE"
-                                    + " action='EVIDENCE_INVALIDATE' AND scope_key=?",
+                                        + " action='EVIDENCE_INVALIDATE' AND scope_key=?",
                                 String.class,
                                 "batch:" + failure.original().batchKey()));
         assertThat(fields(detail)).containsExactlyInAnyOrder("issueId", "snapshotId", "count");
@@ -3210,7 +3239,7 @@ class StoryBatchIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT jsonb_agg(to_jsonb(r) ORDER BY id)::text FROM review_record"
-                                    + " r WHERE snapshot_id=?",
+                                        + " r WHERE snapshot_id=?",
                                 String.class,
                                 f.snapshot()))
                 .isEqualTo(records);
@@ -3290,7 +3319,7 @@ class StoryBatchIT extends DatabaseContextTest {
                 parse(
                         db.queryForObject(
                                 "SELECT detail::text FROM test_audit WHERE"
-                                    + " action='EVIDENCE_INVALIDATE' AND scope_key=?",
+                                        + " action='EVIDENCE_INVALIDATE' AND scope_key=?",
                                 String.class,
                                 "batch:" + thirdFailure.original().batchKey()));
         assertThat(zero.path("count").intValue()).isZero();
@@ -3465,7 +3494,7 @@ class StoryBatchIT extends DatabaseContextTest {
         assertThat(
                         db.queryForObject(
                                 "SELECT jsonb_agg(to_jsonb(e) ORDER BY id)::text FROM evidence_set"
-                                    + " e WHERE snapshot_id=? AND set_key<>?",
+                                        + " e WHERE snapshot_id=? AND set_key<>?",
                                 String.class,
                                 f.snapshot(),
                                 c.original().setKey()))
@@ -3474,7 +3503,7 @@ class StoryBatchIT extends DatabaseContextTest {
                         parse(
                                         db.queryForObject(
                                                 "SELECT evidence_data::text FROM review_record"
-                                                    + " WHERE id=?",
+                                                        + " WHERE id=?",
                                                 String.class,
                                                 Long.parseLong(c.original().recordId())))
                                 .path("details")
@@ -3505,7 +3534,7 @@ class StoryBatchIT extends DatabaseContextTest {
                 .isEqualTo(b.original());
         db.update(
                 "UPDATE story_version SET"
-                    + " status='DRAFT',current_snapshot_id=NULL,edit_rev=edit_rev+1 WHERE id=?",
+                        + " status='DRAFT',current_snapshot_id=NULL,edit_rev=edit_rev+1 WHERE id=?",
                 f.version());
         db.update("UPDATE grade_runtime SET state='SUSPENDED',epoch=epoch+1 WHERE id=?", runtimeId);
         try {
@@ -3574,7 +3603,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             () ->
                                     db.update(
                                             "DELETE FROM test_audit WHERE action='EVIDENCE_CREATE'"
-                                                + " AND detail->>'recordId'=?",
+                                                    + " AND detail->>'recordId'=?",
                                             a.original().recordId()));
             case "readAudit" ->
                     withResolutionHistoryGuardDisabled(
@@ -3583,7 +3612,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             () ->
                                     db.update(
                                             "DELETE FROM test_audit WHERE action='CONTENT_READ' AND"
-                                                + " scope_key=?",
+                                                    + " scope_key=?",
                                             "batch:" + aBatch.original().batchKey()));
             case "invalidateAudit" ->
                     withResolutionHistoryGuardDisabled(
@@ -3592,8 +3621,8 @@ class StoryBatchIT extends DatabaseContextTest {
                             () ->
                                     db.update(
                                             "DELETE FROM test_audit WHERE"
-                                                + " action='EVIDENCE_INVALIDATE' AND"
-                                                + " detail->>'issueId'=?",
+                                                    + " action='EVIDENCE_INVALIDATE' AND"
+                                                    + " detail->>'issueId'=?",
                                             Long.toString(issue)));
             case "openAudit" ->
                     withResolutionHistoryGuardDisabled(
@@ -3602,7 +3631,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             () ->
                                     db.update(
                                             "DELETE FROM test_audit WHERE action='BATCH_ISSUE' AND"
-                                                + " detail->>'issueId'=?",
+                                                    + " detail->>'issueId'=?",
                                             Long.toString(issue)));
             case "count" ->
                     withResolutionHistoryGuardDisabled(
@@ -3622,8 +3651,8 @@ class StoryBatchIT extends DatabaseContextTest {
                             () ->
                                     db.update(
                                             "DELETE FROM test_action WHERE"
-                                                + " result_data->'original'->>'recordId'=? AND"
-                                                + " action='EVIDENCE_CREATE'",
+                                                    + " result_data->'original'->>'recordId'=? AND"
+                                                    + " action='EVIDENCE_CREATE'",
                                             a.original().recordId()));
             case "item" ->
                     withResolutionHistoryGuardDisabled(
@@ -3632,7 +3661,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             () ->
                                     db.update(
                                             "DELETE FROM evidence_item WHERE set_id=(SELECT id FROM"
-                                                + " evidence_set WHERE set_key=?)",
+                                                    + " evidence_set WHERE set_key=?)",
                                             a.original().setKey()));
             case "nonlower" ->
                     withResolutionHistoryGuardDisabled(
@@ -3664,8 +3693,8 @@ class StoryBatchIT extends DatabaseContextTest {
                         () ->
                                 db.update(
                                         "UPDATE evidence_set SET invalidated_at=(SELECT"
-                                            + " created_at+interval '1 microsecond' FROM"
-                                            + " review_record WHERE id=?) WHERE set_key=?",
+                                                + " created_at+interval '1 microsecond' FROM"
+                                                + " review_record WHERE id=?) WHERE set_key=?",
                                         Long.parseLong(b.original().recordId()),
                                         a.original().setKey()));
                 withResolutionHistoryGuardDisabled(
@@ -3674,10 +3703,10 @@ class StoryBatchIT extends DatabaseContextTest {
                         () ->
                                 db.update(
                                         "UPDATE test_audit SET created_at=(SELECT"
-                                            + " created_at+interval '2 microseconds' FROM"
-                                            + " review_record WHERE id=?) WHERE"
-                                            + " action='EVIDENCE_INVALIDATE' AND"
-                                            + " detail->>'issueId'=?",
+                                                + " created_at+interval '2 microseconds' FROM"
+                                                + " review_record WHERE id=?) WHERE"
+                                                + " action='EVIDENCE_INVALIDATE' AND"
+                                                + " detail->>'issueId'=?",
                                         Long.parseLong(b.original().recordId()),
                                         Long.toString(issue)));
             }
@@ -3738,7 +3767,7 @@ class StoryBatchIT extends DatabaseContextTest {
                     Long.toString(
                             id(
                                     "SELECT id FROM review_record WHERE snapshot_id=? AND"
-                                        + " kind='MODEL'",
+                                            + " kind='MODEL'",
                                     f.snapshot()));
         } else {
             Fixture owner = "foreignSnapshot".equals(target) ? fixture() : f;
@@ -3774,7 +3803,7 @@ class StoryBatchIT extends DatabaseContextTest {
 
     /** 현재 권한은 재생에도 필수이며 전역 키를 다른 행위자·업무 의도로 재사용할 수 없다. */
     @ParameterizedTest
-    @ValueSource(strings = {"global", "scoped", "actor", "input", "action"})
+    @ValueSource(strings = {"global", "scoped", "actor", "input", "action", "member"})
     void gradeReplayReauthorizesAndRejectsGlobalIntentConflicts(String defect) {
         Fixture f = fixture();
         var batch = gradePass(f);
@@ -3801,8 +3830,20 @@ class StoryBatchIT extends DatabaseContextTest {
                     () ->
                             db.update(
                                     "UPDATE test_action SET action='BATCH_CREATE' WHERE"
-                                        + " request_key=?",
+                                            + " request_key=?",
                                     key));
+        if ("member".equals(defect)) {
+            long member = receiptMember();
+            withResolutionHistoryGuardDisabled(
+                    "test_action",
+                    "tr_test_action_immutable",
+                    () ->
+                            db.update(
+                                    "UPDATE test_action SET admin_id=NULL,member_id=? WHERE"
+                                            + " request_key=?",
+                                    member,
+                                    key));
+        }
         Actor caller = actor;
         String before = gradeHistory(f);
         assertThatThrownBy(
@@ -3932,7 +3973,7 @@ class StoryBatchIT extends DatabaseContextTest {
                     case "set" -> "UPDATE evidence_set SET summary_data='{}' WHERE id=" + set + ";";
                     case "audit" ->
                             "UPDATE test_audit SET detail='{}' WHERE action='EVIDENCE_INVALIDATE'"
-                                + " AND scope_key='batch:"
+                                    + " AND scope_key='batch:"
                                     + failed.original().batchKey()
                                     + "';";
                     case "record" ->
@@ -3942,7 +3983,7 @@ class StoryBatchIT extends DatabaseContextTest {
                     case "item" -> "DELETE FROM evidence_item WHERE set_id=" + set + ";";
                     default ->
                             "UPDATE grade_attempt SET provider_ref='changed' WHERE job_id IN"
-                                + " (SELECT id FROM grade_job WHERE batch_id="
+                                    + " (SELECT id FROM grade_job WHERE batch_id="
                                     + batchId(pass)
                                     + ");";
                 };
@@ -3966,11 +4007,11 @@ class StoryBatchIT extends DatabaseContextTest {
         if ("invalidationTime".equals(fault)) {
             db.execute(
                     "CREATE FUNCTION batch_test_mutation() RETURNS trigger LANGUAGE plpgsql AS $$"
-                        + " BEGIN NEW.invalidated_at := NEW.invalidated_at+interval '1 second';"
-                        + " RETURN NEW; END $$");
+                            + " BEGIN NEW.invalidated_at := NEW.invalidated_at+interval '1 second';"
+                            + " RETURN NEW; END $$");
             db.execute(
                     "CREATE TRIGGER batch_test_mutation BEFORE UPDATE ON evidence_set FOR EACH ROW"
-                        + " EXECUTE FUNCTION batch_test_mutation()");
+                            + " EXECUTE FUNCTION batch_test_mutation()");
         } else
             trigger("test_audit", "IF NEW.action='BATCH_AGGREGATE' THEN " + mutation + " END IF;");
         try {
@@ -4075,7 +4116,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             "UPDATE evidence_set SET summary_data='{}' WHERE id=" + set + ";";
                     default ->
                             "DELETE FROM test_audit WHERE action='CONTENT_READ' AND"
-                                + " scope_key='batch:"
+                                    + " scope_key='batch:"
                                     + a.original().batchKey()
                                     + "';";
                 };
@@ -4126,7 +4167,7 @@ class StoryBatchIT extends DatabaseContextTest {
         trigger(
                 "test_action",
                 "IF NEW.action='EVIDENCE_CREATE' THEN PERFORM pg_advisory_xact_lock(813618); END"
-                    + " IF;");
+                        + " IF;");
         try {
             var a =
                     executor.submit(
@@ -4263,7 +4304,7 @@ class StoryBatchIT extends DatabaseContextTest {
         trigger(
                 "test_action",
                 "IF NEW.action='EVIDENCE_CREATE' THEN PERFORM pg_advisory_xact_lock(813619); END"
-                    + " IF;");
+                        + " IF;");
         try {
             var blocker =
                     executor.submit(
@@ -4498,7 +4539,7 @@ class StoryBatchIT extends DatabaseContextTest {
         long issue =
                 id(
                         "SELECT id FROM execution_issue WHERE batch_id=? AND kind='INFRA' AND"
-                            + " state='OPEN'",
+                                + " state='OPEN'",
                         batchId(failed));
         assertThat(count("evidence_set", "set_key=? AND available_yn", grade.original().setKey()))
                 .isEqualTo(1);
@@ -4582,7 +4623,7 @@ class StoryBatchIT extends DatabaseContextTest {
                             count(
                                     "evidence_set",
                                     "set_key=? AND available_yn AND invalidated_at IS NULL AND"
-                                        + " invalidated_issue_id IS NULL",
+                                            + " invalidated_issue_id IS NULL",
                                     grade.original().setKey()))
                     .isEqualTo(1);
         } finally {
@@ -4711,7 +4752,7 @@ class StoryBatchIT extends DatabaseContextTest {
     private String evidenceSets(Fixture f) {
         return db.queryForObject(
                 "SELECT jsonb_agg(to_jsonb(e) ORDER BY id)::text FROM evidence_set e WHERE"
-                    + " snapshot_id=?",
+                        + " snapshot_id=?",
                 String.class,
                 f.snapshot());
     }

@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** 최신 V18 검수 물리와 추가 전용 보호를 검사한다. 폐기형 행·역할은 검수 품질 증거가 아니다. */
+/** 최신 V22 검수 물리와 추가 전용 보호를 검사한다. 폐기형 행·역할은 검수 품질 증거가 아니다. */
 class ReviewRecordSchemaIT {
     private static PostgreSQLContainer<?> postgres;
     private static JdbcTemplate jdbc;
@@ -41,12 +41,12 @@ class ReviewRecordSchemaIT {
                                 "SELECT max(version::integer) FROM public.flyway_schema_history"
                                         + " WHERE success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT count(*) FROM public.flyway_schema_history WHERE success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
     }
 
     @AfterAll

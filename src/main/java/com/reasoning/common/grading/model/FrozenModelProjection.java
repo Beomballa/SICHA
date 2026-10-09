@@ -8,6 +8,7 @@ import com.reasoning.common.grading.model.GradeModels.Report;
 import com.reasoning.common.grading.service.FrozenDatasetValidator.SelectedSample;
 import com.reasoning.common.grading.service.FrozenDatasetValidator.ValidatedDataset;
 import com.reasoning.common.grading.service.GradeResultValidator;
+import com.reasoning.common.story.model.FrozenSnapshotCodec.FrozenSnapshot;
 import com.reasoning.common.util.CommonUtil;
 
 import java.nio.charset.StandardCharsets;
@@ -32,13 +33,41 @@ public final class FrozenModelProjection {
      * @throws IllegalArgumentException null·다른 집합·INPUT_ERROR이면 원인 없는 INVALID_MODEL_PROJECTION
      */
     public static SemanticInput project(ValidatedDataset dataset, SelectedSample selected) {
-        byte[] projected = SnapshotJson.encode(payload(dataset, selected));
-        SemanticInput input = decodeCanonical(projected);
+        if (dataset == null || selected == null || selected.report() == null) throw invalid();
+        try {
+            if (dataset.select(selected.code()) != selected) throw invalid();
+            return projectPayload(dataset.frozenSnapshot(), selected.report());
+        } catch (IllegalArgumentException exception) {
+            throw invalid();
+        }
+    }
 
-        byte[] expected = SnapshotJson.encode(payload(dataset, selected));
-        if (!Arrays.equals(input.payloadBytes(), expected)
-                || !input.report().equals(selected.report())) throw invalid();
-        return input;
+    /**
+     * 실제 고정 사본과 검증된 회원 REPORT를 BATCH와 동일한 답안 없는 의미 입력으로 투영한다. 사본의 실행 자격·현재성·완성도는 호출자가 먼저 검사하며
+     * fixture는 읽지 않는다.
+     *
+     * @param frozen 스키마·정렬을 통과한 실제 전체 고정 사본; null 불가
+     * @param report REPORT-1 경계에서 파싱·정규화된 실제 제출값; null 불가
+     * @return BATCH와 동일한 정규 바이트·보고서·등록 순서 좌표를 소유하는 입력
+     * @throws IllegalArgumentException 무효 사본·보고서·투영이면 INVALID_MODEL_PROJECTION
+     */
+    public static SemanticInput projectTest(FrozenSnapshot frozen, Report report) {
+        return projectPayload(frozen, report);
+    }
+
+    /** 두 실행 경로가 동일한 제외 목록과 정규 바이트 검증을 사용한다. */
+    private static SemanticInput projectPayload(FrozenSnapshot frozen, Report report) {
+        if (frozen == null || report == null) throw invalid();
+        try {
+            byte[] projected =
+                    SnapshotJson.encode(payload(frozen.payload().get("resources"), report));
+            SemanticInput input = decodeCanonical(projected);
+            if (!Arrays.equals(input.payloadBytes(), projected) || !input.report().equals(report))
+                throw invalid();
+            return input;
+        } catch (IllegalArgumentException exception) {
+            throw invalid();
+        }
     }
 
     /**
@@ -64,18 +93,15 @@ public final class FrozenModelProjection {
 
     /**
      * 기대값·다른 보고서·장애·답안/공개 원고·정답 코드·서버 범인 명제를 제외한다. CULPRIT 저장 규칙은 그대로 두고 모델 사본에서만 claims와 단계
-     * routes를 비운다. 전체 값 검증은 실제 FrozenSnapshotCodec·FrozenDatasetValidator가 담당한다.
+     * routes를 비운다. 전체 값 검증은 BATCH의 FrozenDatasetValidator 또는 TEST의 실제 소스 검증 경계가 담당한다.
      *
-     * @param dataset 전체 값·참조·유한 규칙 검증을 통과한 불변 고정 집합
-     * @param selected 같은 집합이 소유한 정상 REPORT 선택값
+     * @param resources 고정 사본의 자원 배열 노드
+     * @param report 정규화된 정상 REPORT 선택값 또는 실제 제출값
      * @return 정확한 기존 허용 필드와 배열 순서를 보존한 새 투영 노드
-     * @throws IllegalArgumentException null·다른 집합·INPUT_ERROR이면 원인 없는 고정 오류
+     * @throws IllegalArgumentException 불완전한 규칙이면 원인 없는 고정 오류
      */
-    private static JsonNode payload(ValidatedDataset dataset, SelectedSample selected) {
-        if (dataset == null || selected == null || selected.report() == null) throw invalid();
+    private static JsonNode payload(JsonNode resources, Report report) {
         try {
-            if (dataset.select(selected.code()) != selected) throw invalid();
-            JsonNode resources = dataset.frozenSnapshot().payload().get("resources");
             ObjectNode context = object();
             context.set(
                     "facts", rows(resources.get("facts"), "code", "statement", "truth", "basis"));
@@ -106,6 +132,7 @@ public final class FrozenModelProjection {
                                 "partialText",
                                 "rejectText");
                 JsonNode sourceRule = source.get("ruleData");
+                if (sourceRule == null || sourceRule.isNull()) throw invalid();
                 ObjectNode rule = fields(sourceRule, "formatNo", "requiredNotice");
                 if ("CULPRIT".equals(source.get("category").textValue())) {
                     rule.putArray("claims");
@@ -127,7 +154,6 @@ public final class FrozenModelProjection {
             context.set(
                     "rubricClues",
                     rows(resources.get("rubricClues"), "rubricCode", "clueCode", "linkText"));
-            Report report = selected.report();
             ObjectNode payload = object().put("formatNo", 1);
             payload.set("gradingContext", context);
             payload.set(

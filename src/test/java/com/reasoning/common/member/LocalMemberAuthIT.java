@@ -1,6 +1,7 @@
 package com.reasoning.common.member;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -9,20 +10,34 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
+import com.reasoning.admin.auth.session.AdminSessionAdapter;
+import com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal;
 import com.reasoning.common.auth.DatabaseContextTest;
 import com.reasoning.common.auth.TestKeys;
 import com.reasoning.common.auth.service.AuthProperties;
+import com.reasoning.common.auth.service.CryptoService;
+import com.reasoning.common.grading.FrozenSnapshotContractTest;
+import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier;
+import com.reasoning.common.grading.engine.LocalSemanticEngine;
+import com.reasoning.common.grading.model.GradeDictionary;
+import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.member.auth.MemberAuthConfiguration;
 import com.reasoning.common.member.auth.MemberMailTransport;
 import com.reasoning.common.member.auth.MemberPolicyEvidenceRegistry;
 import com.reasoning.common.member.auth.MemberPolicyGate;
+import com.reasoning.common.member.auth.PlaytestPolicyGate;
+import com.reasoning.common.story.model.FrozenSnapshotCodec;
+import com.reasoning.common.story.service.PlaytestInvitationService;
 
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -32,9 +47,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -48,41 +66,88 @@ import java.util.concurrent.Executors;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
-class LocalMemberAuthIT extends DatabaseContextTest {
+@Import(LocalMemberAuthIT.Installation.class)
+public class LocalMemberAuthIT extends DatabaseContextTest {
     @Container
-    static final PostgreSQLContainer<?> postgres =
+    protected static final PostgreSQLContainer<?> postgres =
             new PostgreSQLContainer<>(
                     DockerImageName.parse(
                                     "postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1")
                             .asCompatibleSubstituteFor("postgres"));
 
-    private static final ObjectMapper JSON = new ObjectMapper();
+    protected static final ObjectMapper JSON = new ObjectMapper();
     private static final GreenMail SMTP = smtp();
     private static final String PASSWORD = "Synthetic-member-password-987!";
     private static final String BASE = "/api/member/auth";
-    @Autowired MockMvc mvc;
-    @Autowired JdbcTemplate db;
+    private static final java.util.concurrent.atomic.AtomicInteger CLIENT_SEQUENCE =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private String fixtureAddress;
+    @Autowired protected MockMvc mvc;
+    @Autowired protected JdbcTemplate db;
     @Autowired AuthProperties keys;
     @Autowired MemberAuthConfiguration.Properties configuration;
     @Autowired MemberMailTransport mail;
-    @Autowired com.reasoning.common.member.auth.MemberAuthService service;
+    @Autowired protected com.reasoning.common.member.auth.MemberAuthService service;
+    @Autowired protected PlaytestInvitationService invitations;
+    @Autowired AdminSessionAdapter adminSessions;
+    @Autowired protected CryptoService crypto;
+    @Autowired GradeRuntimeRepository runtimes;
+    @Autowired InstalledRuntimeManifestVerifier syntheticRuntime;
     private String code;
     private String noticeHash;
     private long policy;
+    private long owner;
+    protected String invitationSid;
+    protected AdminPrincipal invitationActor;
+    protected String invitationStoryCode;
+
+    @TestConfiguration(proxyBeanMethods = false)
+    public static class Installation {
+        /** 모델 호출 없이 설치 지문만 검증할 합성 로컬 런타임을 제공한다. */
+        @Bean
+        InstalledRuntimeManifestVerifier syntheticRuntime() {
+            var dictionary =
+                    new GradeDictionary(
+                            "H5_SYNTHETIC", List.of(new GradeDictionary.Term("ONE", "개념", "합성")));
+            var settings =
+                    new LocalSemanticEngine.Settings(
+                            URI.create("http://127.0.0.1:9"),
+                            "qwen3:8b",
+                            "a".repeat(64),
+                            dictionary.sha256(),
+                            "{{ .System }}{{ .Prompt }}{{ .Response }}",
+                            65536,
+                            4096,
+                            0,
+                            1,
+                            false,
+                            Duration.ofSeconds(30));
+            return new InstalledRuntimeManifestVerifier(
+                    new LocalSemanticEngine(settings),
+                    dictionary,
+                    new InstalledRuntimeManifestVerifier.InstalledProfile(
+                            "H5_SYNTHETIC", "LOCAL", "1", "RULE_20260924"));
+        }
+
+        /** 실제 서비스의 설치 지도를 시험 전용 합성 descriptor에 연결한다. */
+        @Bean
+        @Primary
+        @org.springframework.beans.factory.annotation.Qualifier("gradeInstallations")
+        Map<String, InstalledRuntimeManifestVerifier> h5TestInstallations(
+                InstalledRuntimeManifestVerifier syntheticRuntime) {
+            return Map.of("H5_SYNTHETIC", syntheticRuntime);
+        }
+    }
 
     private static GreenMail smtp() {
         var result = new GreenMail(new ServerSetup(0, "127.0.0.1", ServerSetup.PROTOCOL_SMTP));
         result.start();
+        Runtime.getRuntime().addShutdownHook(new Thread(result::stop));
         return result;
     }
 
-    @AfterAll
-    static void closeMail() {
-        SMTP.stop();
-    }
-
     @DynamicPropertySource
-    static void properties(DynamicPropertyRegistry properties) {
+    protected static void properties(DynamicPropertyRegistry properties) {
         properties.add("spring.datasource.url", postgres::getJdbcUrl);
         properties.add("spring.datasource.username", postgres::getUsername);
         properties.add("spring.datasource.password", postgres::getPassword);
@@ -106,11 +171,14 @@ class LocalMemberAuthIT extends DatabaseContextTest {
 
     /** 보호된 외부 파일은 합성 절차 기록만 포함하며 운영 등록에는 쓰지 않는다. */
     @BeforeEach
-    void ready() throws Exception {
+    protected void ready() throws Exception {
+        int client = CLIENT_SEQUENCE.incrementAndGet();
+        fixtureAddress = "198.18." + ((client >>> 8) & 255) + "." + (client & 255);
         SMTP.purgeEmailFromAllMailboxes();
         configuration.setCollectionEnabled(true);
+        configuration.setPlaytestCollectionEnabled(false);
         db.update("UPDATE privacy_policy SET state='RETIRED' WHERE state='ACTIVE'");
-        long owner =
+        owner =
                 db.queryForObject(
                         "INSERT INTO admin_account(account_key,can_manage) VALUES (?,true)"
                                 + " RETURNING id",
@@ -397,6 +465,11 @@ class LocalMemberAuthIT extends DatabaseContextTest {
                 mvc.perform(
                                 post(path)
                                         .secure(true)
+                                        .with(
+                                                request -> {
+                                                    request.setRemoteAddr(fixtureAddress);
+                                                    return request;
+                                                })
                                         .contentType("application/json")
                                         .content(JSON.writeValueAsBytes(body)))
                         .andExpect(status().is(expected))
@@ -412,9 +485,10 @@ class LocalMemberAuthIT extends DatabaseContextTest {
         return node;
     }
 
-    private JsonNode account(String email) throws Exception {
+    protected JsonNode account(String email) throws Exception {
+        int expectedMailCount = SMTP.getReceivedMessages().length + 1;
         var flow = send(BASE + "/email/signup", Map.of("email", email), 202);
-        assertThat(SMTP.waitForIncomingEmail(5000, 1)).isTrue();
+        assertThat(SMTP.waitForIncomingEmail(5000, expectedMailCount)).isTrue();
         var messages = SMTP.getReceivedMessages();
         String content = messages[messages.length - 1].getContent().toString();
         var match = java.util.regex.Pattern.compile("[0-9]{8}").matcher(content);
@@ -446,6 +520,589 @@ class LocalMemberAuthIT extends DatabaseContextTest {
                         "requestKey",
                         UUID.randomUUID().toString()),
                 201);
+    }
+
+    /** 독립 PLAYTEST 소유·근거·고지를 합성 파일과 실제 정책 행으로 등록한다. */
+    protected String playtestPolicy() throws Exception {
+        String policyCode = "H5_" + UUID.randomUUID().toString().replace("-", "");
+        Instant from = Instant.now().truncatedTo(ChronoUnit.SECONDS).minusSeconds(3600);
+        Instant until = from.plusSeconds(86400);
+        var notice =
+                JSON.valueToTree(
+                        Map.of(
+                                "version",
+                                "1",
+                                "body",
+                                "합성 초대 고지",
+                                "contact",
+                                "synthetic@example.invalid"));
+        String hash = PlaytestPolicyGate.noticeHash(policyCode, notice);
+        var evidence = new TreeMap<String, Object>();
+        var records = new ArrayList<Map<String, Object>>();
+        for (String kind : MemberPolicyEvidenceRegistry.KINDS) {
+            String ref = "h5:" + kind;
+            Object claims =
+                    switch (kind) {
+                        case "responsibility" ->
+                                Map.of(
+                                        "purpose",
+                                        "합성 초대",
+                                        "items",
+                                        List.of("synthetic invitation"),
+                                        "contact",
+                                        "synthetic@example.invalid");
+                        case "access" ->
+                                Map.of(
+                                        "privilegedReaders",
+                                        List.of("synthetic"),
+                                        "securityOperators",
+                                        List.of("synthetic"),
+                                        "erasureOperators",
+                                        List.of("synthetic"),
+                                        "boundaries",
+                                        "isolated test");
+                        case "keys" ->
+                                Map.of(
+                                        "custodians",
+                                        List.of("synthetic"),
+                                        "rotationProcedure",
+                                        "synthetic fixture",
+                                        "restoreProcedure",
+                                        "synthetic fixture");
+                        case "processors" ->
+                                Map.of(
+                                        "gradingProcessors",
+                                        List.of("none"),
+                                        "storageRestrictions",
+                                        "synthetic only",
+                                        "deletionProcedure",
+                                        "purge fixture",
+                                        "confirmationProcedure",
+                                        "test assertions");
+                        case "copies" ->
+                                Map.of(
+                                        "inventory",
+                                        List.of("none"),
+                                        "deletionLedger",
+                                        "synthetic",
+                                        "restoreGuard",
+                                        "synthetic");
+                        case "verification" ->
+                                Map.of(
+                                        "consent",
+                                        "synthetic",
+                                        "revocation",
+                                        "synthetic",
+                                        "isolatedRestore",
+                                        "synthetic",
+                                        "deletionRecordsApplied",
+                                        "synthetic",
+                                        "limitations",
+                                        "not operational evidence");
+                        default -> throw new IllegalArgumentException(kind);
+                    };
+            byte[] bytes =
+                    JSON.writeValueAsBytes(
+                            Map.of(
+                                    "formatNo",
+                                    1,
+                                    "kind",
+                                    kind,
+                                    "ref",
+                                    ref,
+                                    "envCode",
+                                    "SYNTHETIC_HTTP",
+                                    "scope",
+                                    "PLAYTEST",
+                                    "ownerId",
+                                    owner,
+                                    "noticeHash",
+                                    hash,
+                                    "verifiedAt",
+                                    from.toString(),
+                                    "validUntil",
+                                    until.toString(),
+                                    "claims",
+                                    claims));
+            String sha = MemberPolicyEvidenceRegistry.sha256(bytes);
+            records.add(
+                    Map.of(
+                            "kind",
+                            kind,
+                            "ref",
+                            ref,
+                            "path",
+                            protectedFile(bytes).toString(),
+                            "sha256",
+                            sha));
+            evidence.put(
+                    kind,
+                    Map.of(
+                            "ref",
+                            ref,
+                            "sha256",
+                            sha,
+                            "envCode",
+                            "SYNTHETIC_HTTP",
+                            "scope",
+                            "PLAYTEST",
+                            "verifiedAt",
+                            from.toString(),
+                            "validUntil",
+                            until.toString()));
+        }
+        configuration.setPlaytestEvidenceRegistryFile(
+                protectedFile(
+                                JSON.writeValueAsBytes(
+                                        Map.of(
+                                                "formatNo",
+                                                1,
+                                                "scope",
+                                                "PLAYTEST",
+                                                "envCode",
+                                                "SYNTHETIC_HTTP",
+                                                "ownerId",
+                                                owner,
+                                                "noticeHash",
+                                                hash,
+                                                "validFrom",
+                                                from.toString(),
+                                                "validUntil",
+                                                until.toString(),
+                                                "records",
+                                                records)))
+                        .toString());
+        var retention =
+                Map.of(
+                        "inviteSeconds",
+                        604800,
+                        "lobbySeconds",
+                        1800,
+                        "resultSeconds",
+                        86400,
+                        "rawSeconds",
+                        7776000,
+                        "selectedSeconds",
+                        31536000,
+                        "backupMaxSeconds",
+                        3024000);
+        var document =
+                Map.of(
+                        "formatNo",
+                        1,
+                        "notice",
+                        notice,
+                        "validFrom",
+                        from.toString(),
+                        "validUntil",
+                        until.toString(),
+                        "retention",
+                        retention,
+                        "evidence",
+                        evidence);
+        db.update(
+                "INSERT INTO"
+                    + " privacy_policy(code,env_code,scope,state,notice_hash,policy_data,owner_id)"
+                    + " VALUES (?,'SYNTHETIC_HTTP','PLAYTEST','DRAFT',?,?::jsonb,?)",
+                policyCode,
+                hash,
+                JSON.writeValueAsString(document),
+                owner);
+        db.update("UPDATE privacy_policy SET state='ACTIVE' WHERE code=?", policyCode);
+        configuration.setPlaytestCollectionEnabled(true);
+        return policyCode;
+    }
+
+    /** 저장 REVIEW 사본과 설치 지문·실제 세션을 사용해 기능 초대를 생성한다. */
+    protected UUID invitation(List<UUID> members) {
+        db.update("UPDATE admin_account SET can_review=true WHERE id=?", owner);
+        UUID accountKey =
+                db.queryForObject(
+                        "SELECT account_key FROM admin_account WHERE id=?", UUID.class, owner);
+        var prepared = adminSessions.prepare();
+        var principal = new AdminPrincipal(owner, accountKey, UUID.randomUUID(), 1);
+        adminSessions.save(prepared, principal);
+        db.update(
+                "WITH t AS MATERIALIZED (SELECT clock_timestamp() n) INSERT INTO"
+                    + " admin_session(session_key,account_id,sid_hash,auth_rev,state,started_at,last_action_at,expires_at,reauth_at,activated_at)"
+                    + " SELECT ?,?,?,1,'ACTIVE',n,n,n+interval '8 hours',n,n FROM t",
+                principal.sessionKey(),
+                owner,
+                crypto.sessionHash(prepared.id()));
+        long runtime =
+                runtimes.registerRuntime(
+                                "H5_SYNTHETIC",
+                                syntheticRuntime.configHash(),
+                                syntheticRuntime.registrationManifest().toString())
+                        .id();
+        assertThat(runtime).isPositive();
+        String storyCode = "H5_" + UUID.randomUUID().toString().replace("-", "").toUpperCase();
+        invitationSid = prepared.id();
+        invitationActor = principal;
+        invitationStoryCode = storyCode;
+        long story =
+                db.queryForObject(
+                        "INSERT INTO story(code,owner_id) VALUES (?,?) RETURNING id",
+                        Long.class,
+                        storyCode,
+                        owner);
+        db.update(
+                "INSERT INTO story_access(story_id,admin_id,permission,granted_by) VALUES"
+                        + " (?,?,'REVIEW',?)",
+                story,
+                owner,
+                owner);
+        long version =
+                db.queryForObject(
+                        "INSERT INTO"
+                            + " story_version(story_id,version_no,title,policy_code,created_by,updated_by)"
+                            + " VALUES (?,1,'합성 초대','RULE_20260924',?,?) RETURNING id",
+                        Long.class,
+                        story,
+                        owner,
+                        owner);
+        db.update(
+                "INSERT INTO story_role(version_id,code,name) VALUES (?,'R1','합성 A'),(?,'R2','합성"
+                        + " B')",
+                version,
+                version);
+        db.update("INSERT INTO story_pair(version_id,role_a,role_b) VALUES (?,'R1','R2')", version);
+        var source = FrozenSnapshotContractTest.complete();
+        source.put("storyCode", storyCode);
+        ((com.fasterxml.jackson.databind.node.ObjectNode)
+                        source.path("resources").path("hints").get(0))
+                .put("body", "합성 두 번째 힌트");
+        ((com.fasterxml.jackson.databind.node.ArrayNode) source.path("resources").path("hints"))
+                .addObject()
+                .put("code", "H3")
+                .put("level", 3)
+                .put("body", "합성 세 번째 힌트");
+        for (var sample : source.path("resources").path("gradeSamples"))
+            if (!sample.path("checkedBy").isNull())
+                ((com.fasterxml.jackson.databind.node.ObjectNode) sample)
+                        .put("checkedBy", accountKey.toString());
+        var frozen = FrozenSnapshotCodec.freeze(source);
+        long snapshot =
+                db.queryForObject(
+                        "INSERT INTO"
+                            + " review_snapshot(version_id,edit_rev,payload,request_key,created_by)"
+                            + " VALUES (?,0,?::jsonb,?,?) RETURNING id",
+                        Long.class,
+                        version,
+                        new String(frozen.payloadBytes(), StandardCharsets.UTF_8),
+                        UUID.randomUUID(),
+                        owner);
+        db.update(
+                "UPDATE story_version SET status='REVIEW',current_snapshot_id=? WHERE id=?",
+                snapshot,
+                version);
+        var result =
+                invitations.createInvitation(
+                        prepared.id(),
+                        principal,
+                        storyCode,
+                        1,
+                        0,
+                        snapshot,
+                        "H5_SYNTHETIC",
+                        "FUNCTIONAL",
+                        "R1",
+                        "R2",
+                        members,
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
+        assertThat(result.replayed()).isFalse();
+        return (UUID) result.current().get("testKey");
+    }
+
+    /** 합성 PG·SMTP에서 별도 두 LOCAL 회원의 고지·세대·수정번호와 동의 영수증을 검사한다. */
+    @Test
+    void realPostgresTwoMemberInvitationAndConsent() throws Exception {
+        playtestPolicy();
+        var first = account("h5-first-" + UUID.randomUUID() + "@example.invalid");
+        var second = account("h5-second-" + UUID.randomUUID() + "@example.invalid");
+        var unrelated = account("h5-other-" + UUID.randomUUID() + "@example.invalid");
+        String a = first.path("accessToken").asText();
+        String b = second.path("accessToken").asText();
+        String outsider = unrelated.path("accessToken").asText();
+        UUID memberA = invitations.getMemberIdentity(a, UUID.randomUUID()).memberKey();
+        UUID memberB = invitations.getMemberIdentity(b, UUID.randomUUID()).memberKey();
+        UUID key = invitation(List.of(memberA, memberB));
+        var adminDetail =
+                invitations.getInvitationDetail(
+                        invitationSid,
+                        invitationActor,
+                        invitationStoryCode,
+                        1,
+                        key,
+                        UUID.randomUUID());
+        assertThat(adminDetail.completedFeedbackCount()).isZero();
+        assertThat(adminDetail.reviewState()).isEqualTo("NONE");
+        var listResponse =
+                mvc.perform(
+                                get("/api/playtests/invitations")
+                                        .secure(true)
+                                        .header("Authorization", "Bearer " + a))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        var page = JSON.readTree(listResponse.getResponse().getContentAsByteArray());
+        assertThat(page.path("items").toString())
+                .contains(key.toString())
+                .doesNotContain(memberB.toString());
+        assertThat(page.path("items").get(0).path("title").asText()).isNotBlank();
+        assertThat(page.path("items").get(0).path("noticeSummary").asText())
+                .contains("90일", "365일");
+        mvc.perform(
+                        get("/api/playtests/" + key)
+                                .secure(true)
+                                .header("Authorization", "Bearer " + outsider))
+                .andExpect(status().isNotFound());
+        var before = invitations.getMemberInvitationDetail(a, key, UUID.randomUUID());
+        assertThat(before.state()).isEqualTo("WAITING");
+        assertThat(before.self().inviteGen()).isEqualTo(1);
+        assertThat(before.rev()).isEqualTo("0");
+        assertThat(before.draftRev()).isEqualTo("0");
+        assertThat(before.self().roleCode()).isNull();
+        assertThatThrownBy(
+                        () ->
+                                invitations.getMemberInvitationDetail(
+                                        outsider, key, UUID.randomUUID()))
+                .hasMessageContaining("NOT_FOUND");
+        var notice = invitations.getConsentNotice(a, key, UUID.randomUUID());
+        UUID request = UUID.randomUUID();
+        assertThatThrownBy(
+                        () ->
+                                invitations.acceptInvitation(
+                                        a,
+                                        key,
+                                        1,
+                                        0,
+                                        notice.policyCode(),
+                                        "0".repeat(64),
+                                        UUID.randomUUID(),
+                                        UUID.randomUUID()))
+                .hasMessageContaining("POLICY_CHANGED");
+        var httpAccept =
+                mvc.perform(
+                                post("/api/playtests/" + key + "/accept")
+                                        .secure(true)
+                                        .header("Authorization", "Bearer " + a)
+                                        .contentType("application/json")
+                                        .content(
+                                                JSON.writeValueAsBytes(
+                                                        Map.of(
+                                                                "expectedRev",
+                                                                "0",
+                                                                "inviteGen",
+                                                                1,
+                                                                "blindDeclared",
+                                                                false,
+                                                                "policyCode",
+                                                                notice.policyCode(),
+                                                                "noticeHash",
+                                                                notice.noticeHash(),
+                                                                "requestKey",
+                                                                request.toString()))))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        assertThat(
+                        JSON.readTree(httpAccept.getResponse().getContentAsByteArray())
+                                .path("replayed")
+                                .asBoolean())
+                .isFalse();
+        var accepted =
+                invitations.acceptInvitation(
+                        a,
+                        key,
+                        1,
+                        0,
+                        notice.policyCode(),
+                        notice.noticeHash(),
+                        request,
+                        UUID.randomUUID());
+        assertThat(accepted.replayed()).isTrue();
+        assertThat(accepted.original()).containsEntry("rev", "1");
+        assertThat(accepted.current()).containsEntry("rev", "1");
+        assertThat(
+                        invitations
+                                .acceptInvitation(
+                                        a,
+                                        key,
+                                        1,
+                                        0,
+                                        notice.policyCode(),
+                                        notice.noticeHash(),
+                                        request,
+                                        UUID.randomUUID())
+                                .replayed())
+                .isTrue();
+        var next = invitations.getConsentNotice(b, key, UUID.randomUUID());
+        assertThat(next.revision()).isEqualTo("1");
+        assertThatThrownBy(
+                        () ->
+                                invitations.acceptInvitation(
+                                        b,
+                                        key,
+                                        1,
+                                        0,
+                                        next.policyCode(),
+                                        next.noticeHash(),
+                                        UUID.randomUUID(),
+                                        UUID.randomUUID()))
+                .hasMessageContaining("EDIT_CONFLICT");
+        invitations.acceptInvitation(
+                b,
+                key,
+                1,
+                1,
+                next.policyCode(),
+                next.noticeHash(),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+        var afterPartner =
+                invitations.acceptInvitation(
+                        a,
+                        key,
+                        1,
+                        0,
+                        notice.policyCode(),
+                        notice.noticeHash(),
+                        request,
+                        UUID.randomUUID());
+        assertThat(afterPartner.changed()).isFalse();
+        assertThat(afterPartner.original()).containsEntry("rev", "1");
+        assertThat(afterPartner.current()).containsEntry("rev", "2");
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_audit WHERE action='INVITATION_ACCEPT'"
+                                        + " AND scope_key=?",
+                                Integer.class,
+                                "test:" + key))
+                .isEqualTo(2);
+        var stored =
+                db.queryForMap(
+                        "SELECT invite_until=created_at+interval '7 days' AS invite_bound,"
+                            + " ready_until<=invite_until AND"
+                            + " ready_until<=clock_timestamp()+interval '30 minutes' AS lobby_bound"
+                            + " FROM play_test WHERE test_key=?",
+                        key);
+        assertThat(stored.get("invite_bound")).isEqualTo(true);
+        assertThat(stored.get("lobby_bound")).isEqualTo(true);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_member m JOIN play_test t ON"
+                                        + " t.id=m.test_id WHERE t.test_key=? AND"
+                                        + " m.invite_state='ACCEPTED' AND m.accepted_notice_hash=?",
+                                Integer.class,
+                                key,
+                                notice.noticeHash()))
+                .isEqualTo(2);
+    }
+
+    /** 감사 쓰기 실패는 동의와 수정번호를 함께 되돌리고 정책 중단·REVIEW 철회는 조회를 차단한다. */
+    @Test
+    void realPostgresAuditRollbackPolicyAndSourceWithdrawal() throws Exception {
+        String policyCode = playtestPolicy();
+        var first = account("h5-rollback-a-" + UUID.randomUUID() + "@example.invalid");
+        var second = account("h5-rollback-b-" + UUID.randomUUID() + "@example.invalid");
+        String a = first.path("accessToken").asText();
+        UUID key =
+                invitation(
+                        List.of(
+                                invitations.getMemberIdentity(a, UUID.randomUUID()).memberKey(),
+                                invitations
+                                        .getMemberIdentity(
+                                                second.path("accessToken").asText(),
+                                                UUID.randomUUID())
+                                        .memberKey()));
+        var notice = invitations.getConsentNotice(a, key, UUID.randomUUID());
+        db.execute(
+                "CREATE FUNCTION public.h5_reject_consent_audit() RETURNS trigger LANGUAGE plpgsql"
+                        + " AS $$ BEGIN IF NEW.action='INVITATION_ACCEPT' THEN RAISE EXCEPTION"
+                        + " 'synthetic audit failure'; END IF; RETURN NEW; END $$");
+        db.execute(
+                "CREATE TRIGGER h5_reject_consent_audit BEFORE INSERT ON public.test_audit FOR EACH"
+                        + " ROW EXECUTE FUNCTION public.h5_reject_consent_audit()");
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    invitations.acceptInvitation(
+                                            a,
+                                            key,
+                                            1,
+                                            0,
+                                            policyCode,
+                                            notice.noticeHash(),
+                                            UUID.randomUUID(),
+                                            UUID.randomUUID()))
+                    .hasMessageContaining("UNAVAILABLE");
+        } finally {
+            db.execute("DROP TRIGGER h5_reject_consent_audit ON public.test_audit");
+            db.execute("DROP FUNCTION public.h5_reject_consent_audit()");
+        }
+        assertThat(invitations.getMemberInvitationDetail(a, key, UUID.randomUUID()).rev())
+                .isEqualTo("0");
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_action WHERE action='INVITATION_ACCEPT'"
+                                        + " AND scope_key=?",
+                                Integer.class,
+                                "test:" + key))
+                .isZero();
+        db.update("UPDATE privacy_policy SET state='SUSPENDED' WHERE code=?", policyCode);
+        assertThatThrownBy(() -> invitations.getConsentNotice(a, key, UUID.randomUUID()))
+                .hasMessage("PLAYTEST_COLLECTION_NOT_READY");
+        var revoked =
+                invitations.revokeInvitation(
+                        invitationSid,
+                        invitationActor,
+                        invitationStoryCode,
+                        1,
+                        key,
+                        0,
+                        "CONTENT_REVIEW",
+                        "SYNTHETIC_REVIEW",
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
+        assertThat(revoked.current().get("state")).isEqualTo("CANCELLED");
+        assertThat(revoked.original()).containsEntry("rev", "1");
+        var unchanged =
+                invitations.revokeInvitation(
+                        invitationSid,
+                        invitationActor,
+                        invitationStoryCode,
+                        1,
+                        key,
+                        1,
+                        "CONTENT_REVIEW",
+                        "SYNTHETIC_REVIEW",
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
+        assertThat(unchanged.changed()).isFalse();
+        assertThat(unchanged.original()).containsEntry("rev", "1");
+        assertThat(db.queryForObject("SELECT rev FROM play_test WHERE test_key=?", Long.class, key))
+                .isEqualTo(1L);
+        assertThatThrownBy(() -> invitations.getMemberInvitationDetail(a, key, UUID.randomUUID()))
+                .hasMessageContaining("STATE_CONFLICT");
+        playtestPolicy();
+        UUID withdrawn =
+                invitation(
+                        List.of(
+                                invitations.getMemberIdentity(a, UUID.randomUUID()).memberKey(),
+                                invitations
+                                        .getMemberIdentity(
+                                                second.path("accessToken").asText(),
+                                                UUID.randomUUID())
+                                        .memberKey()));
+        db.update(
+                "UPDATE story_version SET status='DRAFT',current_snapshot_id=NULL WHERE id=(SELECT"
+                        + " version_id FROM play_test WHERE test_key=?)",
+                withdrawn);
+        assertThatThrownBy(
+                        () ->
+                                invitations.getMemberInvitationDetail(
+                                        a, withdrawn, UUID.randomUUID()))
+                .hasMessageContaining("INVITATION_INVALIDATED");
     }
 
     /** 실제 SMTP 코드와 binder로 가입하고 로그인·갱신·재사용에 따른 family 회수를 확인한다. */

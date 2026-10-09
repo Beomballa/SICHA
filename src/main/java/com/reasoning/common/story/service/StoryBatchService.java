@@ -566,7 +566,9 @@ public final class StoryBatchService {
         var receipts = db.queryForList("SELECT * FROM test_action WHERE request_key=?", key);
         if (!receipts.isEmpty()) {
             var receipt = receipts.getFirst();
-            if (number(receipt, "admin_id") != actor.accountId()
+            if (receipt.get("admin_id") == null
+                    || receipt.get("member_id") != null
+                    || number(receipt, "admin_id") != actor.accountId()
                     || !"BATCH_CREATE".equals(receipt.get("action"))
                     || !scopeKey.equals(receipt.get("scope_key"))
                     || !hash.equals(receipt.get("request_hash")))

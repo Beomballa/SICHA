@@ -1,5 +1,6 @@
 package com.reasoning.common.grading.service;
 
+import com.reasoning.common.auth.service.CryptoService;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier.VerifiedRuntime;
 import com.reasoning.common.grading.engine.LocalSemanticEngine.BeforeChat;
@@ -10,11 +11,15 @@ import com.reasoning.common.grading.repository.GradeLeaseRepository;
 import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.TestPreparation;
+import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
 import com.reasoning.common.grading.security.GradeWorkerCredentials;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.Action;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.VerifiedWorker;
 import com.reasoning.common.grading.service.FrozenDatasetValidator.SelectedSample;
 import com.reasoning.common.grading.service.FrozenDatasetValidator.ValidatedDataset;
+import com.reasoning.common.member.auth.MemberPolicyGate;
+import com.reasoning.common.member.auth.PlaytestPolicyGate;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -41,9 +46,12 @@ public final class GradeStartService {
     private final GradeFrozenInputRepository frozenInputs;
     private final GradeWorkerCredentials credentials;
     private final Map<String, InstalledRuntimeManifestVerifier> installations;
+    private final PlatformTransactionManager manager;
     private final TransactionTemplate transaction;
     private final GradeLeaseRepository leases;
     private final boolean remoteAssembly;
+    private final PlaytestPolicyGate testPolicy;
+    private final CryptoService crypto;
 
     /**
      * SQL 밖에서 지문을 계산한 실제 설치 인스턴스만 고정한다. 원격 방법은 JDBC와 동일 DataSource 인스턴스의
@@ -62,7 +70,25 @@ public final class GradeStartService {
             PlatformTransactionManager manager,
             GradeWorkerCredentials credentials,
             Map<String, InstalledRuntimeManifestVerifier> installations) {
+        this(jdbc, manager, credentials, installations, null, null, null);
+    }
+
+    /** TEST 지원은 실제 PLAYTEST 정책과 암호화 서비스를 함께 제공한 조립에서만 사용한다. */
+    public GradeStartService(
+            JdbcTemplate jdbc,
+            PlatformTransactionManager manager,
+            GradeWorkerCredentials credentials,
+            Map<String, InstalledRuntimeManifestVerifier> installations,
+            PlaytestPolicyGate testPolicy,
+            MemberPolicyGate memberPolicy,
+            CryptoService crypto) {
+        if ((testPolicy == null) != (crypto == null)
+                || (testPolicy == null) != (memberPolicy == null))
+            throw new IllegalArgumentException("INVALID_TEST_START_ASSEMBLY");
+        this.testPolicy = testPolicy;
+        this.crypto = crypto;
         this.jdbc = Objects.requireNonNull(jdbc);
+        this.manager = Objects.requireNonNull(manager);
         remoteAssembly =
                 manager
                                 instanceof
@@ -78,7 +104,7 @@ public final class GradeStartService {
                         throw new IllegalArgumentException("INVALID_START_INSTALLATIONS");
                     }
                 });
-        sources = new GradeSourceRepository(jdbc);
+        sources = new GradeSourceRepository(jdbc, memberPolicy);
         runtimes = new GradeRuntimeRepository(jdbc);
         frozenInputs = new GradeFrozenInputRepository(jdbc);
         transaction = new TransactionTemplate(Objects.requireNonNull(manager));
@@ -108,7 +134,42 @@ public final class GradeStartService {
             GradeWorkerCredentials registry, GradeCompletionService completion) {
         if (!remoteAssembly || registry != credentials || completion == null)
             throw new IllegalArgumentException("REMOTE_ASSEMBLY_MISMATCH");
-        completion.requireHttpAssembly(registry, jdbc.getDataSource(), installations);
+        completion.requireHttpAssembly(registry, jdbc.getDataSource(), manager, installations);
+    }
+
+    /** 이전 BATCH 조립은 TEST 정책과 암호화 서비스를 포함할 수 없다. */
+    public void requireBatchAssembly(GradeCompletionService completion) {
+        if (testPolicy != null || crypto != null)
+            throw new IllegalArgumentException("REMOTE_ASSEMBLY_MISMATCH");
+        completion.requireBatchAssembly();
+    }
+
+    /** TEST 조립의 정책·암호화·관리자·설치 인스턴스를 SQL 없이 대조한다. */
+    public void requireTestAssembly(
+            GradeWorkerCredentials registry,
+            javax.sql.DataSource source,
+            PlatformTransactionManager expectedManager,
+            Map<String, InstalledRuntimeManifestVerifier> expectedInstallations,
+            PlaytestPolicyGate expectedPolicy,
+            CryptoService expectedCrypto) {
+        if (!remoteAssembly
+                || registry != credentials
+                || jdbc.getDataSource() != source
+                || manager != expectedManager
+                || testPolicy == null
+                || testPolicy != expectedPolicy
+                || crypto == null
+                || crypto != expectedCrypto
+                || !sameInstallations(expectedInstallations))
+            throw new IllegalArgumentException("TEST_ASSEMBLY_MISMATCH");
+    }
+
+    /** 설치 맵의 동등성이 아니라 검증기 객체의 동일 소유권을 검사한다. */
+    private boolean sameInstallations(Map<String, InstalledRuntimeManifestVerifier> expected) {
+        return expected != null
+                && installations.size() == expected.size()
+                && installations.entrySet().stream()
+                        .allMatch(entry -> entry.getValue() == expected.get(entry.getKey()));
     }
 
     /**
@@ -265,6 +326,7 @@ public final class GradeStartService {
     public GradeRemoteExecutionProtocol.StartReply startApproved(
             VerifiedWorker worker, UUID jobKey, long leaseGen) {
         remoteEntry(worker, jobKey, leaseGen);
+        if (testJob(jobKey)) return testStartApproved(worker, jobKey, leaseGen);
         return remoteCall(
                 () -> {
                     discoverPermission(worker, jobKey, Action.START);
@@ -309,6 +371,7 @@ public final class GradeStartService {
             UUID jobKey,
             GradeRemoteExecutionProtocol.AttemptRequest expected) {
         remoteRequest(worker, jobKey, expected);
+        if (testJob(jobKey)) return testFence(worker, jobKey, expected);
         return remoteCall(
                 () -> {
                     discoverPermission(worker, jobKey, Action.START);
@@ -337,6 +400,7 @@ public final class GradeStartService {
             UUID jobKey,
             GradeRemoteExecutionProtocol.AttemptRequest expected) {
         remoteRequest(worker, jobKey, expected);
+        if (testJob(jobKey)) return testRenew(worker, jobKey, expected);
         return remoteCall(
                 () -> {
                     discoverPermission(worker, jobKey, Action.RENEW);
@@ -357,6 +421,383 @@ public final class GradeStartService {
                     return GradeRemoteExecutionProtocol.renew(
                             jobKey, expected, observation.export());
                 });
+    }
+
+    /** 출처 종류만 발견한다. 이 조회는 잠금·인가가 아니며 두 경로 모두 잠근 부모를 다시 검사한다. */
+    private boolean testJob(UUID key) {
+        return remoteCall(
+                () -> {
+                    var kinds =
+                            jdbc.queryForList(
+                                    "SELECT report_id FROM public.grade_job WHERE job_key=?",
+                                    Long.class,
+                                    key);
+                    if (kinds.size() != 1) throw rejected();
+                    return kinds.getFirst() != null;
+                });
+    }
+
+    private TestPreparation testPreparation() {
+        if (testPolicy == null || crypto == null) throw rejected();
+        return sources.prepareTest(testPolicy);
+    }
+
+    private GradeRemoteExecutionProtocol.StartReply testStartApproved(
+            VerifiedWorker worker, UUID key, long generation) {
+        return remoteCall(
+                () -> {
+                    var prepared = testPreparation();
+                    discoverPermission(worker, key, Action.START);
+                    var reserved =
+                            transaction.execute(
+                                    status -> reserveTest(worker, key, generation, prepared));
+                    if (reserved == null) throw rejected();
+                    if (reserved.replay())
+                        return GradeRemoteExecutionProtocol.start(
+                                key, generation, reserved.attempt(), null, null);
+                    credentials.requirePermission(
+                            worker, Action.START, reserved.root().runtimeCode());
+                    return GradeRemoteExecutionProtocol.start(
+                            key,
+                            generation,
+                            reserved.attempt(),
+                            reserved.input(),
+                            reserved.observation().export());
+                });
+    }
+
+    private GradeRemoteExecutionProtocol.FenceReply testFence(
+            VerifiedWorker worker, UUID key, GradeRemoteExecutionProtocol.AttemptRequest expected) {
+        return remoteCall(
+                () -> {
+                    var prepared = testPreparation();
+                    discoverPermission(worker, key, Action.START);
+                    var observation =
+                            transaction.execute(
+                                    status ->
+                                            observeTest(
+                                                    worker,
+                                                    key,
+                                                    expected,
+                                                    Action.START,
+                                                    prepared,
+                                                    null));
+                    if (observation == null) throw rejected();
+                    return GradeRemoteExecutionProtocol.fence(key, expected, observation.export());
+                });
+    }
+
+    private GradeRemoteExecutionProtocol.RenewReply testRenew(
+            VerifiedWorker worker, UUID key, GradeRemoteExecutionProtocol.AttemptRequest expected) {
+        return remoteCall(
+                () -> {
+                    var prepared = testPreparation();
+                    discoverPermission(worker, key, Action.RENEW);
+                    transaction.executeWithoutResult(status -> renewalPreflight());
+                    var renewed =
+                            leases.renew(key, worker.workerKey(), expected.leaseGen())
+                                    .orElseThrow(GradeStartService::rejected);
+                    var observation =
+                            transaction.execute(
+                                    status ->
+                                            observeTest(
+                                                    worker,
+                                                    key,
+                                                    expected,
+                                                    Action.RENEW,
+                                                    prepared,
+                                                    renewed));
+                    if (observation == null) throw rejected();
+                    return GradeRemoteExecutionProtocol.renew(key, expected, observation.export());
+                });
+    }
+
+    private GradeRemoteExecutionProtocol.ApprovedExecutionInput approvedTest(
+            TestRootEvidence root,
+            Job current,
+            VerifiedRuntime runtime,
+            byte[] bytes,
+            String snapshotHash,
+            String owner,
+            long generation,
+            int attempt) {
+        if (current.deadlineAt() == null) throw rejected();
+        var installed = installations.get(root.runtimeCode());
+        if (installed == null) throw rejected();
+        var wireRuntime =
+                GradeRemoteExecutionProtocol.runtime(
+                        installed.registrationManifest(),
+                        runtime.configHash(),
+                        root.runtimeEpoch());
+        var model = GradeRemoteExecutionProtocol.model(bytes);
+        var hash =
+                GradeRemoteExecutionProtocol.testOriginalHash(
+                        root,
+                        owner,
+                        generation,
+                        attempt,
+                        current.deadlineAt().toInstant(),
+                        wireRuntime,
+                        model);
+        return GradeRemoteExecutionProtocol.testInput(
+                root.jobKey(),
+                generation,
+                attempt,
+                current.deadlineAt().toInstant(),
+                root.snapshotId(),
+                snapshotHash,
+                root.rubricHash(),
+                root.reportHash(),
+                wireRuntime,
+                model,
+                hash);
+    }
+
+    private TestMaterial testMaterial(
+            UUID key, TestPreparation prepared, VerifiedWorker worker, Action action) {
+        var locked = sources.lockTestRoots(key, testPolicy, prepared);
+        var root = sources.requireTestExecutionEligibility(locked);
+        credentials.requirePermission(worker, action, root.runtimeCode());
+        var installed = installations.get(root.runtimeCode());
+        if (installed == null) throw rejected();
+        var runtime =
+                installed.verify(
+                        runtimes.getRuntimeDetail(root.runtimeId())
+                                .orElseThrow(GradeStartService::rejected));
+        var verified = frozenInputs.verifiedTestInput(locked, runtime, crypto);
+        if (!sameTestSource(root, verified.root())) throw rejected();
+        var semantic =
+                FrozenModelProjection.projectTest(verified.frozenSnapshot(), verified.report());
+        if (!semantic.report().equals(verified.report())) throw rejected();
+        return new TestMaterial(
+                root,
+                runtime,
+                semantic.payloadBytes(),
+                verified.frozenSnapshot().payloadHash(),
+                locked);
+    }
+
+    private static boolean sameTestSource(TestRootEvidence a, TestRootEvidence b) {
+        return a.jobId() == b.jobId()
+                && a.jobKey().equals(b.jobKey())
+                && a.reportId() == b.reportId()
+                && a.testId() == b.testId()
+                && a.storyId() == b.storyId()
+                && a.versionId() == b.versionId()
+                && a.snapshotId() == b.snapshotId()
+                && a.runtimeId() == b.runtimeId()
+                && a.runtimeCode().equals(b.runtimeCode())
+                && a.configHash().equals(b.configHash())
+                && a.runtimeEpoch() == b.runtimeEpoch()
+                && a.snapshotRev() == b.snapshotRev()
+                && a.snapshotFormat() == b.snapshotFormat()
+                && a.policyCode().equals(b.policyCode())
+                && a.payloadHash().equals(b.payloadHash())
+                && a.reportHash().equals(b.reportHash())
+                && a.rubricHash().equals(b.rubricHash())
+                && a.sourceDraftRev() == b.sourceDraftRev();
+    }
+
+    private void requireTestDeadline(TestRootEvidence root, Job current) {
+        var accepted =
+                jdbc.queryForObject(
+                        "SELECT accepted_at FROM public.test_report WHERE id=?",
+                        OffsetDateTime.class,
+                        root.reportId());
+        if (accepted == null
+                || current.acceptedAt() == null
+                || !accepted.toInstant().equals(current.acceptedAt().toInstant())
+                || current.deadlineAt() == null
+                || !current.deadlineAt().toInstant().equals(accepted.plusSeconds(120).toInstant()))
+            throw rejected();
+    }
+
+    private Observation observeTestClock(TestRootEvidence root, Job current) {
+        requireTestDeadline(root, current);
+        long queryNano = System.nanoTime();
+        var now = jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
+        var observation =
+                new Observation(
+                        now == null ? null : now.toInstant(),
+                        current.deadlineAt().toInstant(),
+                        current.leaseUntil() == null ? null : current.leaseUntil().toInstant(),
+                        current.deadlineAt().toInstant(),
+                        queryNano);
+        observation.export();
+        return observation;
+    }
+
+    private record TestMaterial(
+            TestRootEvidence root,
+            VerifiedRuntime runtime,
+            byte[] bytes,
+            String snapshotHash,
+            com.reasoning.common.grading.repository.GradeSourceRepository.LockedTestSource
+                    locked) {}
+
+    private record TestReservation(
+            TestRootEvidence root,
+            int attempt,
+            boolean replay,
+            GradeRemoteExecutionProtocol.ApprovedExecutionInput input,
+            Observation observation) {}
+
+    private TestReservation reserveTest(
+            VerifiedWorker worker, UUID key, long generation, TestPreparation prepared) {
+        var material = testMaterial(key, prepared, worker, Action.START);
+        var root = material.root();
+        Job current = job(root.jobId());
+        requireOwner(current, worker, generation);
+        requireTestDeadline(root, current);
+        var attempts =
+                jdbc.query(
+                        "SELECT attempt_no,lease_gen,worker_key,state FROM public.grade_attempt"
+                                + " WHERE job_id=? ORDER BY attempt_no FOR UPDATE",
+                        (row, index) ->
+                                new Attempt(
+                                        row.getInt("attempt_no"),
+                                        row.getLong("lease_gen"),
+                                        row.getString("worker_key"),
+                                        row.getString("state")),
+                        root.jobId());
+        OffsetDateTime now = jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
+        if (now == null
+                || current.leaseUntil() == null
+                || current.deadlineAt() == null
+                || !now.isBefore(current.leaseUntil())
+                || !now.isBefore(current.deadlineAt())
+                || current.callCount() < 0
+                || current.callCount() > 3)
+            throw GradeRemoteExecutionProtocol.failure(
+                    GradeRemoteExecutionProtocol.FailureCode.REMOTE_EXECUTION_EXPIRED);
+        for (Attempt attempt : attempts) {
+            if (attempt.generation() == generation) {
+                if (!worker.workerKey().equals(attempt.worker())
+                        || !"RUNNING".equals(attempt.state())
+                        || attempt.number() != current.callCount()) throw rejected();
+                return new TestReservation(root, attempt.number(), true, null, null);
+            }
+        }
+        if (attempts.size() != current.callCount()
+                || attempts.stream().anyMatch(attempt -> "RUNNING".equals(attempt.state()))
+                || current.callCount() >= 3) throw rejected();
+        int number = current.callCount() + 1;
+        var approved =
+                approvedTest(
+                        root,
+                        current,
+                        material.runtime(),
+                        material.bytes(),
+                        material.snapshotHash(),
+                        worker.workerKey(),
+                        generation,
+                        number);
+        int inserted =
+                jdbc.update(
+                        "INSERT INTO"
+                            + " public.grade_attempt(job_id,attempt_no,lease_gen,worker_key,started_at,state)"
+                            + " SELECT id,?,lease_gen,worker_key,?,'RUNNING' FROM public.grade_job"
+                            + " WHERE id=? AND report_id=? AND state='RUNNING' AND worker_key=? AND"
+                            + " lease_gen=? AND call_count=? AND clock_timestamp()<lease_until AND"
+                            + " clock_timestamp()<deadline_at",
+                        number,
+                        now,
+                        root.jobId(),
+                        root.reportId(),
+                        worker.workerKey(),
+                        generation,
+                        current.callCount());
+        if (inserted != 1) throw rejected();
+        var updated =
+                jdbc.query(
+                        "UPDATE public.grade_job SET call_count=call_count+1,updated_at=? WHERE"
+                            + " id=? AND report_id=? AND state='RUNNING' AND worker_key=? AND"
+                            + " lease_gen=? AND call_count=? AND clock_timestamp()<lease_until AND"
+                            + " clock_timestamp()<deadline_at RETURNING call_count",
+                        (row, index) -> row.getInt(1),
+                        now,
+                        root.jobId(),
+                        root.reportId(),
+                        worker.workerKey(),
+                        generation,
+                        current.callCount());
+        if (updated.size() != 1 || updated.getFirst() != number) throw rejected();
+        sources.requireTestExecutionEligibility(material.locked());
+        var reread = job(root.jobId());
+        requireOwner(reread, worker, generation);
+        requireTestDeadline(root, reread);
+        if (reread.callCount() != number
+                || !current.deadlineAt().equals(reread.deadlineAt())
+                || !current.leaseUntil().equals(reread.leaseUntil())) throw rejected();
+        var rows =
+                jdbc.query(
+                        "SELECT lease_gen,worker_key,state,completion_data,started_at FROM"
+                                + " public.grade_attempt WHERE job_id=? AND attempt_no=?",
+                        (row, index) ->
+                                new Readback(
+                                        row.getString("worker_key"),
+                                        row.getLong("lease_gen"),
+                                        number,
+                                        row.getString("state"),
+                                        row.getObject("completion_data") != null,
+                                        row.getObject("started_at", OffsetDateTime.class)),
+                        root.jobId(),
+                        number);
+        if (rows.size() != 1
+                || !"RUNNING".equals(rows.getFirst().state())
+                || rows.getFirst().receipt()
+                || !worker.workerKey().equals(rows.getFirst().worker())
+                || rows.getFirst().generation() != generation
+                || !now.equals(rows.getFirst().started())) throw rejected();
+        return new TestReservation(root, number, false, approved, observeTestClock(root, reread));
+    }
+
+    private Observation observeTest(
+            VerifiedWorker worker,
+            UUID key,
+            GradeRemoteExecutionProtocol.AttemptRequest expected,
+            Action action,
+            TestPreparation prepared,
+            GradeLeaseRepository.Lease renewed) {
+        var material = testMaterial(key, prepared, worker, action);
+        var root = material.root();
+        var rows =
+                jdbc.queryForList(
+                        "SELECT worker_key,lease_gen,state,completion_data FROM"
+                            + " public.grade_attempt WHERE job_id=? AND attempt_no=? FOR UPDATE",
+                        root.jobId(),
+                        expected.attemptNo());
+        if (rows.size() != 1) throw rejected();
+        Job current = job(root.jobId());
+        requireOwner(current, worker, expected.leaseGen());
+        requireTestDeadline(root, current);
+        var attempt = rows.getFirst();
+        if (!"RUNNING".equals(attempt.get("state"))
+                || attempt.get("completion_data") != null
+                || !worker.workerKey().equals(attempt.get("worker_key"))
+                || ((Number) attempt.get("lease_gen")).longValue() != expected.leaseGen()
+                || current.callCount() != expected.attemptNo()) throw rejected();
+        var approved =
+                approvedTest(
+                        root,
+                        current,
+                        material.runtime(),
+                        material.bytes(),
+                        material.snapshotHash(),
+                        worker.workerKey(),
+                        expected.leaseGen(),
+                        expected.attemptNo());
+        if (!expected.originalAttemptHash().equals(approved.originalAttemptHash()))
+            throw rejected();
+        if (renewed != null
+                && (renewed.jobId() != root.jobId()
+                        || !key.equals(renewed.jobKey())
+                        || !worker.workerKey().equals(renewed.workerKey())
+                        || renewed.leaseGen() != expected.leaseGen()
+                        || !renewed.deadlineAt().equals(current.deadlineAt())
+                        || !renewed.leaseUntil().equals(current.leaseUntil()))) throw rejected();
+        sources.requireTestExecutionEligibility(material.locked());
+        return observeTestClock(root, current);
     }
 
     /**
@@ -477,6 +918,9 @@ public final class GradeStartService {
         } catch (SecurityException failure) {
             throw GradeRemoteExecutionProtocol.failure(
                     GradeRemoteExecutionProtocol.FailureCode.REMOTE_EXECUTION_FORBIDDEN);
+        } catch (com.reasoning.common.auth.service.AuthException failure) {
+            throw GradeRemoteExecutionProtocol.failure(
+                    GradeRemoteExecutionProtocol.FailureCode.REMOTE_EXECUTION_NOT_CURRENT);
         } catch (DataAccessException | TransactionException failure) {
             throw GradeRemoteExecutionProtocol.failure(
                     GradeRemoteExecutionProtocol.FailureCode.REMOTE_EXECUTION_UNAVAILABLE);
@@ -957,7 +1401,7 @@ public final class GradeStartService {
     private Job job(long id) {
         return jdbc.queryForObject(
                 """
-                SELECT state,worker_key,lease_gen,lease_until,deadline_at,call_count
+                SELECT state,worker_key,lease_gen,lease_until,deadline_at,call_count,accepted_at
                 FROM public.grade_job WHERE id=?
                 """,
                 (row, index) ->
@@ -967,7 +1411,8 @@ public final class GradeStartService {
                                 row.getLong("lease_gen"),
                                 row.getObject("lease_until", OffsetDateTime.class),
                                 row.getObject("deadline_at", OffsetDateTime.class),
-                                row.getInt("call_count")),
+                                row.getInt("call_count"),
+                                row.getObject("accepted_at", OffsetDateTime.class)),
                 id);
     }
 
@@ -999,7 +1444,8 @@ public final class GradeStartService {
             long generation,
             OffsetDateTime leaseUntil,
             OffsetDateTime deadlineAt,
-            int callCount) {}
+            int callCount,
+            OffsetDateTime acceptedAt) {}
 
     private record Attempt(int number, long generation, String worker, String state) {}
 

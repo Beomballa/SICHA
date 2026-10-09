@@ -51,7 +51,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/** 폐기형 실제 V17 PostgreSQL·전체 사본·설치·START를 사용하는 만료 복구 시험이다. 실제 추론은 하지 않는다. */
+/** 폐기형 실제 V21 PostgreSQL·전체 사본·설치·START를 사용하는 만료 복구 시험이다. 실제 추론은 하지 않는다. */
 class GradeRecoveryServiceIT {
     private static PostgreSQLContainer<?> postgres;
     private static JdbcTemplate jdbc;
@@ -83,7 +83,7 @@ class GradeRecoveryServiceIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
         var dictionary = new GradeDictionary(CODE, List.of(new Term("ONE", "개념", "합성")));
         var settings =
                 new LocalSemanticEngine.Settings(

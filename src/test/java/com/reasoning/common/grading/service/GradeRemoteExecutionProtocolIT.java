@@ -127,7 +127,7 @@ class GradeRemoteExecutionProtocolIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
     }
 
     /** 생성한 폐기형 PostgreSQL 자원만 닫는다. */

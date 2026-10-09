@@ -25,6 +25,8 @@ import com.reasoning.common.grading.security.GradeWorkerCredentials.Action;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.Registration;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.VerifiedWorker;
 import com.reasoning.common.grading.service.GradeRemoteBatchWorker.BoundTransport;
+import com.reasoning.common.grading.service.GradeRemoteBatchWorker.PollReply;
+import com.reasoning.common.grading.service.GradeRemoteBatchWorker.PollingTransport;
 import com.reasoning.common.grading.service.GradeRemoteBatchWorker.TransportBounds;
 import com.reasoning.common.grading.service.GradeRemoteExecutionProtocol.AttemptRequest;
 import com.reasoning.common.story.model.FrozenSnapshotCodec;
@@ -200,7 +202,11 @@ class GradeRemoteBatchWorkerIT {
                                                         .registrationManifest()
                                                         .path("configId")
                                                         .asText()),
-                                        Set.of(Action.START, Action.RENEW, Action.COMPLETE))));
+                                        Set.of(
+                                                Action.CLAIM,
+                                                Action.START,
+                                                Action.RENEW,
+                                                Action.COMPLETE))));
         worker =
                 credentials.authenticate(
                         "Bearer " + Base64.getUrlEncoder().withoutPadding().encodeToString(secret));
@@ -380,6 +386,112 @@ class GradeRemoteBatchWorkerIT {
                                 job))
                 .isEqualTo(1);
         assertRestartRefused(activeStore);
+    }
+
+    /** 실제 TEST lease가 없는 서버 저장소의 204는 START나 저널 기록을 만들지 않는다. */
+    @Test
+    void explicitPollWithoutTestLeaseDoesNotRunBatchJob() throws Exception {
+        activeStore = provision(scope, 65536);
+        var transport = new ServerTransport(scope);
+        try (var owner = owner(activeStore, transport)) {
+            assertThat(owner.pollAndRunOnce("REMOTE_SYNTHETIC")).isNull();
+            assertThat(owner.pollAndRunOnce("REMOTE_SYNTHETIC")).isNull();
+        }
+        assertThat(transport.polls.get()).isEqualTo(2);
+        assertThat(transport.starts.get()).isZero();
+        assertThat(transport.completions.get()).isZero();
+        assertThat(journalStates(activeStore)).isEmpty();
+        assertNoProviderOrCompletion();
+    }
+
+    /** 기존 BATCH-only transport는 poll 권위를 암묵적으로 얻지 않는다. */
+    @Test
+    void batchOnlyTransportCannotPoll() throws Exception {
+        activeStore = provision(scope, 65536);
+        var delegate = new ServerTransport(scope);
+        BoundTransport batchOnly =
+                new BoundTransport() {
+                    public Scope scope() {
+                        return delegate.scope();
+                    }
+
+                    public CompletableFuture<byte[]> start(UUID key, long gen, Duration wait) {
+                        return delegate.start(key, gen, wait);
+                    }
+
+                    public CompletableFuture<byte[]> fence(
+                            UUID key, AttemptRequest original, Duration wait) {
+                        return delegate.fence(key, original, wait);
+                    }
+
+                    public CompletableFuture<byte[]> renew(
+                            UUID key, AttemptRequest original, Duration wait) {
+                        return delegate.renew(key, original, wait);
+                    }
+
+                    public CompletableFuture<byte[]> complete(
+                            UUID key,
+                            GradeRemoteBatchWorker.CompletionCommand command,
+                            Duration wait) {
+                        return delegate.complete(key, command, wait);
+                    }
+                };
+        try (var owner = owner(activeStore, batchOnly)) {
+            assertThatThrownBy(() -> owner.pollAndRunOnce("REMOTE_SYNTHETIC"))
+                    .hasMessage("REMOTE_RESERVATION_REFUSED");
+        }
+        assertThat(delegate.polls.get()).isZero();
+        assertThat(delegate.starts.get()).isZero();
+        assertThat(journalStates(activeStore)).isEmpty();
+    }
+
+    /** 전송된 잘못된 200 body는 임대를 추측하거나 재poll하지 않고 owner를 닫는다. */
+    @Test
+    void malformedPollCannotStartOrRetry() throws Exception {
+        activeStore = provision(scope, 65536);
+        var transport = new ServerTransport(scope);
+        transport.pollMutation =
+                reply ->
+                        new PollReply(
+                                200,
+                                "{\"jobKey\":\"BAD\",\"leaseGen\":1,\"deadline\":\"2026-10-09T00:00:00Z\"}"
+                                        .getBytes(StandardCharsets.UTF_8));
+        try (var owner = owner(activeStore, transport)) {
+            assertThatThrownBy(() -> owner.pollAndRunOnce("REMOTE_SYNTHETIC"))
+                    .hasMessage("REMOTE_RESERVATION_REFUSED");
+            assertThatThrownBy(() -> owner.pollAndRunOnce("REMOTE_SYNTHETIC"))
+                    .hasMessage("REMOTE_RESERVATION_REFUSED");
+        }
+        assertThat(transport.polls.get()).isEqualTo(1);
+        assertThat(transport.starts.get()).isZero();
+        assertThat(journalStates(activeStore)).isEmpty();
+    }
+
+    /** 미완료 poll 동안 run/중복 poll은 거절되고 close는 실제 전체 응답 future를 취소한다. */
+    @Test
+    void outstandingPollExcludesRunAndCloseCancelsResponse() throws Exception {
+        activeStore = provision(scope, 65536);
+        var transport = new ServerTransport(scope);
+        transport.holdPollBody = true;
+        var owner = owner(activeStore, transport);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var polling = executor.submit(() -> owner.pollAndRunOnce("REMOTE_SYNTHETIC"));
+            assertThat(transport.pollEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> owner.runOnce(jobKey, generation))
+                    .hasMessage("REMOTE_RESERVATION_REFUSED");
+            assertThatThrownBy(() -> owner.pollAndRunOnce("REMOTE_SYNTHETIC"))
+                    .hasMessage("REMOTE_RESERVATION_REFUSED");
+            owner.close();
+            assertThatThrownBy(() -> polling.get(5, TimeUnit.SECONDS))
+                    .rootCause()
+                    .hasMessage("REMOTE_RESERVATION_REFUSED");
+            assertThat(transport.pollBodyFuture.isCancelled()).isTrue();
+        } finally {
+            owner.close();
+        }
+        assertThat(transport.polls.get()).isEqualTo(1);
+        assertThat(transport.starts.get()).isZero();
+        assertThat(journalStates(activeStore)).isEmpty();
     }
 
     /** 실제 probes 이후 자격 회수 또는 CHAT_INTENT force 실패는 chat·완료를 만들지 않는다. */
@@ -2674,8 +2786,13 @@ class GradeRemoteBatchWorkerIT {
     }
 
     /** 실제 same-registry VerifiedWorker로 서비스에 진입하며 body mutation은 공격 시험에만 쓰인다. */
-    private final class ServerTransport implements BoundTransport {
+    private final class ServerTransport implements PollingTransport {
         private final Scope binding;
+        private final AtomicInteger polls = new AtomicInteger();
+        private UnaryOperator<PollReply> pollMutation = UnaryOperator.identity();
+        private boolean holdPollBody;
+        private final CountDownLatch pollEntered = new CountDownLatch(1);
+        private final CompletableFuture<PollReply> pollBodyFuture = new CompletableFuture<>();
         private final AtomicInteger starts = new AtomicInteger();
         private final AtomicInteger fences = new AtomicInteger();
         private final AtomicInteger renewals = new AtomicInteger();
@@ -2722,6 +2839,42 @@ class GradeRemoteBatchWorkerIT {
                 }
             }
             return binding;
+        }
+
+        /** 동일 registry의 실제 저장소에서 TEST만 임대하며 결과 데이터를 만들지 않는다. */
+        public CompletableFuture<PollReply> poll(String runtimeCode, Duration maximumWait) {
+            polls.incrementAndGet();
+            credentials.requirePermission(worker, Action.CLAIM, runtimeCode);
+            var lease =
+                    new com.reasoning.common.grading.repository.GradeLeaseRepository(jdbc, manager)
+                            .claimTest(worker.workerKey(), runtimeCode);
+            PollReply reply =
+                    lease.map(
+                                    value ->
+                                            new PollReply(
+                                                    200,
+                                                    SnapshotJson.encode(
+                                                            com.fasterxml.jackson.databind.node
+                                                                    .JsonNodeFactory.instance
+                                                                    .objectNode()
+                                                                    .put(
+                                                                            "jobKey",
+                                                                            value.jobKey()
+                                                                                    .toString())
+                                                                    .put(
+                                                                            "leaseGen",
+                                                                            value.leaseGen())
+                                                                    .put(
+                                                                            "deadline",
+                                                                            value.deadlineAt()
+                                                                                    .toInstant()
+                                                                                    .toString()))))
+                            .orElseGet(() -> new PollReply(204, new byte[0]));
+            if (holdPollBody) {
+                pollEntered.countDown();
+                return pollBodyFuture;
+            }
+            return CompletableFuture.completedFuture(pollMutation.apply(reply));
         }
 
         public CompletableFuture<byte[]> start(UUID key, long gen, Duration maximumWait) {

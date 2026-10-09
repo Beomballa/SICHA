@@ -18,8 +18,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 내부 단일 호출 조립이다. 자동 활성화·폴링·재시도는 없다. SQL fence 커밋 뒤 회수 경쟁과 외부 실행의 불확실성은 남으며 heartbeat 중단은 전송 취소의 최선
- * 노력이지 외부 exactly-once 증명이 아니다.
+ * BATCH Reservation 전용 내부 단일 호출 조립이다. TEST 보고서 실행은 지원하지 않는다. 자동 활성화·폴링·재시도는 없다. SQL fence 커밋 뒤 회수
+ * 경쟁과 외부 실행의 불확실성은 남으며 heartbeat 중단은 전송 취소의 최선 노력이지 외부 exactly-once 증명이 아니다.
  */
 public final class GradeLocalRunner {
     private final GradeWorkerCredentials credentials;
@@ -60,7 +60,7 @@ public final class GradeLocalRunner {
      * 한 신규 예약에서 최대 한 chat만 시작한다. 재전송 예약은 HTTP·갱신·완료 없이 반환한다.
      *
      * @param worker 실제 레지스트리가 인증한 증명, null 불가
-     * @param jobKey 실제 비영 작업 UUID, null 불가
+     * @param jobKey 실제 비영 BATCH 작업 UUID, null 불가
      * @param leaseGen 양수 실제 임대 세대
      * @return 안전한 재전송·복구 상태 또는 실제 완료 영수증
      * @throws RuntimeException 예약 이전 인증·입력·저장소 실패; 원문은 서비스 경계가 제거한다

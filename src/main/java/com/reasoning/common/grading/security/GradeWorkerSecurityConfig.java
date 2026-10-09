@@ -45,6 +45,7 @@ public class GradeWorkerSecurityConfig {
             Pattern.compile(
                     PREFIX
                             + "/jobs/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/(start|before-chat|renew|complete)");
+    private static final Pattern POLL = Pattern.compile(PREFIX + "/poll/[A-Z0-9_]{1,80}");
 
     /**
      * prefix 자체와 모든 자손을 별도 무세션 체인으로 격리한다. 이력→TLS/Bearer→인가 순서를 고정한다.
@@ -53,7 +54,7 @@ public class GradeWorkerSecurityConfig {
      * @param assemblies 명시 실제 서비스 조립의 선택적 제공자, null 불가
      * @param mapper 고정 오류 직렬화기, null 불가
      * @param db 기존 독립 접근 이력 기록 도구, null 불가
-     * @return 네 exact POST만 인증 worker로 허용하는 체인
+     * @return 기존 네 exact POST와 TEST poll만 인증 worker로 허용하는 체인
      * @throws Exception 보안 체인을 조립할 수 없는 경우
      */
     @Bean
@@ -88,10 +89,14 @@ public class GradeWorkerSecurityConfig {
                                 auth.requestMatchers(
                                                 request ->
                                                         "POST".equals(request.getMethod())
-                                                                && ROUTE.matcher(
-                                                                                request
-                                                                                        .getRequestURI())
-                                                                        .matches())
+                                                                && (ROUTE.matcher(
+                                                                                        request
+                                                                                                .getRequestURI())
+                                                                                .matches()
+                                                                        || POLL.matcher(
+                                                                                        request
+                                                                                                .getRequestURI())
+                                                                                .matches()))
                                         .access(
                                                 (authentication, context) -> {
                                                     var current = authentication.get();
@@ -222,7 +227,11 @@ public class GradeWorkerSecurityConfig {
                 Authentication authentication, Integer status, String uri) {
             var route = ROUTE.matcher(uri);
             String normalized =
-                    route.matches() ? PREFIX + "/jobs/{jobKey}/" + route.group(1) : "UNMATCHED";
+                    route.matches()
+                            ? PREFIX + "/jobs/{jobKey}/" + route.group(1)
+                            : POLL.matcher(uri).matches()
+                                    ? PREFIX + "/poll/{runtimeCode}"
+                                    : "UNMATCHED";
             Actor actor =
                     authentication != null
                                     && authentication.isAuthenticated()

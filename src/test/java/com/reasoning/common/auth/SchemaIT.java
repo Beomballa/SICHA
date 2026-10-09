@@ -25,7 +25,7 @@ import java.util.UUID;
 class SchemaIT {
     /** 승인된 최신 물리 구조의 전체 테이블·컬럼·인덱스·FK와 기존 인증/사건 제약을 대조한다. */
     @Test
-    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V19 구조와 회귀 저장 제약 검증")
+    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V23 구조와 회귀 저장 제약 검증")
     void appliesH0Schema() throws Exception {
         DockerImageName image =
                 DockerImageName.parse(
@@ -42,7 +42,7 @@ class SchemaIT {
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -96,7 +96,21 @@ class SchemaIT {
                                 "execution_issue",
                                 "evidence_set",
                                 "evidence_item",
-                                "member_account", "privacy_policy", "member_profile", "member_identity", "member_session", "member_token", "member_flow", "member_auth_audit", "member_auth_limit");
+                                "member_account",
+                                "privacy_policy",
+                                "member_profile",
+                                "member_identity",
+                                "member_session",
+                                "member_token",
+                                "member_flow",
+                                "member_auth_audit",
+                                "member_auth_limit",
+                                "play_test",
+                                "test_member",
+                                "test_hint",
+                                "test_exposure",
+                                "test_retention",
+                                "test_report");
                 Map<String, Set<String>> expectedColumns =
                         new HashMap<>(
                                 Map.of(
@@ -357,7 +371,9 @@ class SchemaIT {
                                 "result_hash",
                                 "error_code",
                                 "created_at",
-                                "updated_at"));
+                                "updated_at",
+                                "report_id",
+                                "report_hash"));
                 expectedColumns.put(
                         "grade_attempt",
                         Set.of(
@@ -465,6 +481,7 @@ class SchemaIT {
                                 "id",
                                 "request_key",
                                 "admin_id",
+                                "member_id",
                                 "action",
                                 "scope_key",
                                 "request_hash",
@@ -502,17 +519,219 @@ class SchemaIT {
                                 "resolved_at",
                                 "resolution_data",
                                 "created_at"));
-                expectedColumns.put("evidence_set", Set.of("id","set_key","snapshot_id","runtime_id","runtime_epoch","kind","evidence_hash","summary_data","available_yn","invalidated_at","invalidated_issue_id","created_by","created_at"));
-                expectedColumns.put("evidence_item", Set.of("set_id","snapshot_id","runtime_id","batch_id","evidence_hash"));
-                expectedColumns.put("member_account", Set.of("id", "member_key", "state", "auth_rev", "created_at", "updated_at", "deleted_at"));
-                expectedColumns.put("privacy_policy", Set.of("id", "code", "env_code", "scope", "state", "notice_hash", "policy_data", "owner_id", "created_at"));
-                expectedColumns.put("member_profile", Set.of("member_id", "nickname_cipher", "policy_id", "accepted_at", "created_at", "updated_at"));
-                expectedColumns.put("member_identity", Set.of("id", "identity_key", "member_id", "provider", "realm", "lookup_hash", "lookup_ver", "subject_cipher", "password_hash", "active_yn", "proof_at", "bound_at", "created_at", "updated_at"));
-                expectedColumns.put("member_session", Set.of("id", "session_key", "member_id", "identity_id", "auth_rev", "created_at", "last_refresh_at", "idle_until", "absolute_until", "revoked_at", "revoke_code"));
-                expectedColumns.put("member_token", Set.of("id", "session_id", "kind", "generation", "token_hash", "state", "issued_at", "expires_at", "used_at"));
-                expectedColumns.put("member_flow", Set.of("id", "flow_key", "binder_hash", "purpose", "state", "provider", "lookup_hash", "code_hash", "proof_cipher", "attempt_count", "created_at", "expires_at", "verified_at", "consumed_at"));
-                expectedColumns.put("member_auth_audit", Set.of("id", "event_key", "member_id", "request_id", "action", "result_code", "http_status", "created_at", "purge_at", "auth_rev"));
-                expectedColumns.put("member_auth_limit", Set.of("scope", "bucket_hash", "window_at", "hit_count", "blocked_until", "purge_at"));
+                expectedColumns.put(
+                        "evidence_set",
+                        Set.of(
+                                "id",
+                                "set_key",
+                                "snapshot_id",
+                                "runtime_id",
+                                "runtime_epoch",
+                                "kind",
+                                "evidence_hash",
+                                "summary_data",
+                                "available_yn",
+                                "invalidated_at",
+                                "invalidated_issue_id",
+                                "created_by",
+                                "created_at"));
+                expectedColumns.put(
+                        "evidence_item",
+                        Set.of("set_id", "snapshot_id", "runtime_id", "batch_id", "evidence_hash"));
+                expectedColumns.put(
+                        "member_account",
+                        Set.of(
+                                "id",
+                                "member_key",
+                                "state",
+                                "auth_rev",
+                                "created_at",
+                                "updated_at",
+                                "deleted_at"));
+                expectedColumns.put(
+                        "privacy_policy",
+                        Set.of(
+                                "id",
+                                "code",
+                                "env_code",
+                                "scope",
+                                "state",
+                                "notice_hash",
+                                "policy_data",
+                                "owner_id",
+                                "created_at"));
+                expectedColumns.put(
+                        "member_profile",
+                        Set.of(
+                                "member_id",
+                                "nickname_cipher",
+                                "policy_id",
+                                "accepted_at",
+                                "created_at",
+                                "updated_at"));
+                expectedColumns.put(
+                        "member_identity",
+                        Set.of(
+                                "id",
+                                "identity_key",
+                                "member_id",
+                                "provider",
+                                "realm",
+                                "lookup_hash",
+                                "lookup_ver",
+                                "subject_cipher",
+                                "password_hash",
+                                "active_yn",
+                                "proof_at",
+                                "bound_at",
+                                "created_at",
+                                "updated_at"));
+                expectedColumns.put(
+                        "member_session",
+                        Set.of(
+                                "id",
+                                "session_key",
+                                "member_id",
+                                "identity_id",
+                                "auth_rev",
+                                "created_at",
+                                "last_refresh_at",
+                                "idle_until",
+                                "absolute_until",
+                                "revoked_at",
+                                "revoke_code"));
+                expectedColumns.put(
+                        "member_token",
+                        Set.of(
+                                "id",
+                                "session_id",
+                                "kind",
+                                "generation",
+                                "token_hash",
+                                "state",
+                                "issued_at",
+                                "expires_at",
+                                "used_at"));
+                expectedColumns.put(
+                        "member_flow",
+                        Set.of(
+                                "id",
+                                "flow_key",
+                                "binder_hash",
+                                "purpose",
+                                "state",
+                                "provider",
+                                "lookup_hash",
+                                "code_hash",
+                                "proof_cipher",
+                                "attempt_count",
+                                "created_at",
+                                "expires_at",
+                                "verified_at",
+                                "consumed_at"));
+                expectedColumns.put(
+                        "member_auth_audit",
+                        Set.of(
+                                "id",
+                                "event_key",
+                                "member_id",
+                                "request_id",
+                                "action",
+                                "result_code",
+                                "http_status",
+                                "created_at",
+                                "purge_at",
+                                "auth_rev"));
+                expectedColumns.put(
+                        "member_auth_limit",
+                        Set.of(
+                                "scope",
+                                "bucket_hash",
+                                "window_at",
+                                "hit_count",
+                                "blocked_until",
+                                "purge_at"));
+                expectedColumns.put(
+                        "play_test",
+                        Set.of(
+                                "id",
+                                "test_key",
+                                "version_id",
+                                "snapshot_id",
+                                "runtime_id",
+                                "config_hash",
+                                "runtime_epoch",
+                                "role_a",
+                                "role_b",
+                                "mode",
+                                "state",
+                                "outcome",
+                                "rev",
+                                "draft_rev",
+                                "invite_until",
+                                "ready_until",
+                                "started_at",
+                                "deadline_at",
+                                "ended_at",
+                                "result_until",
+                                "attempt_count",
+                                "wrong_count",
+                                "final_score",
+                                "created_by",
+                                "created_at",
+                                "updated_at",
+                                "cancel_reason",
+                                "draft_cipher",
+                                "draft_hash",
+                                "next_submit_no"));
+                expectedColumns.put(
+                        "test_member",
+                        Set.of(
+                                "test_id",
+                                "member_id",
+                                "slot",
+                                "invite_gen",
+                                "invite_state",
+                                "accepted_at",
+                                "accepted_policy_id",
+                                "accepted_notice_hash",
+                                "ready_yn",
+                                "role_code",
+                                "last_seen_at",
+                                "blind_declared",
+                                "revoked_at",
+                                "created_at",
+                                "updated_at",
+                                "feedback_cipher",
+                                "feedback_at"));
+                expectedColumns.put(
+                        "test_report",
+                        Set.of(
+                                "id",
+                                "report_key",
+                                "test_id",
+                                "snapshot_id",
+                                "runtime_id",
+                                "config_hash",
+                                "runtime_epoch",
+                                "source_draft_rev",
+                                "proposer_id",
+                                "payload_cipher",
+                                "payload_hash",
+                                "state",
+                                "accepted_by",
+                                "accepted_at",
+                                "submit_no",
+                                "purged_at",
+                                "created_at",
+                                "updated_at"));
+                expectedColumns.put(
+                        "test_exposure", Set.of("story_id", "member_id", "first_exposed_at"));
+                expectedColumns.put(
+                        "test_hint", Set.of("test_id", "member_id", "level", "opened_at"));
+                expectedColumns.put(
+                        "test_retention",
+                        Set.of("test_id", "policy_id", "raw_until", "max_until", "selected_at"));
                 for (var entry : expectedColumns.entrySet()) {
                     Set<String> columns = new HashSet<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", entry.getKey(), "%")) {
@@ -521,6 +740,51 @@ class SchemaIT {
                     assertThat(columns)
                             .as(entry.getKey() + " columns")
                             .containsExactlyInAnyOrderElementsOf(entry.getValue());
+                }
+                try (var statement = connection.createStatement();
+                        ResultSet rs =
+                                statement.executeQuery(
+                                        "SELECT"
+                                            + " a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.attidentity,pg_get_expr(d.adbin,d.adrelid)"
+                                            + " FROM pg_attribute a LEFT JOIN pg_attrdef d ON"
+                                            + " d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE"
+                                            + " a.attrelid='public.test_report'::regclass AND"
+                                            + " a.attnum>0 AND NOT a.attisdropped ORDER BY"
+                                            + " a.attnum")) {
+                    List<String> columns = new ArrayList<>();
+                    while (rs.next()) {
+                        columns.add(
+                                rs.getString(1) + ":" + rs.getString(2) + ":" + rs.getBoolean(3));
+                        assertThat(rs.getString(4))
+                                .isEqualTo(rs.getString(1).equals("id") ? "a" : "");
+                        assertThat(rs.getString(5))
+                                .isEqualTo(
+                                        switch (rs.getString(1)) {
+                                            case "state" -> "'PROPOSED'::character varying";
+                                            case "created_at", "updated_at" -> "now()";
+                                            default -> null;
+                                        });
+                    }
+                    assertThat(columns)
+                            .containsExactly(
+                                    "id:bigint:true",
+                                    "report_key:uuid:true",
+                                    "test_id:bigint:true",
+                                    "snapshot_id:bigint:true",
+                                    "runtime_id:bigint:true",
+                                    "config_hash:character(64):true",
+                                    "runtime_epoch:bigint:true",
+                                    "source_draft_rev:bigint:true",
+                                    "proposer_id:bigint:true",
+                                    "payload_cipher:bytea:false",
+                                    "payload_hash:character(64):false",
+                                    "state:character varying(24):true",
+                                    "accepted_by:bigint:false",
+                                    "accepted_at:timestamp with time zone:false",
+                                    "submit_no:integer:false",
+                                    "purged_at:timestamp with time zone:false",
+                                    "created_at:timestamp with time zone:true",
+                                    "updated_at:timestamp with time zone:true");
                 }
                 Map<String, Set<String>> approvedIndexes =
                         new HashMap<>(
@@ -574,7 +838,8 @@ class SchemaIT {
                                 "pk_grade_job",
                                 "uk_grade_job_key",
                                 "uk_grade_job_sample",
-                                "uk_gj_worker"));
+                                "uk_gj_worker",
+                                "uk_gj_report"));
                 approvedIndexes.put("grade_attempt", Set.of("pk_grade_attempt", "uk_ga_lease"));
                 approvedIndexes.put(
                         "grade_event", Set.of("pk_grade_event", "uk_grade_event_command"));
@@ -588,7 +853,11 @@ class SchemaIT {
                                 "uk_stf_pending",
                                 "ix_stf_expiry"));
                 approvedIndexes.put(
-                        "review_record", Set.of("pk_review_record", "uq_review_record_request", "uq_review_record_set"));
+                        "review_record",
+                        Set.of(
+                                "pk_review_record",
+                                "uq_review_record_request",
+                                "uq_review_record_set"));
                 approvedIndexes.put(
                         "test_action", Set.of("pk_test_action", "uk_test_action_request"));
                 approvedIndexes.put("test_audit", Set.of("pk_test_audit", "uk_test_audit_event"));
@@ -598,17 +867,67 @@ class SchemaIT {
                                 "pk_execution_issue",
                                 "uk_execution_issue_key",
                                 "uk_eissue_batch_kind"));
-                approvedIndexes.put("evidence_set", Set.of("pk_evidence_set","uq_evidence_set_key","uq_evidence_set_snapshot","uq_evidence_set_source"));
+                approvedIndexes.put(
+                        "evidence_set",
+                        Set.of(
+                                "pk_evidence_set",
+                                "uq_evidence_set_key",
+                                "uq_evidence_set_snapshot",
+                                "uq_evidence_set_source"));
                 approvedIndexes.put("evidence_item", Set.of("pk_evidence_item"));
                 approvedIndexes.put("member_account", Set.of("pk_member_account", "uk_member_key"));
-                approvedIndexes.put("privacy_policy", Set.of("pk_privacy_policy", "uk_privacy_policy_code", "uk_pp_active"));
+                approvedIndexes.put(
+                        "privacy_policy",
+                        Set.of("pk_privacy_policy", "uk_privacy_policy_code", "uk_pp_active"));
                 approvedIndexes.put("member_profile", Set.of("pk_member_profile"));
-                approvedIndexes.put("member_identity", Set.of("pk_member_identity", "uk_mi_key", "uk_mi_member_id", "uk_mi_subject", "uk_mi_member_provider"));
-                approvedIndexes.put("member_session", Set.of("pk_member_session", "uk_ms_key", "uk_ms_member_id"));
-                approvedIndexes.put("member_token", Set.of("pk_member_token", "uk_mt_hash", "uk_mt_generation", "uk_mt_current_refresh"));
-                approvedIndexes.put("member_flow", Set.of("pk_member_flow", "uk_mf_key", "ix_mf_expiry"));
-                approvedIndexes.put("member_auth_audit", Set.of("pk_member_auth_audit", "uk_maa_event"));
+                approvedIndexes.put(
+                        "member_identity",
+                        Set.of(
+                                "pk_member_identity",
+                                "uk_mi_key",
+                                "uk_mi_member_id",
+                                "uk_mi_subject",
+                                "uk_mi_member_provider"));
+                approvedIndexes.put(
+                        "member_session",
+                        Set.of("pk_member_session", "uk_ms_key", "uk_ms_member_id"));
+                approvedIndexes.put(
+                        "member_token",
+                        Set.of(
+                                "pk_member_token",
+                                "uk_mt_hash",
+                                "uk_mt_generation",
+                                "uk_mt_current_refresh"));
+                approvedIndexes.put(
+                        "member_flow", Set.of("pk_member_flow", "uk_mf_key", "ix_mf_expiry"));
+                approvedIndexes.put(
+                        "member_auth_audit", Set.of("pk_member_auth_audit", "uk_maa_event"));
                 approvedIndexes.put("member_auth_limit", Set.of("pk_member_auth_limit"));
+                approvedIndexes.put(
+                        "play_test",
+                        Set.of(
+                                "pk_play_test",
+                                "uk_play_test_key",
+                                "uk_play_test_snapshot",
+                                "uk_test_report_pins"));
+                approvedIndexes.put(
+                        "test_report",
+                        Set.of(
+                                "pk_test_report",
+                                "uk_report_key",
+                                "uk_report_pins",
+                                "uk_report_submit",
+                                "uk_report_live"));
+                approvedIndexes.put(
+                        "test_member",
+                        Set.of(
+                                "pk_test_member",
+                                "uk_test_member_slot",
+                                "uk_test_member_role",
+                                "ix_tm_member_invite"));
+                approvedIndexes.put("test_exposure", Set.of("pk_test_exposure"));
+                approvedIndexes.put("test_hint", Set.of("pk_test_hint"));
+                approvedIndexes.put("test_retention", Set.of("pk_test_retention", "ix_tret_due"));
                 for (var entry : approvedIndexes.entrySet()) {
                     Set<String> indexes = new HashSet<>();
                     try (ResultSet rs =
@@ -672,7 +991,11 @@ class SchemaIT {
                 approvedForeignKeys.put(
                         "grade_batch", Set.of("fk_gb_snapshot", "fk_gb_runtime", "fk_gb_admin"));
                 approvedForeignKeys.put(
-                        "grade_job", Set.of("fk_gj_snapshot", "fk_gj_runtime", "fk_gj_batch"));
+                        "grade_job",
+                        Set.of("fk_gj_snapshot", "fk_gj_runtime", "fk_gj_batch", "fk_gj_report"));
+                approvedForeignKeys.put(
+                        "test_report",
+                        Set.of("fk_report_test", "fk_report_proposer", "fk_report_acceptor"));
                 approvedForeignKeys.put("grade_attempt", Set.of("fk_ga_job"));
                 approvedForeignKeys.put(
                         "grade_event", Set.of("fk_grade_event_job", "fk_grade_event_attempt"));
@@ -689,8 +1012,11 @@ class SchemaIT {
                 int fkCount = 0;
                 approvedForeignKeys.put(
                         "review_record",
-                        Set.of("fk_review_record_snapshot", "fk_review_record_reviewer", "fk_review_record_set"));
-                approvedForeignKeys.put("test_action", Set.of("fk_ta_admin"));
+                        Set.of(
+                                "fk_review_record_snapshot",
+                                "fk_review_record_reviewer",
+                                "fk_review_record_set"));
+                approvedForeignKeys.put("test_action", Set.of("fk_ta_admin", "fk_ta_member"));
                 approvedForeignKeys.put("test_audit", Set.of());
                 approvedForeignKeys.put(
                         "execution_issue",
@@ -700,8 +1026,15 @@ class SchemaIT {
                                 "fk_eissue_batch",
                                 "fk_eissue_res_batch",
                                 "fk_eissue_admin"));
-                approvedForeignKeys.put("evidence_set", Set.of("fk_evidence_set_snapshot","fk_evidence_set_runtime","fk_evidence_set_issue","fk_evidence_set_creator"));
-                approvedForeignKeys.put("evidence_item", Set.of("fk_evidence_item_set","fk_evidence_item_batch"));
+                approvedForeignKeys.put(
+                        "evidence_set",
+                        Set.of(
+                                "fk_evidence_set_snapshot",
+                                "fk_evidence_set_runtime",
+                                "fk_evidence_set_issue",
+                                "fk_evidence_set_creator"));
+                approvedForeignKeys.put(
+                        "evidence_item", Set.of("fk_evidence_item_set", "fk_evidence_item_batch"));
                 approvedForeignKeys.put("member_account", Set.of());
                 approvedForeignKeys.put("privacy_policy", Set.of("fk_pp_owner"));
                 approvedForeignKeys.put("member_profile", Set.of("fk_mp_member", "fk_mp_policy"));
@@ -711,6 +1044,19 @@ class SchemaIT {
                 approvedForeignKeys.put("member_flow", Set.of());
                 approvedForeignKeys.put("member_auth_audit", Set.of("fk_maa_member"));
                 approvedForeignKeys.put("member_auth_limit", Set.of());
+                approvedForeignKeys.put(
+                        "play_test",
+                        Set.of(
+                                "fk_test_version",
+                                "fk_test_snapshot",
+                                "fk_test_runtime",
+                                "fk_test_pair",
+                                "fk_test_admin"));
+                approvedForeignKeys.put(
+                        "test_member", Set.of("fk_tm_test", "fk_tm_member", "fk_tm_policy"));
+                approvedForeignKeys.put("test_exposure", Set.of("fk_tex_story", "fk_tex_member"));
+                approvedForeignKeys.put("test_hint", Set.of("fk_hint_member"));
+                approvedForeignKeys.put("test_retention", Set.of("fk_tret_test", "fk_tret_policy"));
                 for (var entry : approvedForeignKeys.entrySet()) {
                     Set<String> foreignKeys = new HashSet<>();
                     try (ResultSet rs = metadata.getImportedKeys(null, "public", entry.getKey())) {
@@ -721,7 +1067,16 @@ class SchemaIT {
                             .containsExactlyInAnyOrderElementsOf(entry.getValue());
                     fkCount += foreignKeys.size();
                 }
-                assertThat(fkCount).isEqualTo(72);
+                assertThat(fkCount).isEqualTo(90);
+                try (var statement = connection.createStatement();
+                        ResultSet rs =
+                                statement.executeQuery(
+                                        "SELECT count(*) FROM pg_constraint c JOIN pg_namespace n"
+                                            + " ON n.oid=c.connamespace WHERE n.nspname='public'"
+                                            + " AND c.contype='f'")) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getInt(1)).isEqualTo(101);
+                }
                 // V16 수동 검수와 V18 근거의 세부 물리 경계는 전용 스키마 시험에서 추가 검사한다.
                 // 복합 참조의 열 순서와 삭제·갱신 차단 정책까지 검사한다.
                 Map<String, List<String>> rolePairFks = new HashMap<>();
@@ -908,6 +1263,39 @@ class SchemaIT {
                     }
                     assertThat(primaryKey.values()).containsExactlyElementsOf(entry.getValue());
                 }
+                Map<Short, String> testHintPrimaryKey = new java.util.TreeMap<>();
+                try (ResultSet rs = metadata.getPrimaryKeys(null, "public", "test_hint")) {
+                    while (rs.next()) {
+                        assertThat(rs.getString("PK_NAME")).isEqualTo("pk_test_hint");
+                        testHintPrimaryKey.put(rs.getShort("KEY_SEQ"), rs.getString("COLUMN_NAME"));
+                    }
+                }
+                assertThat(testHintPrimaryKey.values())
+                        .containsExactly("test_id", "member_id", "level");
+                Map<Short, String> testHintForeignKey = new java.util.TreeMap<>();
+                try (ResultSet rs = metadata.getImportedKeys(null, "public", "test_hint")) {
+                    while (rs.next()) {
+                        assertThat(rs.getString("FK_NAME")).isEqualTo("fk_hint_member");
+                        assertThat(rs.getInt("DELETE_RULE"))
+                                .isEqualTo(DatabaseMetaData.importedKeyNoAction);
+                        assertThat(rs.getInt("UPDATE_RULE"))
+                                .isEqualTo(DatabaseMetaData.importedKeyNoAction);
+                        assertThat(rs.getInt("DEFERRABILITY"))
+                                .isEqualTo(DatabaseMetaData.importedKeyNotDeferrable);
+                        testHintForeignKey.put(
+                                rs.getShort("KEY_SEQ"),
+                                rs.getString("FKCOLUMN_NAME")
+                                        + "->"
+                                        + rs.getString("PKTABLE_NAME")
+                                        + "."
+                                        + rs.getString("PKCOLUMN_NAME"));
+                    }
+                }
+                assertThat(testHintForeignKey)
+                        .containsExactlyInAnyOrderEntriesOf(
+                                Map.of(
+                                        (short) 1, "test_id->test_member.test_id",
+                                        (short) 2, "member_id->test_member.member_id"));
                 for (String table : List.of("story_clue", "clue_role")) {
                     Map<String, String> definitions = new HashMap<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", table, "%")) {

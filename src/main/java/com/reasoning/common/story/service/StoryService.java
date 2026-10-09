@@ -1553,11 +1553,24 @@ public class StoryService {
             int number,
             java.util.function.Supplier<R> runtimeLock,
             java.util.function.BiFunction<ReviewScope, R, T> work) {
+        return withBatchAction(sid, actor, code, number, List.of(), runtimeLock, work);
+    }
+
+    /** 추가 관리자 계정을 행위자와 함께 ID순으로 잠그고 현재 인가 뒤에 작업을 실행한다. */
+    <R, T> T withBatchAction(
+            String sid,
+            AdminActor actor,
+            String code,
+            int number,
+            List<Long> additionalAccountIds,
+            java.util.function.Supplier<R> runtimeLock,
+            java.util.function.BiFunction<ReviewScope, R, T> work) {
         return withExecutionAction(
                 sid,
                 actor,
                 code,
                 number,
+                additionalAccountIds,
                 runtimeLock,
                 (scope, runtime) -> new GradeEvidenceWork<>(work.apply(scope, runtime), null),
                 false);
@@ -1571,7 +1584,7 @@ public class StoryService {
             int number,
             java.util.function.Supplier<R> runtimeLock,
             java.util.function.BiFunction<ReviewScope, R, GradeEvidenceWork<T>> work) {
-        return withExecutionAction(sid, actor, code, number, runtimeLock, work, true);
+        return withExecutionAction(sid, actor, code, number, List.of(), runtimeLock, work, true);
     }
 
     /** 현재 인증·runtime·부모·자식·최종 인가를 공유하되 기록 추가 정책은 내부에서만 선택한다. */
@@ -1580,10 +1593,16 @@ public class StoryService {
             AdminActor actor,
             String code,
             int number,
+            List<Long> additionalAccountIds,
             java.util.function.Supplier<R> runtimeLock,
             java.util.function.BiFunction<ReviewScope, R, GradeEvidenceWork<T>> work,
             boolean gradeEvidence) {
         path(code, number);
+        if (additionalAccountIds == null
+                || additionalAccountIds.stream().anyMatch(id -> id == null || id <= 0))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        List<Long> accountIds = new ArrayList<>(additionalAccountIds);
+        accountIds.add(actor.accountId());
         if (org.springframework.transaction.support.TransactionSynchronizationManager
                 .isActualTransactionActive()) throw AuthException.unavailable("STORY_UNAVAILABLE");
         precheck(sid, actor);
@@ -1601,7 +1620,7 @@ public class StoryService {
                     if (!Boolean.TRUE.equals(valid))
                         throw AuthException.unavailable("STORY_UNAVAILABLE");
                     db.execute("SET LOCAL lock_timeout = '5s'");
-                    lockAccounts(List.of(actor.accountId()));
+                    lockAccounts(accountIds);
                     Account account = authorizeLocked(sid, actor);
                     R runtime = runtimeLock.get();
                     StoryRow story = story(code);

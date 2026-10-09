@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.auth.service.CryptoService;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier;
 import com.reasoning.common.grading.model.GradeModels.BaseResult;
@@ -18,10 +19,15 @@ import com.reasoning.common.grading.repository.GradeFrozenInputRepository;
 import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.LockedTestSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.TestPreparation;
+import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
 import com.reasoning.common.grading.security.GradeWorkerCredentials;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.Action;
 import com.reasoning.common.grading.security.GradeWorkerCredentials.VerifiedWorker;
 import com.reasoning.common.grading.service.FrozenDatasetValidator.SelectedSample;
+import com.reasoning.common.member.auth.MemberPolicyGate;
+import com.reasoning.common.member.auth.PlaytestPolicyGate;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -56,11 +62,14 @@ public final class GradeCompletionService {
     private final JdbcTemplate jdbc;
     private final GradeWorkerCredentials credentials;
     private final Map<String, InstalledRuntimeManifestVerifier> installations;
+    private final PlatformTransactionManager manager;
+    private final String coordinatorKey;
     private final CryptoService crypto;
     private final GradeSourceRepository sources;
     private final GradeRuntimeRepository runtimes;
     private final GradeFrozenInputRepository frozen;
     private final GradeEventRepository audit;
+    private final PlaytestPolicyGate testPolicy;
     private final TransactionTemplate transaction;
 
     /** 동일 실제 레지스트리·DataSource 조립인지 예약 전에 확인하며 비밀 getter는 제공하지 않는다. */
@@ -74,21 +83,54 @@ public final class GradeCompletionService {
      *
      * @param registry 실제 동일 인증 registry, null 불가
      * @param source START와 동일 DataSource 인스턴스, null 불가
+     * @param expectedManager START와 동일 JDBC TX 관리자, null 불가
      * @param expectedInstallations START가 소유한 실제 불변 설치 map, null 불가
      * @throws IllegalArgumentException 동일 소유 또는 JDBC 관리자 불일치의 고정 오류
      */
     void requireHttpAssembly(
             GradeWorkerCredentials registry,
             javax.sql.DataSource source,
+            PlatformTransactionManager expectedManager,
             Map<String, InstalledRuntimeManifestVerifier> expectedInstallations) {
         if (credentials != registry
                 || jdbc.getDataSource() != source
+                || manager != expectedManager
                 || !(transaction.getTransactionManager()
                         instanceof
                         org.springframework.jdbc.datasource.DataSourceTransactionManager manager)
                 || manager.getDataSource() != source
-                || !installations.equals(expectedInstallations))
+                || !sameInstallations(expectedInstallations))
             throw new IllegalArgumentException("REMOTE_ASSEMBLY_MISMATCH");
+    }
+
+    /** 이전 BATCH 조립에는 TEST 완료 권위를 허용하지 않는다. */
+    public void requireBatchAssembly() {
+        if (testPolicy != null) throw new IllegalArgumentException("REMOTE_ASSEMBLY_MISMATCH");
+    }
+
+    /** TEST 서비스가 같은 실제 암호화·정책·coordinator를 소유하는지 대조한다. */
+    public void requireTestAssembly(
+            GradeWorkerCredentials registry,
+            javax.sql.DataSource source,
+            PlatformTransactionManager expectedManager,
+            Map<String, InstalledRuntimeManifestVerifier> expectedInstallations,
+            PlaytestPolicyGate expectedPolicy,
+            CryptoService expectedCrypto,
+            String expectedCoordinator) {
+        requireHttpAssembly(registry, source, expectedManager, expectedInstallations);
+        if (testPolicy == null
+                || testPolicy != expectedPolicy
+                || crypto != expectedCrypto
+                || !coordinatorKey.equals(expectedCoordinator))
+            throw new IllegalArgumentException("TEST_ASSEMBLY_MISMATCH");
+    }
+
+    /** 동일 configId라도 다른 설치 객체로 교체한 조립은 허용하지 않는다. */
+    private boolean sameInstallations(Map<String, InstalledRuntimeManifestVerifier> expected) {
+        return expected != null
+                && installations.size() == expected.size()
+                && installations.entrySet().stream()
+                        .allMatch(entry -> entry.getValue() == expected.get(entry.getKey()));
     }
 
     /** 원래 완료 명령과 다른 replay만 구분하는 고정 오류이며 저장·조립 실패를 대신하지 않는다. */
@@ -117,17 +159,35 @@ public final class GradeCompletionService {
             Map<String, InstalledRuntimeManifestVerifier> installations,
             CryptoService crypto,
             String trustedCoordinatorKey) {
+        this(jdbc, manager, credentials, installations, crypto, trustedCoordinatorKey, null, null);
+    }
+
+    /** TEST 완료는 같은 PLAYTEST 정책 증거를 별도로 받으며 기존 생성자는 BATCH 전용으로 둔다. */
+    public GradeCompletionService(
+            JdbcTemplate jdbc,
+            PlatformTransactionManager manager,
+            GradeWorkerCredentials credentials,
+            Map<String, InstalledRuntimeManifestVerifier> installations,
+            CryptoService crypto,
+            String trustedCoordinatorKey,
+            PlaytestPolicyGate testPolicy,
+            MemberPolicyGate memberPolicy) {
+        if ((testPolicy == null) != (memberPolicy == null))
+            throw new IllegalArgumentException("INVALID_TEST_COMPLETION_ASSEMBLY");
         if (TransactionSynchronizationManager.isActualTransactionActive()) throw boundary();
         this.jdbc = Objects.requireNonNull(jdbc);
+        this.manager = Objects.requireNonNull(manager);
+        this.coordinatorKey = Objects.requireNonNull(trustedCoordinatorKey);
         this.credentials = Objects.requireNonNull(credentials);
         this.installations = Map.copyOf(Objects.requireNonNull(installations));
         this.crypto = Objects.requireNonNull(crypto);
+        this.testPolicy = testPolicy;
         this.installations.forEach(
                 (code, verifier) -> {
                     if (!code.equals(verifier.registrationManifest().path("configId").textValue()))
                         throw invalid();
                 });
-        sources = new GradeSourceRepository(jdbc);
+        sources = new GradeSourceRepository(jdbc, memberPolicy);
         runtimes = new GradeRuntimeRepository(jdbc);
         frozen = new GradeFrozenInputRepository(jdbc);
         audit = new GradeEventRepository(jdbc, credentials, trustedCoordinatorKey);
@@ -203,6 +263,67 @@ public final class GradeCompletionService {
                             jobKey);
             if (codes.size() != 1) throw invalid();
             credentials.requirePermission(worker, Action.COMPLETE, codes.getFirst());
+            var kinds =
+                    jdbc.queryForList(
+                            "SELECT report_id FROM public.grade_job WHERE job_key=?",
+                            Long.class,
+                            jobKey);
+            if (kinds.size() != 1) throw invalid();
+            if (kinds.getFirst() != null) {
+                if (testPolicy == null)
+                    throw new IllegalStateException("TEST_COMPLETION_NOT_CONFIGURED");
+                CompletionReceipt inspected =
+                        transaction.execute(
+                                status ->
+                                        inspectTest(
+                                                worker,
+                                                jobKey,
+                                                leaseGen,
+                                                attemptNo,
+                                                requestId,
+                                                commandHash,
+                                                false));
+                if (inspected != null) return inspected;
+                try {
+                    var prepared = sources.prepareTest(testPolicy);
+                    return transaction.execute(
+                            status ->
+                                    applyTest(
+                                            worker,
+                                            jobKey,
+                                            leaseGen,
+                                            attemptNo,
+                                            observedProviderVersion,
+                                            providerResponseRef,
+                                            result,
+                                            requestId,
+                                            commandHash,
+                                            prepared));
+                } catch (AuthException failure) {
+                    return transaction.execute(
+                            status ->
+                                    inspectTest(
+                                            worker,
+                                            jobKey,
+                                            leaseGen,
+                                            attemptNo,
+                                            requestId,
+                                            commandHash,
+                                            true));
+                } catch (IllegalStateException failure) {
+                    if (!"SOURCE_NOT_CURRENT".equals(failure.getMessage())) throw failure;
+                    return transaction.execute(
+                            status ->
+                                    inspectTest(
+                                            worker,
+                                            jobKey,
+                                            leaseGen,
+                                            attemptNo,
+                                            requestId,
+                                            commandHash,
+                                            true));
+                }
+            }
             return transaction.execute(
                     status ->
                             apply(
@@ -221,6 +342,56 @@ public final class GradeCompletionService {
             if ("GRADE_AUDIT_STORAGE_FAILURE".equals(failure.getMessage())) throw storage();
             throw failure;
         }
+    }
+
+    /** 역사 루트는 현재 실행 권한 없이 원래 worker·시도와 저장된 명령만 검사한다. 신규 정산은 별도 거래에서 수행한다. */
+    private CompletionReceipt inspectTest(
+            VerifiedWorker worker,
+            UUID key,
+            long gen,
+            int number,
+            UUID request,
+            String hash,
+            boolean unavailable) {
+        LockedTestSource locked = sources.lockTestRootsForSettlement(key);
+        TestRootEvidence root = locked.lockedFacts(jdbc.getDataSource());
+        credentials.requirePermission(worker, Action.COMPLETE, root.runtimeCode());
+        var attempts =
+                jdbc.queryForList(
+                        """
+                        SELECT worker_key,lease_gen,state,completion_data::text AS completion
+                        FROM public.grade_attempt WHERE job_id=? AND attempt_no=? FOR UPDATE
+                        """,
+                        root.jobId(),
+                        number);
+        if (attempts.size() != 1) throw invalid();
+        Map<String, Object> attempt = attempts.getFirst();
+        if (!worker.workerKey().equals(attempt.get("worker_key")))
+            throw new SecurityException("WORKER_NOT_AUTHORIZED");
+        if (attempt.get("completion") != null) {
+            JsonNode envelope = stored((String) attempt.get("completion"));
+            if (!hash.equals(envelope.path("commandHash").textValue()))
+                throw new CallbackConflictException();
+            return receipt(envelope.path("receipt"), key, number);
+        }
+        Job job = job(root.jobId());
+        Reason reason =
+                gen != number(attempt, "lease_gen")
+                        ? Reason.STALE_LEASE
+                        : testRejection(job, attempt, worker, gen, number, now());
+        if (reason == null) reason = testEpochRejection(root);
+        if (reason != null || unavailable)
+            return rejectTest(
+                    worker,
+                    root,
+                    job,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    reason == null ? Reason.SOURCE_REVOKED : reason);
+        return null;
     }
 
     /**
@@ -447,6 +618,656 @@ public final class GradeCompletionService {
         frozen.dataset(root, verified);
         requirePostWrite(root, current, after, afterAttempt, worker, gen, number);
         return receipt;
+    }
+
+    /** TEST는 같은 예약·명령 영수증을 사용하지만 보고서와 플레이 부모만 잠그고 정산한다. */
+    private CompletionReceipt applyTest(
+            VerifiedWorker worker,
+            UUID key,
+            long gen,
+            int number,
+            String observed,
+            String reference,
+            JsonNode result,
+            UUID request,
+            String hash,
+            TestPreparation prepared) {
+        LockedTestSource locked = sources.lockTestRoots(key, testPolicy, prepared);
+        TestRootEvidence root = locked.lockedFacts(jdbc.getDataSource());
+        credentials.requirePermission(worker, Action.COMPLETE, root.runtimeCode());
+        var attempts =
+                jdbc.queryForList(
+                        """
+                        SELECT worker_key,lease_gen,state,completion_data::text AS completion
+                        FROM public.grade_attempt WHERE job_id=? AND attempt_no=? FOR UPDATE
+                        """,
+                        root.jobId(),
+                        number);
+        if (attempts.size() != 1) throw invalid();
+        Map<String, Object> attempt = attempts.getFirst();
+        if (!worker.workerKey().equals(attempt.get("worker_key")))
+            throw new SecurityException("WORKER_NOT_AUTHORIZED");
+        Job before = job(root.jobId());
+        if (attempt.get("completion") != null) {
+            JsonNode envelope = stored((String) attempt.get("completion"));
+            if (!hash.equals(envelope.path("commandHash").textValue()))
+                throw new CallbackConflictException();
+            return receipt(envelope.path("receipt"), key, number);
+        }
+        Reason rejection =
+                gen != number(attempt, "lease_gen")
+                        ? Reason.STALE_LEASE
+                        : testRejection(before, attempt, worker, gen, number, now());
+        if (rejection != null)
+            return rejectTest(worker, root, before, attempt, gen, number, request, hash, rejection);
+        rejection = testEpochRejection(root);
+        if (rejection != null)
+            return rejectTest(worker, root, before, attempt, gen, number, request, hash, rejection);
+        try {
+            sources.requireTestExecutionEligibility(locked);
+        } catch (IllegalStateException failure) {
+            if ("SOURCE_NOT_CURRENT".equals(failure.getMessage()))
+                return rejectTest(
+                        worker,
+                        root,
+                        before,
+                        attempt,
+                        gen,
+                        number,
+                        request,
+                        hash,
+                        Reason.SOURCE_REVOKED);
+            throw failure;
+        }
+        var priorCounters =
+                jdbc.queryForMap(
+                        "SELECT attempt_count,wrong_count FROM public.play_test WHERE id=?",
+                        root.testId());
+        int normalAttempts = ((Number) priorCounters.get("attempt_count")).intValue();
+        int wrongAttempts = ((Number) priorCounters.get("wrong_count")).intValue();
+
+        var installation = installations.get(root.runtimeCode());
+        if (installation == null) throw new IllegalStateException("INSTALLED_RUNTIME_MISMATCH");
+        var registered =
+                runtimes.getRuntimeDetail(root.runtimeId())
+                        .orElseThrow(GradeCompletionService::invalid);
+        var verified = installation.verify(registered);
+        GradeFrozenInputRepository.TestGradeInput input;
+        try {
+            input = frozen.verifiedTestInput(locked, verified, crypto);
+        } catch (IllegalStateException failure) {
+            if ("TEST_INPUT_NOT_CURRENT".equals(failure.getMessage()))
+                return rejectTest(
+                        worker,
+                        root,
+                        before,
+                        attempt,
+                        gen,
+                        number,
+                        request,
+                        hash,
+                        Reason.SOURCE_REVOKED);
+            throw failure;
+        }
+        JsonNode policy = input.frozenSnapshot().payload().path("policy");
+        JsonNode limitValue = policy.path("attemptLimit");
+        JsonNode penaltyValue = policy.path("wrongPenalty");
+        if (!limitValue.isIntegralNumber()
+                || !limitValue.canConvertToInt()
+                || limitValue.intValue() < 1
+                || limitValue.intValue() > 5
+                || !penaltyValue.isIntegralNumber()
+                || !penaltyValue.canConvertToInt()
+                || penaltyValue.intValue() < 0
+                || penaltyValue.intValue() > 100) throw invalid();
+        int attemptLimit = limitValue.intValue();
+        int wrongPenalty = penaltyValue.intValue();
+        BaseResult base = null;
+        String error =
+                "COMPLETE".equals(result.path("kind").textValue())
+                        ? null
+                        : result.path("errorCode").textValue();
+        if (error == null) {
+            try {
+                var semantic =
+                        new GradeResultValidator()
+                                .validate(
+                                        text(result.get("semantic")),
+                                        input.report(),
+                                        input.snapshot());
+                base = new GradeCalculator().calculate(input.report(), input.snapshot(), semantic);
+            } catch (IllegalArgumentException failure) {
+                throw invalid();
+            }
+        }
+        ObjectNode privateResult = null;
+        ObjectNode summary = null;
+        if (base != null) {
+            privateResult = object().put("formatNo", 1);
+            privateResult.set("baseResult", INTERNAL.valueToTree(base));
+            summary =
+                    object().put("formatNo", 1)
+                            .put("baseScore", base.baseScore())
+                            .put("success", base.success());
+        }
+        String outputHash = base == null ? null : SnapshotJson.hash(result.get("semantic"));
+        String resultHash = privateResult == null ? null : SnapshotJson.hash(privateResult);
+        byte[] outputCipher =
+                base == null
+                        ? null
+                        : bytes(
+                                crypto.encrypt(
+                                        text(result.get("semantic")),
+                                        "grade_attempt/"
+                                                + root.jobId()
+                                                + "/"
+                                                + number
+                                                + "/output/v1"));
+        byte[] resultCipher =
+                privateResult == null
+                        ? null
+                        : bytes(
+                                crypto.encrypt(
+                                        text(privateResult),
+                                        "grade_job/" + root.jobId() + "/result/v1"));
+
+        Job current = job(root.jobId());
+        OffsetDateTime clock = now();
+        rejection = testRejection(current, attempt, worker, gen, number, clock);
+        if (rejection != null)
+            return rejectTest(
+                    worker, root, current, attempt, gen, number, request, hash, rejection);
+        rejection = testEpochRejection(root);
+        if (rejection != null)
+            return rejectTest(
+                    worker, root, current, attempt, gen, number, request, hash, rejection);
+        try {
+            sources.requireTestExecutionEligibility(locked);
+        } catch (IllegalStateException failure) {
+            if ("SOURCE_NOT_CURRENT".equals(failure.getMessage()))
+                return rejectTest(
+                        worker,
+                        root,
+                        current,
+                        attempt,
+                        gen,
+                        number,
+                        request,
+                        hash,
+                        Reason.SOURCE_REVOKED);
+            throw failure;
+        }
+        installation.verify(
+                runtimes.getRuntimeDetail(root.runtimeId())
+                        .orElseThrow(GradeCompletionService::storage));
+        try {
+            frozen.verifiedTestInput(locked, verified, crypto);
+        } catch (IllegalStateException failure) {
+            if ("TEST_INPUT_NOT_CURRENT".equals(failure.getMessage()))
+                return rejectTest(
+                        worker,
+                        root,
+                        current,
+                        attempt,
+                        gen,
+                        number,
+                        request,
+                        hash,
+                        Reason.SOURCE_REVOKED);
+            throw failure;
+        }
+        clock = now();
+        rejection = testTimeRejection(current, clock);
+        if (rejection != null)
+            return rejectTest(
+                    worker, root, current, attempt, gen, number, request, hash, rejection);
+
+        JobState after =
+                base != null ? JobState.COMPLETED : number < 3 ? JobState.QUEUED : JobState.FAILED;
+        AttemptState attemptState = base != null ? AttemptState.SUCCEEDED : AttemptState.FAILED;
+        Reason reason = error == null ? Reason.NONE : Reason.valueOf(error);
+        String outcome =
+                base != null ? "COMPLETE" : after == JobState.FAILED ? "SYSTEM_ERROR" : null;
+        CompletionReceipt receipt =
+                new CompletionReceipt(
+                        key,
+                        number,
+                        true,
+                        after.name(),
+                        after == JobState.QUEUED,
+                        outcome,
+                        reason.name(),
+                        request);
+
+        var savedAttempt =
+                jdbc.query(
+                        """
+                        UPDATE public.grade_attempt a SET state=?,ended_at=clock_timestamp(),error_code=?,
+                            observed_version=?,provider_ref=?,output_hash=?,output_cipher=?
+                        WHERE a.job_id=? AND a.attempt_no=? AND a.worker_key=? AND a.lease_gen=?
+                            AND a.state='RUNNING' AND a.completion_data IS NULL
+                            AND EXISTS(SELECT 1 FROM public.grade_job j WHERE j.id=a.job_id
+                                AND j.state='RUNNING' AND j.worker_key=? AND j.lease_gen=? AND j.call_count=?
+                                AND clock_timestamp()<j.lease_until AND clock_timestamp()<j.deadline_at)
+                        RETURNING ended_at
+                        """,
+                        (row, index) -> row.getObject(1, OffsetDateTime.class),
+                        attemptState.name(),
+                        error,
+                        observed,
+                        reference,
+                        outputHash,
+                        outputCipher,
+                        root.jobId(),
+                        number,
+                        worker.workerKey(),
+                        gen,
+                        worker.workerKey(),
+                        gen,
+                        number);
+        if (savedAttempt.size() != 1
+                || !savedAttempt.getFirst().isBefore(current.leaseUntil())
+                || !savedAttempt.getFirst().isBefore(current.deadlineAt())) throw storage();
+
+        int changed =
+                jdbc.update(
+                        """
+                        UPDATE public.grade_job SET state=?,worker_key=NULL,lease_until=NULL,error_code=?,
+                            result_data=?::jsonb,result_hash=?,result_cipher=?,next_run_at=?,updated_at=clock_timestamp()
+                        WHERE id=? AND job_key=? AND report_id=? AND report_hash=? AND batch_id IS NULL
+                            AND snapshot_id=? AND runtime_id=? AND config_hash=? AND rubric_hash=?
+                            AND state='RUNNING' AND worker_key=? AND lease_gen=? AND call_count=?
+                            AND accepted_at=? AND deadline_at=?
+                            AND clock_timestamp()<lease_until AND clock_timestamp()<deadline_at
+                        """,
+                        after.name(),
+                        error,
+                        summary == null ? null : text(summary),
+                        resultHash,
+                        resultCipher,
+                        clock,
+                        root.jobId(),
+                        key,
+                        root.reportId(),
+                        root.reportHash(),
+                        root.snapshotId(),
+                        root.runtimeId(),
+                        root.configHash(),
+                        root.rubricHash(),
+                        worker.workerKey(),
+                        gen,
+                        number,
+                        current.acceptedAt(),
+                        current.deadlineAt());
+        if (changed != 1) throw storage();
+
+        String testOutcome = null;
+        int score = -1;
+        if (base != null) {
+            var tests =
+                    jdbc.query(
+                            """
+                            SELECT attempt_count,wrong_count,deadline_at,state FROM public.play_test WHERE id=?
+                            """,
+                            (row, index) ->
+                                    Map.<String, Object>of(
+                                            "attempt_count", row.getInt("attempt_count"),
+                                            "wrong_count", row.getInt("wrong_count"),
+                                            "deadline_at",
+                                                    row.getObject(
+                                                            "deadline_at", OffsetDateTime.class),
+                                            "state", row.getString("state")),
+                            root.testId());
+            if (tests.size() != 1 || !"RUNNING".equals(tests.getFirst().get("state")))
+                throw storage();
+            Map<String, Object> test = tests.getFirst();
+            int next = normalAttempts + 1;
+            int wrong = wrongAttempts + (base.success() ? 0 : 1);
+            if (((Number) test.get("attempt_count")).intValue() != normalAttempts
+                    || ((Number) test.get("wrong_count")).intValue() != wrongAttempts)
+                throw storage();
+            normalAttempts = next;
+            wrongAttempts = wrong;
+            OffsetDateTime playDeadline = (OffsetDateTime) test.get("deadline_at");
+            if (next > attemptLimit || wrong > next || playDeadline == null) throw storage();
+            testOutcome =
+                    base.success()
+                            ? "SUCCESS"
+                            : !clock.isBefore(playDeadline)
+                                    ? "TIME_LIMIT"
+                                    : next >= attemptLimit ? "ATTEMPTS_EXHAUSTED" : null;
+            score = Math.max(0, base.baseScore() - wrong * wrongPenalty);
+            if (jdbc.update(
+                            """
+                            UPDATE public.test_report SET state='GRADED',updated_at=clock_timestamp()
+                            WHERE id=? AND test_id=? AND state='ACCEPTED' AND accepted_at=?
+                                AND payload_hash=? AND purged_at IS NULL
+                            """,
+                            root.reportId(),
+                            root.testId(),
+                            current.acceptedAt(),
+                            root.payloadHash())
+                    != 1) throw storage();
+            OffsetDateTime ended = testOutcome == null ? null : now();
+            changed =
+                    jdbc.update(
+                            """
+                            UPDATE public.play_test SET attempt_count=?,wrong_count=?,
+                                state=CASE WHEN ?::text IS NULL THEN 'RUNNING' ELSE 'ENDED' END,
+                                outcome=?,final_score=CASE WHEN ?::text IS NULL THEN NULL ELSE ? END,
+                                ended_at=?,result_until=?,
+                                updated_at=clock_timestamp(),rev=rev+1
+                            WHERE id=? AND state='RUNNING' AND attempt_count=? AND wrong_count=?
+                            """,
+                            next,
+                            wrong,
+                            testOutcome,
+                            testOutcome,
+                            testOutcome,
+                            score,
+                            ended,
+                            ended == null ? null : ended.plusHours(24),
+                            root.testId(),
+                            next - 1,
+                            wrong - (base.success() ? 0 : 1));
+            if (changed != 1) throw storage();
+        } else if (after == JobState.FAILED) {
+            if (jdbc.update(
+                            """
+                            UPDATE public.test_report SET state='UNGRADABLE',updated_at=clock_timestamp()
+                            WHERE id=? AND test_id=? AND state='ACCEPTED' AND payload_hash=?
+                            """,
+                            root.reportId(),
+                            root.testId(),
+                            root.payloadHash())
+                    != 1) throw storage();
+            OffsetDateTime ended = now();
+            if (jdbc.update(
+                            """
+                            UPDATE public.play_test SET state='ENDED',outcome='SYSTEM_ERROR',
+                                final_score=NULL,ended_at=?,result_until=?,updated_at=clock_timestamp(),rev=rev+1
+                            WHERE id=? AND state='RUNNING'
+                            """,
+                            ended,
+                            ended.plusHours(24),
+                            root.testId())
+                    != 1) throw storage();
+            testOutcome = "SYSTEM_ERROR";
+        }
+
+        long event =
+                audit.recordWorkerEvent(
+                        worker,
+                        root.jobId(),
+                        number,
+                        EventKind.COMPLETE_APPLIED,
+                        UUID.randomUUID(),
+                        request,
+                        hash,
+                        new Detail(
+                                gen,
+                                JobState.RUNNING,
+                                after,
+                                AttemptState.RUNNING,
+                                attemptState,
+                                reason,
+                                outputHash,
+                                resultHash));
+        Long testAudit =
+                jdbc.queryForObject(
+                        """
+                        INSERT INTO public.test_audit(event_key,actor_kind,actor_ref,action,scope_kind,
+                            scope_key,request_id,phase,business_result,detail)
+                        VALUES (?,'WORKER',?,'GRADE_COMPLETE','TEST',?,?,'RESULT',?,?::jsonb)
+                        RETURNING id
+                        """,
+                        Long.class,
+                        UUID.randomUUID(),
+                        worker.workerKey(),
+                        key.toString(),
+                        request,
+                        after == JobState.COMPLETED
+                                ? "GRADED"
+                                : after == JobState.FAILED ? "UNGRADABLE" : "RETRY",
+                        text(
+                                object().put("jobKey", key.toString())
+                                        .put("attemptNo", number)
+                                        .put("gradeEventId", event)
+                                        .put("commandHash", hash)));
+        if (testAudit == null || testAudit <= 0) throw storage();
+        ObjectNode envelope = object().put("auditEventId", event).put("commandHash", hash);
+        envelope.set("receipt", receiptJson(receipt));
+        if (jdbc.update(
+                        """
+                        UPDATE public.grade_attempt SET completion_data=?::jsonb
+                        WHERE job_id=? AND attempt_no=? AND worker_key=? AND lease_gen=? AND state=?
+                            AND completion_data IS NULL AND clock_timestamp()<? AND clock_timestamp()<?
+                        """,
+                        text(envelope),
+                        root.jobId(),
+                        number,
+                        worker.workerKey(),
+                        gen,
+                        attemptState.name(),
+                        current.leaseUntil(),
+                        current.deadlineAt())
+                != 1) throw storage();
+        requireTestStored(
+                root,
+                current,
+                worker,
+                gen,
+                number,
+                after,
+                attemptState,
+                error,
+                observed,
+                reference,
+                outputHash,
+                outputCipher,
+                resultHash,
+                resultCipher,
+                summary,
+                envelope,
+                base != null,
+                testOutcome,
+                score,
+                normalAttempts,
+                wrongAttempts,
+                testAudit,
+                request);
+        return receipt;
+    }
+
+    /** 거절은 플레이 상태나 예약 예산을 변경하지 않고 실제 작업 감사만 쓴다. */
+    private CompletionReceipt rejectTest(
+            VerifiedWorker worker,
+            TestRootEvidence root,
+            Job job,
+            Map<String, Object> attempt,
+            long gen,
+            int number,
+            UUID request,
+            String hash,
+            Reason reason) {
+        JobState state = JobState.valueOf(job.state());
+        AttemptState attemptState = AttemptState.valueOf((String) attempt.get("state"));
+        audit.recordWorkerEvent(
+                worker,
+                root.jobId(),
+                number,
+                EventKind.COMPLETE_REJECTED,
+                UUID.randomUUID(),
+                request,
+                hash,
+                new Detail(gen, state, state, attemptState, attemptState, reason, null, null));
+        return new CompletionReceipt(
+                root.jobKey(), number, false, state.name(), false, null, reason.name(), request);
+    }
+
+    /** TEST 예약은 접수 당시 마감과 실제 lease를 별도로 보존한다. */
+    private Reason testRejection(
+            Job job,
+            Map<String, Object> attempt,
+            VerifiedWorker worker,
+            long gen,
+            int number,
+            OffsetDateTime clock) {
+        if (Set.of("COMPLETED", "FAILED", "CANCELLED").contains(job.state()))
+            return Reason.TERMINAL;
+        if (!"RUNNING".equals(job.state())
+                || !"RUNNING".equals(attempt.get("state"))
+                || !worker.workerKey().equals(job.worker())
+                || gen != job.generation()
+                || number != job.count()) return Reason.STALE_LEASE;
+        return testTimeRejection(job, clock);
+    }
+
+    private static Reason testTimeRejection(Job job, OffsetDateTime clock) {
+        if (job.deadlineAt() == null || !clock.isBefore(job.deadlineAt()))
+            return Reason.DEADLINE_EXCEEDED;
+        if (job.leaseUntil() == null || !clock.isBefore(job.leaseUntil()))
+            return Reason.STALE_LEASE;
+        return null;
+    }
+
+    private Reason testEpochRejection(TestRootEvidence root) {
+        Boolean same =
+                jdbc.queryForObject(
+                        "SELECT r.epoch=t.runtime_epoch AND r.epoch=p.runtime_epoch FROM"
+                            + " public.grade_runtime r JOIN public.play_test t ON t.runtime_id=r.id"
+                            + " JOIN public.test_report p ON p.test_id=t.id WHERE t.id=? AND"
+                            + " p.id=?",
+                        Boolean.class,
+                        root.testId(),
+                        root.reportId());
+        return Boolean.TRUE.equals(same) ? null : Reason.RUNTIME_EPOCH_CHANGED;
+    }
+
+    /** 완료·영수증·감사와 플레이 횟수·24시간 종료를 한 연결에서 독립적으로 다시 읽는다. */
+    private void requireTestStored(
+            TestRootEvidence root,
+            Job before,
+            VerifiedWorker worker,
+            long gen,
+            int number,
+            JobState after,
+            AttemptState attemptState,
+            String error,
+            String observed,
+            String reference,
+            String outputHash,
+            byte[] outputCipher,
+            String resultHash,
+            byte[] resultCipher,
+            ObjectNode summary,
+            ObjectNode envelope,
+            boolean normal,
+            String outcome,
+            int score,
+            int normalAttempts,
+            int wrongAttempts,
+            long testAudit,
+            UUID request) {
+        Boolean valid =
+                jdbc.queryForObject(
+                        """
+                        SELECT j.state=? AND j.worker_key IS NULL AND j.lease_until IS NULL
+                            AND j.lease_gen=? AND j.call_count=? AND j.accepted_at=? AND j.deadline_at=?
+                            AND j.batch_id IS NULL AND j.report_id=? AND j.report_hash=?
+                            AND j.snapshot_id=? AND j.runtime_id=? AND j.config_hash=? AND j.rubric_hash=?
+                            AND j.result_hash IS NOT DISTINCT FROM ? AND j.result_cipher IS NOT DISTINCT FROM ?
+                            AND j.result_data IS NOT DISTINCT FROM ?::jsonb AND j.error_code IS NOT DISTINCT FROM ?
+                            AND a.state=? AND a.worker_key=? AND a.lease_gen=?
+                            AND a.output_hash IS NOT DISTINCT FROM ? AND a.output_cipher IS NOT DISTINCT FROM ?
+                            AND a.error_code IS NOT DISTINCT FROM ? AND a.observed_version IS NOT DISTINCT FROM ?
+                            AND a.provider_ref IS NOT DISTINCT FROM ? AND a.completion_data=?::jsonb
+                            AND a.ended_at IS NOT NULL AND a.ended_at>=a.started_at
+                            AND r.test_id=? AND r.snapshot_id=? AND r.runtime_id=? AND r.payload_hash=?
+                            AND r.state=? AND r.accepted_at=j.accepted_at
+                            AND t.snapshot_id=j.snapshot_id AND t.runtime_id=j.runtime_id
+                            AND t.config_hash=j.config_hash AND t.runtime_epoch=rt.epoch
+                            AND rt.state='AVAILABLE' AND rt.config_hash=j.config_hash AND rt.epoch=?
+                            AND r.config_hash=j.config_hash AND r.runtime_epoch=rt.epoch
+                            AND v.current_snapshot_id=j.snapshot_id AND v.active_yn AND v.status='REVIEW'
+                            AND s.active_yn AND f.version_id=v.id AND f.edit_rev=? AND f.format_no=?
+                            AND clock_timestamp()<j.deadline_at AND clock_timestamp()<?
+                            AND t.outcome IS NOT DISTINCT FROM ? AND t.state=?
+                            AND t.attempt_count=? AND t.wrong_count=?
+                            AND (NOT ? OR t.final_score IS NOT DISTINCT FROM ?)
+                            AND (t.state<>'ENDED' OR (t.ended_at IS NOT NULL
+                                AND t.result_until=t.ended_at+interval '24 hours'))
+                            AND EXISTS(SELECT 1 FROM public.test_audit x WHERE x.id=?
+                                AND x.actor_kind='WORKER' AND x.actor_ref=? AND x.scope_kind='TEST'
+                                AND x.scope_key=? AND x.action='GRADE_COMPLETE' AND x.phase='RESULT'
+                                AND x.request_id=? AND x.detail->>'gradeEventId'=?
+                                AND x.detail->>'commandHash'=?)
+                            AND EXISTS(SELECT 1 FROM public.grade_event e WHERE e.id=?
+                                AND e.job_id=j.id AND e.attempt_no=? AND e.command_hash=?
+                                AND e.event_kind='COMPLETE_APPLIED' AND e.actor_kind='WORKER'
+                                AND e.actor_key=? AND e.request_id=?)
+                        FROM public.grade_job j JOIN public.grade_attempt a ON a.job_id=j.id AND a.attempt_no=?
+                        JOIN public.test_report r ON r.id=j.report_id JOIN public.play_test t ON t.id=r.test_id
+                        JOIN public.grade_runtime rt ON rt.id=j.runtime_id
+                        JOIN public.review_snapshot f ON f.id=j.snapshot_id
+                        JOIN public.story_version v ON v.id=f.version_id
+                        JOIN public.story s ON s.id=v.story_id WHERE j.id=? AND j.job_key=?
+                        """,
+                        Boolean.class,
+                        after.name(),
+                        gen,
+                        number,
+                        before.acceptedAt(),
+                        before.deadlineAt(),
+                        root.reportId(),
+                        root.reportHash(),
+                        root.snapshotId(),
+                        root.runtimeId(),
+                        root.configHash(),
+                        root.rubricHash(),
+                        resultHash,
+                        resultCipher,
+                        summary == null ? null : text(summary),
+                        error,
+                        attemptState.name(),
+                        worker.workerKey(),
+                        gen,
+                        outputHash,
+                        outputCipher,
+                        error,
+                        observed,
+                        reference,
+                        text(envelope),
+                        root.testId(),
+                        root.snapshotId(),
+                        root.runtimeId(),
+                        root.payloadHash(),
+                        normal ? "GRADED" : after == JobState.FAILED ? "UNGRADABLE" : "ACCEPTED",
+                        root.runtimeEpoch(),
+                        root.snapshotRev(),
+                        root.snapshotFormat(),
+                        before.leaseUntil(),
+                        outcome,
+                        outcome == null ? "RUNNING" : "ENDED",
+                        normalAttempts,
+                        wrongAttempts,
+                        normal && outcome != null,
+                        score < 0 ? null : score,
+                        testAudit,
+                        worker.workerKey(),
+                        root.jobKey().toString(),
+                        request,
+                        Long.toString(envelope.path("auditEventId").longValue()),
+                        envelope.path("commandHash").textValue(),
+                        envelope.path("auditEventId").longValue(),
+                        number,
+                        envelope.path("commandHash").textValue(),
+                        worker.workerKey(),
+                        UUID.fromString(envelope.path("receipt").path("requestId").textValue()),
+                        number,
+                        root.jobId(),
+                        root.jobKey());
+        if (!Boolean.TRUE.equals(valid)) throw storage();
     }
 
     /**

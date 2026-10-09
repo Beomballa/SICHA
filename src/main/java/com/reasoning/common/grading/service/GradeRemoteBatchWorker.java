@@ -16,6 +16,7 @@ import com.reasoning.common.grading.service.GradeRemoteExecutionProtocol.Attempt
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +74,31 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
          */
         CompletableFuture<byte[]> complete(
                 UUID jobKey, CompletionCommand command, Duration maximumWait);
+    }
+
+    /** 자격에 결속된 기존 transport만 추가로 구현할 수 있는 선택적 TEST HTTPS poll 경계다. */
+    public interface PollingTransport extends BoundTransport {
+        /**
+         * 인증된 POST /internal/api/grading/poll/{runtimeCode} 한 번만 보낸다. 본문·query·redirect·재시도는 금지되며
+         * 취소는 실제 전체 응답 전송에 전파한다.
+         *
+         * @param runtimeCode 등록된 대문자 코드, null 불가
+         * @param maximumWait 전체 응답의 유한 상한, null 불가
+         * @return HTTP 상태와 전체 본문을 담은 취소 전파 future, null 불가
+         */
+        CompletableFuture<PollReply> poll(String runtimeCode, Duration maximumWait);
+    }
+
+    /** 실제 상태와 전체 본문이다. 배열은 외부와 공유하지 않는다. */
+    public record PollReply(int status, byte[] body) {
+        public PollReply {
+            body = body == null ? null : body.clone();
+        }
+
+        @Override
+        public byte[] body() {
+            return body == null ? null : body.clone();
+        }
     }
 
     /** 호출자 신원·requestId를 포함하지 않는 내부 명령이며 원문은 로그에 출력하지 않는다. */
@@ -151,6 +177,7 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
     private final Object observations = new Object();
     private volatile Attempt attempt;
     private volatile CompletableFuture<byte[]> pending;
+    private volatile CompletableFuture<PollReply> pollPending;
     private volatile boolean failed;
     private volatile boolean closed;
     private boolean reserving;
@@ -297,10 +324,84 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
      * @throws IllegalStateException 같은 owner의 동시 run 또는 사전 수명 거절
      */
     public Outcome runOnce(UUID jobKey, long leaseGen) {
+        return runOnce(jobKey, leaseGen, null, null);
+    }
+
+    /**
+     * 한 번의 인증된 TEST poll로 받은 좌표만 기존 NEW 경로에 전달한다. 빈 204는 작업이 없음을 뜻한다.
+     *
+     * @param runtimeCode 등록된 대문자 코드, null 불가
+     * @return 204이면 null, 200이면 실제 runOnce 결과
+     * @throws IllegalStateException 부적격 transport·동시 사용·불확실 응답의 고정 소유 거절
+     */
+    public Outcome pollAndRunOnce(String runtimeCode) {
+        if (!(transport instanceof PollingTransport polling)) throw refused();
         synchronized (this) {
             requireAvailable();
-            if (running || attempt != null || reserving) throw refused();
+            if (running
+                    || reserving
+                    || attempt != null
+                    || runtimeCode == null
+                    || !runtimeCode.matches("[A-Z0-9_]{1,80}")) throw refused();
             running = true;
+            admitted++;
+        }
+        boolean attempted = false;
+        try {
+            requireScope();
+            long started = System.nanoTime();
+            synchronized (this) {
+                requireAvailable();
+                attempted = true;
+                pollPending = polling.poll(runtimeCode, bounds.maximumWait());
+                if (pollPending == null) throw refused();
+            }
+            long left =
+                    Math.subtractExact(
+                            bounds.maximumWait().toNanos(), elapsed(started, System.nanoTime()));
+            requireMillisecond(left);
+            PollReply reply = pollPending.get(left, TimeUnit.NANOSECONDS);
+            requireWait(started, bounds.maximumWait());
+            requireAvailable();
+            if (reply == null) throw refused();
+            byte[] body = reply.body();
+            if (body == null || body.length > bounds.maximumReplyBytes()) throw refused();
+            if (reply.status() == 204 && body.length == 0) return null;
+            if (reply.status() != 200 || body.length == 0) throw refused();
+            var lease = GradeRemoteReplyDecoder.decodePoll(body);
+            pollPending = null;
+            return runOnce(lease.jobKey(), lease.leaseGen(), lease.deadline(), runtimeCode);
+        } catch (Exception exception) {
+            if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
+            CompletableFuture<PollReply> request = pollPending;
+            if (request != null) request.cancel(true);
+            if (attempted) failed = true;
+            throw refused();
+        } finally {
+            pollPending = null;
+            synchronized (this) {
+                running = false;
+                releaseOperation();
+            }
+        }
+    }
+
+    /**
+     * 명시 poll 호출의 admission을 유지한 채 같은 원래 NEW 실행만 수행한다.
+     *
+     * @param jobKey 실제 서버 작업, null·영 UUID 불가
+     * @param leaseGen 실제 양수 임대 세대
+     * @param polledDeadline poll 경로에서는 서버 마감, 직접 실행은 null
+     * @param polledRuntimeCode poll 경로에서는 요청 runtime, 직접 실행은 null
+     * @return 실제 완료 영수증 또는 재실행 없는 REPLAY/RECOVERY
+     */
+    private Outcome runOnce(
+            UUID jobKey, long leaseGen, Instant polledDeadline, String polledRuntimeCode) {
+        boolean fromPoll = polledDeadline != null;
+        synchronized (this) {
+            requireAvailable();
+            if (running && !fromPoll || attempt != null || reserving) throw refused();
+            if (!fromPoll) running = true;
             admitted++;
         }
         Attempt original = null;
@@ -308,6 +409,10 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
             reserve(jobKey, leaseGen, true);
             original = attempt;
             var input = original.start.input();
+            if (fromPoll
+                    && (!"TEST".equals(input.sourceKind())
+                            || !polledDeadline.equals(input.deadlineAt())
+                            || !polledRuntimeCode.equals(input.runtime().code()))) throw refused();
             var runtime = configuration(input.runtime());
             // 실제 private P를 canonical MODEL decode보다 먼저 한 번 고정한다.
             synchronized (this) {
@@ -426,7 +531,7 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
             }
             if (original != null && original.budget != null) original.budget.stopAlarm();
             synchronized (this) {
-                running = false;
+                if (!fromPoll) running = false;
                 releaseOperation();
             }
         }
@@ -866,6 +971,8 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
         if (original != null && original.budget != null) original.budget.cancel();
         CompletableFuture<byte[]> request = pending;
         if (request != null) request.cancel(true);
+        CompletableFuture<PollReply> poll = pollPending;
+        if (poll != null) poll.cancel(true);
         Renewal heartbeat = renewal;
         if (heartbeat != null) heartbeat.stopAndJoin();
         synchronized (this) {

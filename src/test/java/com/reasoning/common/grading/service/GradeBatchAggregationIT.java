@@ -48,7 +48,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/** 고정 폐기형 PG16.10·실제 V18·독립 합성 의미 튜플로 수동 역사 집계를 검사한다. 모델·사람·운영 승인 증거가 아니다. */
+/** 고정 폐기형 PG16.10·최신 실제 V21·독립 합성 의미 튜플로 수동 역사 집계를 검사한다. 모델·사람·운영 승인 증거가 아니다. */
 class GradeBatchAggregationIT {
     private static final String CODE = "AGGREGATION_SYNTHETIC";
     private static final String VERSION = "a".repeat(64);
@@ -74,7 +74,7 @@ class GradeBatchAggregationIT {
     private UUID key;
     private FrozenSnapshot frozen;
 
-    /** 기존 helper의 digest 고정 PostgreSQL16.10과 최신 실제 V19를 사용한다. 키·설치는 SQL 밖에서 조립한다. */
+    /** 기존 helper의 digest 고정 PostgreSQL16.10과 최신 실제 V21을 사용한다. 키·설치는 SQL 밖에서 조립한다. */
     @BeforeAll
     static void open() {
         postgres = GradeSchemaIT.startDatabase();
@@ -85,7 +85,7 @@ class GradeBatchAggregationIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
         var dictionary =
                 new GradeDictionary(CODE, List.of(new GradeDictionary.Term("ONE", "개념", "합성")));
         var settings =

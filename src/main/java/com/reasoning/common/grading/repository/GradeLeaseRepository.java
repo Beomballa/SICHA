@@ -41,7 +41,7 @@ public class GradeLeaseRepository {
                             new Lease(
                                     row.getLong("id"),
                                     row.getLong("snapshot_id"),
-                                    row.getLong("batch_id"),
+                                    row.getObject("batch_id", Long.class),
                                     row.getLong("runtime_id"),
                                     row.getObject("job_key", UUID.class),
                                     row.getString("worker_key"),
@@ -67,8 +67,9 @@ public class GradeLeaseRepository {
     }
 
     /**
-     * 인증 worker당 하나의 임대를 할당하거나 동일 runtime의 유효한 기존 임대를 그대로 반환한다. 만료·다른 runtime의 RUNNING 행은 고치지 않는다.
-     * coordinator가 별도 정상 루트 순서로 정비한다. SKIP LOCKED는 엄격 FIFO를 보장하지 않으며 STAGED나 호출 예약은 건드리지 않는다.
+     * 인증 worker당 하나의 BATCH 임대를 할당하거나 동일 출처·runtime의 유효한 기존 임대를 그대로 반환한다. 만료·다른 runtime의 RUNNING 행은
+     * 고치지 않는다. coordinator가 별도 정상 루트 순서로 정비한다. SKIP LOCKED는 엄격 FIFO를 보장하지 않으며 STAGED나 호출 예약은 건드리지
+     * 않는다.
      *
      * @param workerKey 호출자가 인증한 공백 아닌 80자 이하 키, null 불가
      * @param runtimeCode 허용 권한을 확인한 grade_runtime.code, 공백 아닌 80자 이하, null 불가
@@ -77,6 +78,25 @@ public class GradeLeaseRepository {
      * @throws IllegalStateException 호출자가 이미 트랜잭션을 보유한 경우
      */
     public Optional<Lease> claim(String workerKey, String runtimeCode) {
+        return claimSource(workerKey, runtimeCode, false);
+    }
+
+    /**
+     * 인증 worker에게 접수된 TEST 보고서 대기 작업만 할당한다. BATCH와 worker 독점 임대를 공유하며 시도·호출 예산은 소비하지 않는다. 마감된 대기
+     * 작업은 변경하지 않고 복구 대상으로 남긴다.
+     *
+     * @param workerKey 호출자가 인증한 공백 아닌 80자 이하 키, null 불가
+     * @param runtimeCode 허용 권한을 확인한 grade_runtime.code, 공백 아닌 80자 이하, null 불가
+     * @return 신규 TEST 임대만 반환하며 기존 소유 임대는 재발행하지 않음
+     * @throws IllegalArgumentException 입력이 잘못된 경우
+     * @throws IllegalStateException 호출자가 이미 트랜잭션을 보유한 경우
+     */
+    public Optional<Lease> claimTest(String workerKey, String runtimeCode) {
+        return claimSource(workerKey, runtimeCode, true);
+    }
+
+    /** 두 출처가 동일한 worker advisory 잠금과 짧은 거래를 공유하되 서로의 임대는 반환하지 않는다. */
+    private Optional<Lease> claimSource(String workerKey, String runtimeCode, boolean test) {
         key(workerKey);
         key(runtimeCode);
         return shortTransaction(
@@ -96,7 +116,10 @@ public class GradeLeaseRepository {
                     if (!existing.isEmpty()) {
                         Lease lease = existing.getFirst().lease();
                         OffsetDateTime now = dbNow();
-                        return lease.runtimeCode().equals(runtimeCode) && valid(lease, now)
+                        return !test
+                                        && lease.runtimeCode().equals(runtimeCode)
+                                        && (test == (lease.batchId() == null))
+                                        && valid(lease, now)
                                 ? Optional.of(lease)
                                 : Optional.empty();
                     }
@@ -105,6 +128,17 @@ public class GradeLeaseRepository {
                                     SELECT_JOB
                                             + """
                                              WHERE r.code=? AND j.state='QUEUED' AND j.next_run_at<=clock_timestamp()
+                                                 AND
+                                            """
+                                            + (test
+                                                    ? " j.report_id IS NOT NULL AND j.report_hash"
+                                                          + " IS NOT NULL AND j.batch_id IS NULL"
+                                                          + " AND j.sample_code IS NULL AND"
+                                                          + " j.repeat_no IS NULL AND j.input_hash"
+                                                          + " IS NULL"
+                                                    : " j.batch_id IS NOT NULL AND j.report_id IS"
+                                                            + " NULL")
+                                            + """
                                                  AND j.deadline_at>clock_timestamp() AND j.call_count<3
                                              ORDER BY j.next_run_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED
                                             """,
@@ -219,6 +253,55 @@ public class GradeLeaseRepository {
                                         limit)));
     }
 
+    /**
+     * V22 TEST 보고서 작업 중 접수 후 120초가 지났으나 임대를 받지 못했거나 재대기 중인 작업만 발견한다. 기존 BATCH 임대 후보 조회와 분리하며 작업
+     * 잠금·기술 종료 판단은 복구 서비스가 수행한다.
+     *
+     * @param limit 내부 조회 상한 1~100, endpoint 설정이 아님
+     * @return 실제 TEST 대기 작업 ID의 불변 목록
+     * @throws IllegalArgumentException 상한 범위가 잘못된 경우
+     * @throws IllegalStateException 호출자가 이미 트랜잭션을 보유한 경우
+     */
+    public List<Long> getExpiredTestQueueList(int limit) {
+        if (limit < 1 || limit > EXPIRED_LIMIT)
+            throw new IllegalArgumentException("INVALID_LEASE_LIMIT");
+        return shortTransaction(
+                readTransaction,
+                () ->
+                        List.copyOf(
+                                jdbc.queryForList(
+                                        "SELECT id FROM public.grade_job WHERE state='QUEUED' AND"
+                                                + " report_id IS NOT NULL AND"
+                                                + " deadline_at<=clock_timestamp() ORDER BY"
+                                                + " deadline_at,id LIMIT ?",
+                                        Long.class,
+                                        limit)));
+    }
+
+    /** 인증된 polling runtime의 TEST 후보만 읽는다. 다른 runtime의 복구 권한을 위임하지 않는다. */
+    public List<UUID> getExpiredTestRuntimeList(String runtimeCode, int limit) {
+        key(runtimeCode);
+        if (limit < 1 || limit > EXPIRED_LIMIT)
+            throw new IllegalArgumentException("INVALID_LEASE_LIMIT");
+        return shortTransaction(
+                readTransaction,
+                () ->
+                        List.copyOf(
+                                jdbc.queryForList(
+                                        "SELECT j.job_key FROM public.grade_job j JOIN"
+                                            + " public.grade_runtime r ON r.id=j.runtime_id WHERE"
+                                            + " r.code=? AND j.report_id IS NOT NULL AND"
+                                            + " ((j.state='QUEUED' AND"
+                                            + " j.deadline_at<=clock_timestamp()) OR"
+                                            + " (j.state='RUNNING' AND"
+                                            + " (j.lease_until<=clock_timestamp() OR"
+                                            + " j.deadline_at<=clock_timestamp()))) ORDER BY"
+                                            + " COALESCE(j.lease_until,j.deadline_at),j.id LIMIT ?",
+                                        UUID.class,
+                                        runtimeCode,
+                                        limit)));
+    }
+
     /** 외부 루트 잠금을 이어받거나 중단한 채 새 임대를 만들지 않는다. */
     private <T> T shortTransaction(TransactionTemplate template, Supplier<T> work) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -286,7 +369,7 @@ public class GradeLeaseRepository {
     public record Lease(
             long jobId,
             long snapshotId,
-            long batchId,
+            Long batchId,
             long runtimeId,
             UUID jobKey,
             String workerKey,

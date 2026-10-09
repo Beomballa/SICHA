@@ -172,7 +172,9 @@ public final class StoryGradeEvidenceService {
                 db.queryForList("SELECT * FROM test_action WHERE request_key=?", input.key());
         if (!existing.isEmpty()) {
             var receipt = existing.getFirst();
-            if (number(receipt, "admin_id") != actor.accountId()
+            if (receipt.get("admin_id") == null
+                    || receipt.get("member_id") != null
+                    || number(receipt, "admin_id") != actor.accountId()
                     || !ACTION.equals(receipt.get("action"))
                     || !scopeKey.equals(receipt.get("scope_key"))
                     || !hash.equals(receipt.get("request_hash")))
@@ -185,7 +187,7 @@ public final class StoryGradeEvidenceService {
                     db
                             .queryForList(
                                     "SELECT b.batch_key FROM evidence_item i JOIN grade_batch b ON"
-                                        + " b.id=i.batch_id WHERE i.set_id=?",
+                                            + " b.id=i.batch_id WHERE i.set_id=?",
                                     UUID.class,
                                     number(set, "id"))
                             .stream()
@@ -204,7 +206,7 @@ public final class StoryGradeEvidenceService {
                             .equals(
                                     db.queryForObject(
                                             "SELECT evidence_data->'request'->>'expectedRev' FROM"
-                                                + " review_record WHERE id=?",
+                                                    + " review_record WHERE id=?",
                                             String.class,
                                             Long.parseLong(original.recordId())))
                     || !original.createdAt().equals(instant(set.get("created_at")))
@@ -253,7 +255,7 @@ public final class StoryGradeEvidenceService {
             var rows =
                     db.queryForList(
                             "SELECT b.* FROM grade_batch b JOIN review_snapshot s ON"
-                                + " s.id=b.snapshot_id WHERE b.batch_key=? AND s.version_id=?",
+                                    + " s.id=b.snapshot_id WHERE b.batch_key=? AND s.version_id=?",
                             ref,
                             scope.versionId());
             if (rows.isEmpty()) throw missing();
@@ -438,8 +440,8 @@ public final class StoryGradeEvidenceService {
                 parse(
                         db.queryForObject(
                                 "SELECT coalesce(jsonb_agg(to_jsonb(i) ORDER BY"
-                                    + " batch_id),'[]'::jsonb)::text FROM evidence_item i WHERE"
-                                    + " set_id=?",
+                                        + " batch_id),'[]'::jsonb)::text FROM evidence_item i WHERE"
+                                        + " set_id=?",
                                 String.class,
                                 setId)))) throw storage();
         ObjectNode expectedRecord =
@@ -549,9 +551,9 @@ public final class StoryGradeEvidenceService {
         for (var issue :
                 db.queryForList(
                         "SELECT i.*,b.batch_key FROM execution_issue i JOIN grade_batch b ON"
-                            + " b.id=i.batch_id AND b.snapshot_id=i.snapshot_id AND"
-                            + " b.runtime_id=i.runtime_id WHERE i.snapshot_id=? AND i.kind IN"
-                            + " ('GRADING','INFRA') ORDER BY i.id",
+                                + " b.id=i.batch_id AND b.snapshot_id=i.snapshot_id AND"
+                                + " b.runtime_id=i.runtime_id WHERE i.snapshot_id=? AND i.kind IN"
+                                + " ('GRADING','INFRA') ORDER BY i.id",
                         snapshot)) {
             long issueId = number(issue, "id");
             String scope = "batch:" + issue.get("batch_key");
@@ -747,7 +749,7 @@ public final class StoryGradeEvidenceService {
         var record =
                 db.queryForMap(
                         "SELECT r.*,a.account_key FROM review_record r JOIN admin_account a ON"
-                            + " a.id=r.reviewer_id WHERE r.id=?",
+                                + " a.id=r.reviewer_id WHERE r.id=?",
                         id);
         StoredIssuance issuance = authenticateIssuance(set, record, id, reviewer, key, resolves);
         reads.issuances.put(id, issuance);
@@ -1053,9 +1055,9 @@ public final class StoryGradeEvidenceService {
             var issues =
                     db.queryForList(
                             "SELECT i.*,b.batch_key FROM execution_issue i JOIN grade_batch b ON"
-                                + " b.id=i.batch_id AND b.snapshot_id=i.snapshot_id AND"
-                                + " b.runtime_id=i.runtime_id WHERE i.id=? AND i.kind IN"
-                                + " ('GRADING','INFRA')",
+                                    + " b.id=i.batch_id AND b.snapshot_id=i.snapshot_id AND"
+                                    + " b.runtime_id=i.runtime_id WHERE i.id=? AND i.kind IN"
+                                    + " ('GRADING','INFRA')",
                             target.issueId());
             if (issues.size() != 1) throw storage();
             var issue = issues.getFirst();
@@ -1088,8 +1090,8 @@ public final class StoryGradeEvidenceService {
             var markers =
                     db.queryForMap(
                             "SELECT min(invalidated_at) AS first_at,max(invalidated_at) AS last_at"
-                                + " FROM evidence_set WHERE snapshot_id=? AND"
-                                + " invalidated_issue_id=?",
+                                    + " FROM evidence_set WHERE snapshot_id=? AND"
+                                    + " invalidated_issue_id=?",
                             snapshot,
                             target.issueId());
             Instant marked = instant(markers.get("first_at"));
@@ -1128,7 +1130,7 @@ public final class StoryGradeEvidenceService {
         var rows =
                 db.queryForList(
                         "SELECT e.* FROM evidence_set e JOIN review_snapshot s ON"
-                            + " s.id=e.snapshot_id WHERE e.set_key=? AND s.version_id=?",
+                                + " s.id=e.snapshot_id WHERE e.set_key=? AND s.version_id=?",
                         key,
                         scope.versionId());
         if (rows.size() != 1) throw storage();
@@ -1151,7 +1153,7 @@ public final class StoryGradeEvidenceService {
                     switch (table) {
                         case "grade_attempt", "grade_event" ->
                                 "JOIN grade_job j ON j.id=t.job_id JOIN review_snapshot s ON"
-                                    + " s.id=j.snapshot_id";
+                                        + " s.id=j.snapshot_id";
                         default -> "JOIN review_snapshot s ON s.id=t.snapshot_id";
                     };
             String excluded =
@@ -1250,6 +1252,7 @@ public final class StoryGradeEvidenceService {
                 object().put("id", id)
                         .put("request_key", input.key().toString())
                         .put("admin_id", adminId)
+                        .putNull("member_id")
                         .put("action", ACTION)
                         .put("scope_key", scope)
                         .put("request_hash", hash);

@@ -35,7 +35,8 @@ public final class GradeEventRepository {
         JOB_ACTIVATED,
         JOB_INPUT_REJECTED,
         JOB_SOURCE_CANCELLED,
-        JOB_LEASE_RECLAIMED
+        JOB_LEASE_RECLAIMED,
+        JOB_DEADLINE_EXPIRED
     }
 
     /** 감사에 허용된 작업 상태다. */
@@ -177,8 +178,8 @@ public final class GradeEventRepository {
      * 신뢰된 생성자 coordinator만 SYSTEM 주체로 기록한다. 업무 eligibility 승인을 대신하지 않는다.
      *
      * @param jobId 이미 업무 루트 검사·잠금을 완료한 양수 실제 작업 식별자
-     * @param attemptNo RECOVERY_EXPIRED는 실제 시도 1~3 필수, 네 JOB 사건은 null 필수
-     * @param kind RECOVERY_EXPIRED 또는 네 JOB 사건, null 불가
+     * @param attemptNo RECOVERY_EXPIRED는 실제 시도 1~3 필수, 다섯 JOB 사건은 null 필수
+     * @param kind RECOVERY_EXPIRED 또는 다섯 JOB 사건, null 불가
      * @param commandKey 서버 내부 비영 UUID, null 불가
      * @param commandHash 서버 정규 명령 소문자 SHA-256 64자, null 불가
      * @param detail 고정 typed 상세, null 불가

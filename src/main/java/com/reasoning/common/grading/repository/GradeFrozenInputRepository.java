@@ -1,9 +1,18 @@
 package com.reasoning.common.grading.repository;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.reasoning.common.auth.service.CryptoService;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier.VerifiedRuntime;
+import com.reasoning.common.grading.model.GradeModels.Report;
+import com.reasoning.common.grading.model.GradeModels.Snapshot;
+import com.reasoning.common.grading.model.SnapshotJson;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.LockedTestSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
 import com.reasoning.common.grading.service.FrozenDatasetValidator;
 import com.reasoning.common.grading.service.FrozenDatasetValidator.ValidatedDataset;
+import com.reasoning.common.grading.service.GradeResultValidator;
 import com.reasoning.common.story.model.FrozenSnapshotCodec;
 import com.reasoning.common.story.model.FrozenSnapshotCodec.FrozenSnapshot;
 
@@ -15,8 +24,11 @@ import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.util.Objects;
 
 /** 실제 전체 사본의 무결성만 검사한다. 출처 권한·임대·현재 실행 자격을 부여하지 않는다. */
 public final class GradeFrozenInputRepository {
@@ -70,6 +82,130 @@ public final class GradeFrozenInputRepository {
         } catch (DataAccessException failure) {
             throw new DataAccessResourceFailureException("FROZEN_INPUT_STORAGE_FAILURE");
         }
+    }
+
+    /**
+     * 같은 거래의 실제 TEST 출처를 재검사하고 저장 암호문의 AAD·REPORT-1 내용·두 선언 해시를 전체 사본과 대조한다. BATCH fixture나 반복 횟수는
+     * TEST 입력에 포함하지 않는다.
+     *
+     * @param source TEST 저장소가 이 거래에서 잠근 실제 출처
+     * @param runtime 설치된 런타임 검증 증거
+     * @param crypto 서버의 실제 암호화 서비스
+     * @return 검증된 실제 전체 사본·그 채점표·보고서를 함께 지닌 타입 입력
+     * @throws IllegalStateException 출처·거래·암호문·해시 불일치 시 TEST_INPUT_NOT_CURRENT
+     */
+    public TestGradeInput verifiedTestInput(
+            LockedTestSource source, VerifiedRuntime runtime, CryptoService crypto) {
+        if (source == null || runtime == null || crypto == null)
+            throw new IllegalArgumentException("INVALID_TEST_INPUT");
+        try {
+            requireTransaction();
+            TestRootEvidence root = sourceEvidence(source);
+            SavedDataset saved = loadSavedFacts(root.snapshotId());
+            if (saved.storyId() != root.storyId()
+                    || saved.versionId() != root.versionId()
+                    || saved.sourceRev() != root.snapshotRev()
+                    || saved.formatNo() != root.snapshotFormat()
+                    || !saved.policyCode().equals(root.policyCode())
+                    || !runtime.profile().policyCode().equals(root.policyCode())
+                    || !saved.frozen().rubricHash().equals(root.rubricHash())) throw testRejected();
+            var rows =
+                    jdbc.queryForList(
+                            "SELECT"
+                                + " payload_cipher,payload_hash,source_draft_rev,test_id,snapshot_id,state,purged_at"
+                                + " FROM public.test_report WHERE id=?",
+                            root.reportId());
+            if (rows.size() != 1) throw testRejected();
+            var row = rows.getFirst();
+            byte[] cipher = (byte[]) row.get("payload_cipher");
+            if (!"ACCEPTED".equals(row.get("state"))
+                    || row.get("purged_at") != null
+                    || cipher == null
+                    || cipher.length > 524288
+                    || !Objects.equals(row.get("payload_hash"), root.payloadHash())
+                    || ((Number) row.get("source_draft_rev")).longValue() != root.sourceDraftRev()
+                    || ((Number) row.get("test_id")).longValue() != root.testId()
+                    || ((Number) row.get("snapshot_id")).longValue() != root.snapshotId())
+                throw testRejected();
+            String envelope =
+                    StandardCharsets.UTF_8
+                            .newDecoder()
+                            .onMalformedInput(CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(CodingErrorAction.REPORT)
+                            .decode(ByteBuffer.wrap(cipher))
+                            .toString();
+            String aad =
+                    "test_report/"
+                            + root.reportId()
+                            + "/test/"
+                            + root.testId()
+                            + "/snapshot/"
+                            + root.snapshotId()
+                            + "/draft/"
+                            + root.sourceDraftRev()
+                            + "/payload/v1";
+            byte[] plain = crypto.decrypt(envelope, aad).getBytes(StandardCharsets.UTF_8);
+            if (plain.length > 524288) throw testRejected();
+            JsonNode reportJson = SnapshotJson.parse(plain);
+            Report report =
+                    new GradeResultValidator()
+                            .parseReport(
+                                    new String(
+                                            SnapshotJson.encode(reportJson),
+                                            StandardCharsets.UTF_8));
+            if (!report.culpritCode().equals(reportJson.path("culpritCode").textValue())
+                    || !report.method().equals(reportJson.path("method").textValue())
+                    || !report.time().equals(reportJson.path("time").textValue())
+                    || !report.motive().equals(reportJson.path("motive").textValue())
+                    || !report.evidence().equals(reportJson.path("evidence").textValue())
+                    || !saved.frozen().payload().path("resources").path("persons").isArray())
+                throw testRejected();
+            boolean known = false;
+            for (JsonNode person : saved.frozen().payload().path("resources").path("persons")) {
+                if (report.culpritCode().equals(person.path("code").textValue())) known = true;
+            }
+            if (!known || !SnapshotJson.hash(reportJson).equals(root.payloadHash()))
+                throw testRejected();
+            var binding =
+                    JsonNodeFactory.instance
+                            .objectNode()
+                            .put("formatNo", 1)
+                            .put("payloadHash", saved.frozen().payloadHash())
+                            .put("rubricHash", saved.frozen().rubricHash());
+            binding.set("report", reportJson);
+            if (!SnapshotJson.hash(binding).equals(root.reportHash())) throw testRejected();
+            return new TestGradeInput(
+                    root,
+                    saved.dataset().frozenSnapshot(),
+                    saved.dataset().gradingSnapshot(),
+                    report);
+        } catch (DataAccessException failure) {
+            throw new DataAccessResourceFailureException("FROZEN_INPUT_STORAGE_FAILURE");
+        } catch (Exception failure) {
+            if (failure instanceof DataAccessResourceFailureException storage) throw storage;
+            throw testRejected();
+        }
+    }
+
+    private TestRootEvidence sourceEvidence(LockedTestSource source) {
+        // 다른 저장소의 잠금 증명은 공개 숫자/UUID로 다시 생성할 수 없다.
+        return source.requireCurrent(jdbc.getDataSource());
+    }
+
+    /** 검증된 TEST 전체 사본과 단일 보고서이며 fixture 집합과 혼용하지 않는다. */
+    public record TestGradeInput(
+            TestRootEvidence root,
+            FrozenSnapshot frozenSnapshot,
+            Snapshot snapshot,
+            Report report) {
+        @Override
+        public String toString() {
+            return "TestGradeInput[reportId=" + root.reportId() + "]";
+        }
+    }
+
+    private static IllegalStateException testRejected() {
+        return new IllegalStateException("TEST_INPUT_NOT_CURRENT");
     }
 
     /**

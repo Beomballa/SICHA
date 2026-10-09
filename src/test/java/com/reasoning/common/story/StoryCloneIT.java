@@ -140,9 +140,9 @@ class StoryCloneIT extends DatabaseContextTest {
     @Autowired EntityManager entities;
     @Autowired PlatformTransactionManager manager;
 
-    /** 실제 V1~19 초기화 재실행과 새 버전의 JPA 투영을 검사하며 스키마 대체를 만들지 않는다. */
+    /** 실제 V1~23 초기화 재실행과 새 버전의 JPA 투영을 검사하며 스키마 대체를 만들지 않는다. */
     @Test
-    void actualV19BootstrapRepeatsZeroAndJpaReadsClonedDraft() {
+    void actualV23BootstrapRepeatsZeroAndJpaReadsClonedDraft() {
         var flyway =
                 Flyway.configure()
                         .resourceProvider(new EmbeddedSqlResourceProvider())
@@ -152,7 +152,7 @@ class StoryCloneIT extends DatabaseContextTest {
                                 postgres.getPassword())
                         .locations("classpath:db/migration")
                         .load();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("19");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
         Fixture f = fixture();

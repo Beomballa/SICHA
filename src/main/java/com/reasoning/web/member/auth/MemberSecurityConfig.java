@@ -36,6 +36,9 @@ import java.util.Set;
 public class MemberSecurityConfig {
     static final String AUTH = "/api/member/auth";
     static final String NOTICE = "/api/member/privacy/policies/member-auth";
+    static final String PLAYTEST = "/api/playtests";
+    private static final String TEST_KEY =
+            "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
     private static final Set<String> POST =
             Set.of(
                     AUTH + "/email/signup",
@@ -54,7 +57,9 @@ public class MemberSecurityConfig {
         http.securityMatcher(
                         request ->
                                 request.getRequestURI().equals("/api/member")
-                                        || request.getRequestURI().startsWith("/api/member/"))
+                                        || request.getRequestURI().startsWith("/api/member/")
+                                        || request.getRequestURI().equals(PLAYTEST)
+                                        || request.getRequestURI().startsWith(PLAYTEST + "/"))
                 .securityContext(
                         context ->
                                 context.securityContextRepository(
@@ -101,6 +106,34 @@ public class MemberSecurityConfig {
     /** 메서드와 exact 경로를 함께 검사하여 미래 회원 API를 자동 공개하지 않는다. */
     static boolean route(HttpServletRequest request) {
         String path = request.getRequestURI();
+        if (path.startsWith(PLAYTEST + "/")) {
+            String suffix = path.substring(PLAYTEST.length());
+            return "GET".equals(request.getMethod())
+                            && (suffix.equals("/identity")
+                                    || suffix.equals("/invitations")
+                                    || suffix.matches("/" + TEST_KEY)
+                                    || suffix.matches("/" + TEST_KEY + "/policy-notice")
+                                    || suffix.matches("/" + TEST_KEY + "/materials")
+                                    || suffix.matches("/" + TEST_KEY + "/report")
+                                    || suffix.matches("/" + TEST_KEY + "/result"))
+                    || "PATCH".equals(request.getMethod())
+                            && suffix.matches("/" + TEST_KEY + "/report")
+                    || "POST".equals(request.getMethod())
+                            && (suffix.matches("/" + TEST_KEY + "/accept")
+                                    || suffix.matches("/" + TEST_KEY + "/ready")
+                                    || suffix.matches("/" + TEST_KEY + "/start")
+                                    || suffix.matches("/" + TEST_KEY + "/heartbeat")
+                                    || suffix.matches("/" + TEST_KEY + "/hints/[1-3]/open")
+                                    || suffix.matches("/" + TEST_KEY + "/report/proposals")
+                                    || suffix.matches(
+                                            "/"
+                                                    + TEST_KEY
+                                                    + "/report/proposals/"
+                                                    + TEST_KEY
+                                                    + "/respond")
+                                    || suffix.matches("/" + TEST_KEY + "/forfeit")
+                                    || suffix.matches("/" + TEST_KEY + "/feedback"));
+        }
         return "POST".equals(request.getMethod()) && POST.contains(path)
                 || "GET".equals(request.getMethod())
                         && (path.equals(AUTH + "/me") || path.equals(NOTICE));
@@ -171,9 +204,21 @@ public class MemberSecurityConfig {
                                         : new RequestAuditKernel.Actor(
                                                 RequestAuditKernel.ActorKind.ANONYMOUS, null, null);
                         return new RequestAuditKernel.Observation(
-                                route(request) ? uri : "UNMATCHED", actor);
+                                route(request) ? auditRoute(uri) : "UNMATCHED", actor);
                     });
         }
+    }
+
+    /** 승인된 동적 경로의 실제 UUID를 접근 이력에 남기지 않는다. */
+    private static String auditRoute(String uri) {
+        if (uri.startsWith(PLAYTEST + "/")) {
+            return uri.replaceFirst("/" + TEST_KEY + "(?=/|$)", "/{testKey}")
+                    .replaceFirst(
+                            "/report/proposals/" + TEST_KEY + "/respond$",
+                            "/report/proposals/{reportKey}/respond")
+                    .replaceFirst("/hints/[1-3]/open$", "/hints/{level}/open");
+        }
+        return uri;
     }
 
     private static final class MemberFilter extends OncePerRequestFilter {
@@ -191,17 +236,23 @@ public class MemberSecurityConfig {
                 throws ServletException, IOException {
             response.setHeader("Cache-Control", "no-store");
             SecurityContextHolder.setContext(SecurityContextHolder.createEmptyContext());
-            if (!request.isSecure() || request.getHeader("Origin") != null) {
+            if (!request.isSecure()
+                    || request.getHeader("Origin") != null
+                    || (request.getRequestURI().startsWith(PLAYTEST + "/")
+                            && request.getHeader("Cookie") != null)) {
                 error(mapper, request, response, 403, "FORBIDDEN");
                 return;
             }
-            if (request.getQueryString() != null) {
+            if (request.getQueryString() != null
+                    && !(request.getRequestURI().equals(PLAYTEST + "/invitations")
+                            && "GET".equals(request.getMethod()))) {
                 error(mapper, request, response, 400, "INVALID_REQUEST");
                 return;
             }
             if (route(request)
                     && (request.getRequestURI().equals(AUTH + "/me")
-                            || request.getRequestURI().equals(AUTH + "/logout"))) {
+                            || request.getRequestURI().equals(AUTH + "/logout")
+                            || request.getRequestURI().startsWith(PLAYTEST + "/"))) {
                 try {
                     principal(
                             service.authenticate(

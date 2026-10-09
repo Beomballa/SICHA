@@ -74,7 +74,11 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     "3e51fefadc803df34939ca740257750b8350a368114914022da09da2bf5c8bcc",
                     "5e1c1f7649856360b3fa9396456cb50210507841fb0cd2f41df02943cfc8a02a",
                     "b030e65b4f3f6a229d95d17c89dd01fbfe29cea79a13b1637334c58216c195c2",
-                    "5adb2c16378f7dc8fa01a237d431f05a6fc3e12d968b9a0a87a07be28ad34919");
+                    "5adb2c16378f7dc8fa01a237d431f05a6fc3e12d968b9a0a87a07be28ad34919",
+                    "79232e8dfe5b5ac83369ba8ac9a1a7b009090cb31dad2def463982f76d60a8bc",
+                    "911236943b2e10fac1189a501a02b1dd65b039227634291b8c4f0e77b1b11d9a",
+                    "bb1852bf9d9cbe150355f678843a128eb293092224b4f50226c26cd9f07e600b",
+                    "3d793c8cf4b11865af878bc3a31afe7a0e4e060346c255a25efc418cd4288d0d");
 
     @Container static final PostgreSQLContainer<?> postgres = database();
 
@@ -104,9 +108,9 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     void completeCatalogReadersAndIntegrityFailures() throws Exception {
         var entries = OriginalSqlCatalog.entries();
         var provider = new EmbeddedSqlResourceProvider();
-        assertThat(entries).hasSize(19);
+        assertThat(entries).hasSize(23);
         assertThat(entries.stream().map(OriginalSqlCatalog.Entry::name).distinct().count())
-                .isEqualTo(19);
+                .isEqualTo(23);
         int totalBytes = 0;
         for (int index = 0; index < entries.size(); index++) {
             var entry = entries.get(index);
@@ -129,12 +133,12 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                 assertThat(text(reopened)).isEqualTo(entry.sql());
             }
         }
-        assertThat(totalBytes).isEqualTo(136396);
+        assertThat(totalBytes).isEqualTo(166621);
         assertThat(provider.getResource("missing.sql")).isNull();
         assertThat(provider.getResource(entries.getFirst().name().toLowerCase())).isNull();
         assertThat(provider.getResource("db/migration/" + entries.getFirst().name())).isNull();
         assertThat(provider.getResource(entries.getFirst().name() + ".conf")).isNull();
-        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(19);
+        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(23);
         assertThat(provider.getResources("V1__", new String[] {".txt", ".sql"})).hasSize(1);
         assertThat(provider.getResources("R", new String[] {""})).isEmpty();
         assertThat(provider.getResources("", new String[] {})).isEmpty();
@@ -167,11 +171,11 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     /** 정상 Boot 시작 뒤 실제 Hibernate 조회와 JDBC 세션 왕복 및 원본 SQL 전체 구조를 비교한다. */
     @Test
     void freshBootSqlHistorySchemaAndSessionReadiness() throws Exception {
-        assertThat(readiness.migrations()).isEqualTo(19);
+        assertThat(readiness.migrations()).isEqualTo(23);
         assertThat(bootFlyway.getConfiguration().getResourceProvider())
                 .isInstanceOf(EmbeddedSqlResourceProvider.class);
         var before = history(jdbc);
-        assertThat(before).hasSize(19);
+        assertThat(before).hasSize(23);
         assertThat(bootFlyway.migrate().migrationsExecuted).isZero();
         bootFlyway.validate();
         assertThat(history(jdbc)).isEqualTo(before);
@@ -203,8 +207,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
         }
         try (var legacyDatabase = database()) {
             legacyDatabase.start();
-            var legacy = legacy(legacyDatabase, "19");
-            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(19);
+            var legacy = legacy(legacyDatabase, "23");
+            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(23);
             legacy.validate();
             assertSqlIdentity(bootFlyway, legacy);
             assertThat(schema(jdbc)).isEqualTo(schema(jdbc(legacyDatabase)));
@@ -215,16 +219,16 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                                         + " n.oid=c.connamespace WHERE n.nspname='public' AND"
                                         + " c.contype='f'",
                                 Integer.class))
-                .isEqualTo(83);
+                .isEqualTo(101);
     }
 
-    /** 빈 폐기형 DB에 embedded SQL19을 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
+    /** 빈 폐기형 DB에 embedded SQL23을 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
     @Test
-    void freshEmbeddedNineteenThenZero() {
+    void freshEmbeddedTwentyThreeThenZero() {
         try (var database = database()) {
             database.start();
             var embedded = embedded(database);
-            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(19);
+            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(23);
             var jdbc = jdbc(database);
             var before = history(jdbc);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
@@ -234,25 +238,131 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
         }
     }
 
-    /** 실제 기본 SQL 탐색으로 V16을 적용한 뒤 embedded V17·V18·V19을 실행하고 이전 이력을 보존한다. */
+    /** V22 자체의 원본 이력과 보호 함수를 보존하고 V23 한 건만 적용한다. */
     @Test
-    void originalSqlSixteenToEmbeddedNineteen() throws Exception {
+    void originalSqlTwentyTwoToEmbeddedTwentyThree() throws Exception {
+        try (var database = database()) {
+            database.start();
+            var historical = legacy(database, "22");
+            assertThat(historical.migrate().migrationsExecuted).isEqualTo(22);
+            historical.validate();
+            assertSqlIdentity(embedded(database, "22"), historical);
+            var jdbc = jdbc(database);
+            var before = history(jdbc);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT prosrc FROM pg_proc WHERE"
+                                            + " oid='public.guard_test_job_source()'::regprocedure",
+                                    String.class))
+                    .contains("OLD.report_id IS NOT NULL OR OLD.accepted_at IS NOT NULL");
+            var current = embedded(database);
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(history(jdbc).subList(0, 22)).isEqualTo(before);
+            assertThat(current.migrate().migrationsExecuted).isZero();
+            current.validate();
+            assertSqlIdentity(current, legacy(database, "23"));
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT prosrc FROM pg_proc WHERE"
+                                            + " oid='public.guard_test_job_source()'::regprocedure",
+                                    String.class))
+                    .contains("OLD.report_id IS NOT NULL OR NEW.report_id IS NOT NULL");
+        }
+    }
+
+    /** V22 초기화·재실행·SQL 정체성은 최신 목표와 분리해 유지한다. */
+    @Test
+    void freshEmbeddedTwentyTwoThenZero() throws Exception {
+        try (var database = database()) {
+            database.start();
+            var historical = embedded(database, "22");
+            assertThat(historical.migrate().migrationsExecuted).isEqualTo(22);
+            var before = history(jdbc(database));
+            assertThat(historical.migrate().migrationsExecuted).isZero();
+            historical.validate();
+            assertSqlIdentity(historical, legacy(database, "22"));
+            assertThat(history(jdbc(database))).isEqualTo(before);
+        }
+    }
+
+    /** V19 자체의 초기화·재실행·SQL 정체성을 최신 목표와 분리해 유지한다. */
+    @Test
+    void freshEmbeddedNineteenThenZero() throws Exception {
+        try (var database = database()) {
+            database.start();
+            var historical = embedded(database, "19");
+            assertThat(historical.migrate().migrationsExecuted).isEqualTo(19);
+            var before = history(jdbc(database));
+            assertThat(historical.migrate().migrationsExecuted).isZero();
+            historical.validate();
+            assertSqlIdentity(historical, legacy(database, "19"));
+            assertThat(history(jdbc(database))).isEqualTo(before);
+        }
+    }
+
+    /** 실제 V19 이력을 보존하고 V20 한 건만 적용하며 파일·embedded 구조를 대조한다. */
+    @Test
+    void originalSqlNineteenToEmbeddedTwenty() throws Exception {
+        try (var database = database()) {
+            database.start();
+            var original = legacy(database, "19");
+            assertThat(original.migrate().migrationsExecuted).isEqualTo(19);
+            var before = history(jdbc(database));
+            var current = embedded(database, "20");
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(history(jdbc(database)).subList(0, 19)).isEqualTo(before);
+            var after = history(jdbc(database));
+            assertThat(current.migrate().migrationsExecuted).isZero();
+            current.validate();
+            assertSqlIdentity(current, legacy(database, "20"));
+            assertThat(history(jdbc(database))).isEqualTo(after);
+        }
+    }
+
+    /** 정상 독립 SQL V20 이력을 보존하고 V21 한 건만 embedded로 적용한다. */
+    @Test
+    void originalSqlTwentyToEmbeddedTwentyOne() throws Exception {
+        try (var database = database()) {
+            database.start();
+            var original = legacy(database, "20");
+            assertThat(original.migrate().migrationsExecuted).isEqualTo(20);
+            var jdbc = jdbc(database);
+            var before = history(jdbc);
+            var current = embedded(database, "21");
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(history(jdbc).subList(0, 20)).isEqualTo(before);
+            var after = history(jdbc);
+            assertThat(current.migrate().migrationsExecuted).isZero();
+            current.validate();
+            assertSqlIdentity(current, legacy(database, "21"));
+            assertThat(history(jdbc)).isEqualTo(after);
+        }
+    }
+
+    /** SQL V16에서 embedded V19까지의 기존 경로를 명시적 목표로 보존한 뒤 V20을 적용한다. */
+    @Test
+    void originalSqlSixteenToEmbeddedTwenty() throws Exception {
         try (var database = database()) {
             database.start();
             var legacy = legacy(database, "16");
             assertThat(legacy.migrate().migrationsExecuted).isEqualTo(16);
             var jdbc = jdbc(database);
             var before = history(jdbc);
-            var embedded = embedded(database);
+            var embedded = embedded(database, "19");
             assertThat(embedded.migrate().migrationsExecuted).isEqualTo(3);
             assertThat(history(jdbc).subList(0, 16)).isEqualTo(before);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
             embedded.validate();
             assertSqlIdentity(embedded, legacy(database, "19"));
+            var current = embedded(database, "20");
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(current.migrate().migrationsExecuted).isZero();
+            current.validate();
+            assertSqlIdentity(current, legacy(database, "20"));
         }
     }
 
-    /** 이미 정상 SQL V18인 DB는 V19 하나로 전환되며 변조된 역사적 텍스트는 정상 검증에서 실패한다. */
+    /** 이미 정상 SQL V18인 DB는 V19·V20으로 전환되며 변조된 역사적 텍스트는 검증에서 실패한다. */
     @Test
     void originalSqlEighteenSwitchAndChecksumFailure() throws Exception {
         try (var database = database()) {
@@ -261,13 +371,19 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
             assertThat(legacy.migrate().migrationsExecuted).isEqualTo(18);
             var jdbc = jdbc(database);
             var before = history(jdbc);
-            var embedded = embedded(database);
+            var embedded = embedded(database, "19");
             assertThat(embedded.migrate().migrationsExecuted).isEqualTo(1);
             assertThat(history(jdbc).subList(0, 18)).isEqualTo(before);
             before = history(jdbc);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
             embedded.validate();
             assertSqlIdentity(embedded, legacy(database, "19"));
+            var current = embedded(database, "20");
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(current.migrate().migrationsExecuted).isZero();
+            current.validate();
+            assertSqlIdentity(current, legacy(database, "20"));
+            before = history(jdbc);
             assertThat(history(jdbc)).isEqualTo(before);
             Path altered = materialize();
             var first = OriginalSqlCatalog.entries().getFirst();
@@ -344,9 +460,15 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
      * @return 독립 파일 위치가 없는 전체 embedded SQL Flyway
      */
     private static Flyway embedded(PostgreSQLContainer<?> database) {
+        return embedded(database, "23");
+    }
+
+    /** 역사적 목표도 동일한 embedded 공급원으로 실행한다. */
+    private static Flyway embedded(PostgreSQLContainer<?> database, String target) {
         return configuration(database)
                 .locations("classpath:embedded-bootstrap-no-sql-files")
                 .resourceProvider(new EmbeddedSqlResourceProvider())
+                .target(target)
                 .load();
     }
 
@@ -386,7 +508,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
      * 원본 Java 바이트를 owner 전용 임시 SQL로 물질화한 뒤 정상 SQL discovery를 사용한다.
      *
      * @param database 시작된 폐기형 DB
-     * @param target 정상 SQL 목표 버전 16, 18 또는 19
+     * @param target 정상 SQL 목표 버전 16, 18, 19, 20, 21, 22 또는 23
      * @return 기본 파일 SQL Flyway
      * @throws Exception 임시 파일 쓰기 실패
      */
@@ -456,8 +578,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     private static void assertSqlIdentity(Flyway embedded, Flyway legacy) {
         var actual = embedded.info().all();
         var expected = legacy.info().all();
-        assertThat(actual).hasSize(19);
-        assertThat(expected).hasSize(19);
+        assertThat(actual).hasSameSizeAs(expected);
         for (int index = 0; index < actual.length; index++) {
             assertThat(actual[index].getType()).isEqualTo(CoreMigrationType.SQL);
             assertThat(actual[index].getScript())
@@ -541,7 +662,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadinessConfiguration {
         /**
-         * 정상 초기화 의존 bean 생성 시점에서 SQL18과 세션 테이블 준비를 관측한다.
+         * 정상 초기화 의존 bean 생성 시점에서 SQL23과 세션 테이블 준비를 관측한다.
          *
          * @param jdbc 정상 Boot가 주입한 폐기형 DB 도구
          * @return 생성 시점의 실제 성공 마이그레이션 수
@@ -553,7 +674,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     jdbc.queryForObject(
                             "SELECT count(*) FROM public.flyway_schema_history WHERE success",
                             Integer.class);
-            assertThat(migrations).isEqualTo(19);
+            assertThat(migrations).isEqualTo(23);
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM public.spring_session", Integer.class))

@@ -187,16 +187,17 @@ public class GradeSchemaIT {
                                     + " with time zone:Y,created_by:bigint:N,created_at:timestamp"
                                     + " with time zone:N,ended_at:timestamp with time zone:Y",
                         "grade_job",
-                                "id:bigint:N,job_key:uuid:N,snapshot_id:bigint:N,runtime_id:bigint:N,batch_id:bigint:N,sample_code:character"
-                                    + " varying(32):N,repeat_no:smallint:N,state:character"
+                                "id:bigint:N,job_key:uuid:N,snapshot_id:bigint:N,runtime_id:bigint:N,batch_id:bigint:Y,sample_code:character"
+                                    + " varying(32):Y,repeat_no:smallint:Y,state:character"
                                     + " varying(24):N,accepted_at:timestamp with time"
                                     + " zone:Y,deadline_at:timestamp with time"
                                     + " zone:Y,call_count:smallint:N,lease_gen:bigint:N,lease_until:timestamp"
                                     + " with time zone:Y,worker_key:character"
                                     + " varying(80):Y,next_run_at:timestamp with time"
-                                    + " zone:N,input_hash:character(64):N,config_hash:character(64):N,rubric_hash:character(64):N,result_cipher:bytea:Y,result_data:jsonb:Y,result_hash:character(64):Y,error_code:character"
+                                    + " zone:N,input_hash:character(64):Y,config_hash:character(64):N,rubric_hash:character(64):N,result_cipher:bytea:Y,result_data:jsonb:Y,result_hash:character(64):Y,error_code:character"
                                     + " varying(40):Y,created_at:timestamp with time"
-                                    + " zone:N,updated_at:timestamp with time zone:N",
+                                    + " zone:N,updated_at:timestamp with time"
+                                    + " zone:N,report_id:bigint:Y,report_hash:character(64):Y",
                         "grade_attempt",
                                 "job_id:bigint:N,attempt_no:smallint:N,lease_gen:bigint:N,worker_key:character"
                                     + " varying(80):N,started_at:timestamp with time"
@@ -251,7 +252,11 @@ public class GradeSchemaIT {
                     .containsExactly(spec.getValue().split(","));
             for (var column : columns) {
                 String name = (String) column.get("attname");
-                assertThat((String) column.get("comment")).containsPattern("[가-힣]");
+                if (spec.getKey().equals("grade_job") && name.equals("report_id")) {
+                    assertThat(column.get("comment")).isNull();
+                } else {
+                    assertThat((String) column.get("comment")).containsPattern("[가-힣]");
+                }
                 assertThat(column.get("attidentity")).isEqualTo(name.equals("id") ? "a" : "");
                 assertThat(column.get("def"))
                         .isEqualTo(
@@ -284,7 +289,8 @@ public class GradeSchemaIT {
                                         "pk_grade_job",
                                         "uk_grade_job_key",
                                         "uk_grade_job_sample",
-                                        "uk_gj_worker"),
+                                        "uk_gj_worker",
+                                        "uk_gj_report"),
                         "grade_attempt", Set.of("pk_grade_attempt", "uk_ga_lease"));
         Map<String, Set<String>> checks =
                 Map.of(
@@ -308,6 +314,7 @@ public class GradeSchemaIT {
                                 Set.of(
                                         "ck_gj_state",
                                         "ck_gj_source",
+                                        "ck_gj_report_hash",
                                         "ck_gj_running",
                                         "ck_gj_budget",
                                         "ck_gj_deadline",
@@ -350,6 +357,8 @@ public class GradeSchemaIT {
                         "UNIQUE (job_key)",
                         "uk_grade_job_sample",
                         "UNIQUE (batch_id, sample_code, repeat_no)",
+                        "uk_gj_report",
+                        "UNIQUE (report_id)",
                         "uk_ga_lease",
                         "UNIQUE (job_id, lease_gen)");
         Map<String, List<String>> foreignKeys = new HashMap<>();
@@ -404,7 +413,12 @@ public class GradeSchemaIT {
                                         .toList())
                         .containsExactlyInAnyOrderElementsOf(checks.get(table));
                 for (var constraint : constraints) {
-                    assertThat((String) constraint.get("comment")).containsPattern("[가-힣]");
+                    if (Set.of("ck_gj_source", "ck_gj_report_hash", "uk_gj_report", "fk_gj_report")
+                            .contains(constraint.get("conname"))) {
+                        assertThat(constraint.get("comment")).isNull();
+                    } else {
+                        assertThat((String) constraint.get("comment")).containsPattern("[가-힣]");
+                    }
                     if ("u".equals(constraint.get("contype"))) {
                         assertThat(constraint.get("def"))
                                 .isEqualTo(uniqueDefinitions.get(constraint.get("conname")));
@@ -417,13 +431,17 @@ public class GradeSchemaIT {
                     }
                 }
                 for (String index : actualIndexes) {
-                    assertThat(
-                                    jdbc.queryForObject(
-                                            "SELECT"
-                                                + " pg_catalog.obj_description(?::regclass,'pg_class')",
-                                            String.class,
-                                            "public." + index))
-                            .contains("미측정");
+                    String comment =
+                            jdbc.queryForObject(
+                                    "SELECT"
+                                            + " pg_catalog.obj_description(?::regclass,'pg_class')",
+                                    String.class,
+                                    "public." + index);
+                    if (index.equals("uk_gj_report")) {
+                        assertThat(comment).isNull();
+                    } else {
+                        assertThat(comment).contains("미측정");
+                    }
                 }
             }
         }
@@ -444,6 +462,11 @@ public class GradeSchemaIT {
                                 List.of(
                                         "snapshot_id->grade_batch.snapshot_id",
                                         "batch_id->grade_batch.id"),
+                                "fk_gj_report",
+                                List.of(
+                                        "snapshot_id->test_report.snapshot_id",
+                                        "runtime_id->test_report.runtime_id",
+                                        "report_id->test_report.id"),
                                 "fk_ga_job",
                                 List.of("job_id->grade_job.id")));
         String workerIndex =
@@ -457,8 +480,21 @@ public class GradeSchemaIT {
 
     /** PostgreSQL의 출력 정규화와 무관하게 모든 CHECK의 승인된 경계와 참여 열을 대조한다. */
     private static void verifyCheckDefinition(String name, String definition) {
+        if (name.equals("ck_gj_source")) {
+            String expected =
+                    "CHECK ((batch_id IS NOT NULL AND sample_code IS NOT NULL AND repeat_no IS NOT"
+                        + " NULL AND repeat_no >= 1 AND repeat_no <= 3 AND input_hash IS NOT NULL"
+                        + " AND report_id IS NULL AND report_hash IS NULL) OR (batch_id IS NULL AND"
+                        + " sample_code IS NULL AND repeat_no IS NULL AND input_hash IS NULL AND"
+                        + " report_id IS NOT NULL AND report_hash IS NOT NULL))";
+            assertThat(definition.replaceAll("[()\\s]", ""))
+                    .isEqualTo(expected.replaceAll("[()\\s]", ""));
+        }
         if (name.endsWith("_hash")) {
-            String column = name.replaceFirst("^ck_grade_(runtime|batch|job|attempt)_", "");
+            String column =
+                    name.equals("ck_gj_report_hash")
+                            ? "report_hash"
+                            : name.replaceFirst("^ck_grade_(runtime|batch|job|attempt)_", "");
             assertThat(definition).contains(column, "^[0-9a-f]{64}$");
             return;
         }
@@ -504,7 +540,16 @@ public class GradeSchemaIT {
                                     "sample_code IS NOT NULL",
                                     "repeat_no IS NOT NULL",
                                     "repeat_no >= 1",
-                                    "repeat_no <= 3");
+                                    "repeat_no <= 3",
+                                    "input_hash IS NOT NULL",
+                                    "report_id IS NULL",
+                                    "report_hash IS NULL",
+                                    "batch_id IS NULL",
+                                    "sample_code IS NULL",
+                                    "repeat_no IS NULL",
+                                    "input_hash IS NULL",
+                                    "report_id IS NOT NULL",
+                                    "report_hash IS NOT NULL");
                     case "ck_gj_running" -> List.of("RUNNING", "worker_key IS NOT NULL");
                     case "ck_gj_budget" ->
                             List.of("call_count >= 0", "call_count <= 3", "lease_gen >= 0");
@@ -553,8 +598,13 @@ public class GradeSchemaIT {
 
     @Test
     void mandatoryBatchSourceAndSameSnapshot() {
-        for (String field :
-                List.of("batch_id", "sample_code", "repeat_no", "snapshot_id", "runtime_id")) {
+        for (String field : List.of("batch_id", "sample_code", "repeat_no", "input_hash")) {
+            failsConstraint(
+                    "23514",
+                    "ck_gj_source",
+                    "UPDATE public.grade_job SET " + field + "=NULL WHERE id=" + job);
+        }
+        for (String field : List.of("snapshot_id", "runtime_id")) {
             fails("23502", "UPDATE public.grade_job SET " + field + "=NULL WHERE id=" + job);
         }
         for (int repeat : List.of(0, 4))
@@ -658,6 +708,190 @@ public class GradeSchemaIT {
                     + " WHERE id=?",
                 "W" + job,
                 second);
+    }
+
+    /** V23는 TEST 출처만 고정하고 활성 BATCH의 기존 출처·시간 fixture 갱신을 허용한다. */
+    @Test
+    void testSourcePinsImmutableWhileLegacyBatchAdjustmentsRemainAllowed() {
+        long version =
+                jdbc.queryForObject(
+                        "SELECT version_id FROM public.review_snapshot WHERE id=?",
+                        Long.class,
+                        snapshot);
+        jdbc.update(
+                "INSERT INTO public.story_role(version_id,code,name) VALUES (?,'A','역할"
+                        + " A'),(?,'B','역할 B')",
+                version,
+                version);
+        jdbc.update(
+                "INSERT INTO public.story_pair(version_id,role_a,role_b) VALUES (?,'A','B')",
+                version);
+        long test =
+                id(
+                        "INSERT INTO"
+                            + " public.play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,runtime_epoch,role_a,role_b,mode,invite_until,created_by)"
+                            + " VALUES (?::uuid,?,?,?,?,0,'A','B','FUNCTIONAL',now()+interval '7"
+                            + " days',?) RETURNING id",
+                        UUID.randomUUID().toString(),
+                        version,
+                        snapshot,
+                        runtime,
+                        HASH,
+                        owner);
+        long proposer =
+                id(
+                        "INSERT INTO public.member_account(member_key,state) VALUES"
+                                + " (?::uuid,'ACTIVE') RETURNING id",
+                        UUID.randomUUID().toString());
+        long acceptor =
+                id(
+                        "INSERT INTO public.member_account(member_key,state) VALUES"
+                                + " (?::uuid,'ACTIVE') RETURNING id",
+                        UUID.randomUUID().toString());
+        jdbc.update(
+                "INSERT INTO public.test_member(test_id,member_id,slot) VALUES (?,?,1),(?,?,2)",
+                test,
+                proposer,
+                test,
+                acceptor);
+        long report =
+                id(
+                        "INSERT INTO"
+                            + " public.test_report(report_key,test_id,snapshot_id,runtime_id,config_hash,runtime_epoch,source_draft_rev,proposer_id,payload_cipher,payload_hash)"
+                            + " VALUES (?::uuid,?,?,?,?,0,0,?,decode(repeat('00',32),'hex'),?)"
+                            + " RETURNING id",
+                        UUID.randomUUID().toString(),
+                        test,
+                        snapshot,
+                        runtime,
+                        HASH,
+                        proposer,
+                        HASH);
+        jdbc.update(
+                "UPDATE public.test_report SET"
+                    + " state='ACCEPTED',accepted_by=?,accepted_at=created_at+interval '1"
+                    + " second',submit_no=1,updated_at=created_at+interval '1 second' WHERE id=?",
+                acceptor,
+                report);
+        for (String pins :
+                List.of(
+                        "config_hash,accepted_at+interval '1 second',accepted_at+interval '121"
+                                + " seconds','QUEUED'",
+                        "config_hash,accepted_at,accepted_at+interval '119 seconds','QUEUED'",
+                        "'"
+                                + "b".repeat(64)
+                                + "',accepted_at,accepted_at+interval '120 seconds','QUEUED'",
+                        "config_hash,accepted_at,accepted_at+interval '120 seconds','STAGED'")) {
+            failsConstraint(
+                    "23514",
+                    "grade_job TEST report pin mismatch",
+                    "INSERT INTO"
+                        + " public.grade_job(job_key,snapshot_id,runtime_id,report_id,report_hash,rubric_hash,config_hash,accepted_at,deadline_at,state)"
+                        + " SELECT '"
+                            + UUID.randomUUID()
+                            + "'::uuid,snapshot_id,runtime_id,id,'"
+                            + HASH
+                            + "','"
+                            + HASH
+                            + "',"
+                            + pins
+                            + " FROM public.test_report WHERE id="
+                            + report);
+        }
+        long testJob =
+                id(
+                        "INSERT INTO"
+                            + " public.grade_job(job_key,snapshot_id,runtime_id,report_id,report_hash,config_hash,rubric_hash,state,accepted_at,deadline_at)"
+                            + " SELECT"
+                            + " ?::uuid,snapshot_id,runtime_id,id,?,config_hash,?,'QUEUED',accepted_at,accepted_at+interval"
+                            + " '120 seconds' FROM public.test_report WHERE id=? RETURNING id",
+                        UUID.randomUUID().toString(),
+                        HASH,
+                        HASH,
+                        report);
+        var original =
+                jdbc.queryForMap(
+                        "SELECT"
+                            + " snapshot_id,runtime_id,report_id,report_hash,config_hash,rubric_hash,accepted_at,deadline_at"
+                            + " FROM public.grade_job WHERE id=?",
+                        testJob);
+        for (String fields :
+                List.of(
+                        "snapshot_id=" + otherSnapshot,
+                        "runtime_id=9223372036854775807",
+                        "report_id=9223372036854775807",
+                        "report_hash='" + "b".repeat(64) + "'",
+                        "config_hash='" + "b".repeat(64) + "'",
+                        "rubric_hash='" + "b".repeat(64) + "'",
+                        "accepted_at=accepted_at+interval '1 second'",
+                        "accepted_at=accepted_at+interval '1"
+                                + " second',deadline_at=deadline_at+interval '1 second'",
+                        "deadline_at=deadline_at+interval '1 second'",
+                        "report_id=NULL,report_hash=NULL,batch_id="
+                                + batch
+                                + ",sample_code='FROM_TEST',repeat_no=1,input_hash='"
+                                + HASH
+                                + "'")) {
+            failsConstraint(
+                    "23514",
+                    "accepted grade_job source immutable",
+                    "UPDATE public.grade_job SET " + fields + " WHERE id=" + testJob);
+        }
+        assertThat(
+                        jdbc.queryForMap(
+                                "SELECT"
+                                    + " snapshot_id,runtime_id,report_id,report_hash,config_hash,rubric_hash,accepted_at,deadline_at"
+                                    + " FROM public.grade_job WHERE id=?",
+                                testJob))
+                .isEqualTo(original);
+        assertThat(
+                        jdbc.update(
+                                "UPDATE public.grade_job SET report_hash=report_hash,state='FAILED'"
+                                        + " WHERE id=?",
+                                testJob))
+                .isEqualTo(1);
+
+        String conversion =
+                "batch_id=NULL,sample_code=NULL,repeat_no=NULL,input_hash=NULL,report_id="
+                        + report
+                        + ",report_hash='"
+                        + HASH
+                        + "',state='QUEUED',accepted_at=(SELECT accepted_at FROM public.test_report"
+                        + " WHERE id="
+                        + report
+                        + "),deadline_at=(SELECT accepted_at+interval '120 seconds' FROM"
+                        + " public.test_report WHERE id="
+                        + report
+                        + ")";
+        failsConstraint(
+                "23514",
+                "accepted grade_job source immutable",
+                "UPDATE public.grade_job SET " + conversion + " WHERE id=" + job);
+        updateJob(
+                "state='QUEUED',accepted_at='2026-01-01T00:00:00Z',deadline_at='2026-01-01T00:02:00Z'");
+        updateJob(
+                "sample_code='ADJUSTED',repeat_no=2,input_hash='"
+                        + "b".repeat(64)
+                        + "',config_hash='"
+                        + "b".repeat(64)
+                        + "',rubric_hash='"
+                        + "b".repeat(64)
+                        + "',accepted_at='2026-01-02T00:00:00Z',deadline_at='2026-01-02T00:02:00Z'");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT report_id IS NULL AND report_hash IS NULL AND"
+                                    + " sample_code='ADJUSTED' AND repeat_no=2 AND input_hash=? AND"
+                                    + " accepted_at='2026-01-02T00:00:00Z' AND"
+                                    + " deadline_at=accepted_at+interval '120 seconds' FROM"
+                                    + " public.grade_job WHERE id=?",
+                                Boolean.class,
+                                "b".repeat(64),
+                                job))
+                .isTrue();
+        failsConstraint(
+                "23514",
+                "accepted grade_job source immutable",
+                "UPDATE public.grade_job SET " + conversion + " WHERE id=" + job);
     }
 
     @Test
@@ -892,6 +1126,17 @@ public class GradeSchemaIT {
     private void updateJob(String fields) {
         assertThat(jdbc.update("UPDATE public.grade_job SET " + fields + " WHERE id=?", job))
                 .isEqualTo(1);
+    }
+
+    /** SQLSTATE와 실제 CHECK 또는 trigger 메시지를 함께 확인한다. */
+    private static void failsConstraint(String state, String constraint, String sql) {
+        assertThatThrownBy(() -> jdbc.update(sql))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining(constraint)
+                .satisfies(
+                        error ->
+                                assertThat(((java.sql.SQLException) error.getCause()).getSQLState())
+                                        .isEqualTo(state));
     }
 
     /** 자동 커밋의 한 실패 문장을 검사하므로 다음 시험에 실패 트랜잭션을 남기지 않는다. */

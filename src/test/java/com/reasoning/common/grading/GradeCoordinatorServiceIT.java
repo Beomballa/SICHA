@@ -48,7 +48,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/** 폐기형 pinned V17·전체 codec·실제 설치·REPORT 경계 시험이다. 모델 추론·GRADE 승인은 없다. */
+/** 폐기형 pinned V21·전체 codec·실제 설치·REPORT 경계 시험이다. 모델 추론·GRADE 승인은 없다. */
 class GradeCoordinatorServiceIT {
     private static PostgreSQLContainer<?> postgres;
     private static JdbcTemplate jdbc;
@@ -73,7 +73,7 @@ class GradeCoordinatorServiceIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(19);
+                .isEqualTo(23);
     }
 
     @AfterAll

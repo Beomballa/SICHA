@@ -22,6 +22,24 @@ public class MemberAuthConfiguration {
         private String envCode = "";
         private String mailFrom = "";
         private String evidenceRegistryFile = "";
+        private boolean playtestCollectionEnabled;
+        private String playtestEvidenceRegistryFile = "";
+
+        public boolean isPlaytestCollectionEnabled() {
+            return playtestCollectionEnabled;
+        }
+
+        public void setPlaytestCollectionEnabled(boolean value) {
+            playtestCollectionEnabled = value;
+        }
+
+        public String getPlaytestEvidenceRegistryFile() {
+            return playtestEvidenceRegistryFile;
+        }
+
+        public void setPlaytestEvidenceRegistryFile(String value) {
+            playtestEvidenceRegistryFile = value;
+        }
 
         public boolean isCollectionEnabled() {
             return collectionEnabled;
@@ -72,6 +90,11 @@ public class MemberAuthConfiguration {
     public MemberPolicyGate memberPolicyGate(
             JdbcTemplate db, Properties properties, MemberPolicyEvidenceRegistry registry) {
         return new MemberPolicyGate(db, properties, registry);
+    }
+
+    @Bean
+    public PlaytestPolicyGate playtestPolicyGate(JdbcTemplate db, Properties properties) {
+        return new PlaytestPolicyGate(db, properties);
     }
 
     @Bean

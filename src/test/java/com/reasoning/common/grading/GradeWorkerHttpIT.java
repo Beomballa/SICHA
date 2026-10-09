@@ -33,6 +33,8 @@ import com.reasoning.common.grading.service.GradeRemoteBatchWorker;
 import com.reasoning.common.grading.service.GradeRemoteExecutionProtocol.AttemptRequest;
 import com.reasoning.common.grading.service.GradeResultValidator;
 import com.reasoning.common.grading.service.GradeStartService;
+import com.reasoning.common.member.auth.MemberPolicyGate;
+import com.reasoning.common.member.auth.PlaytestPolicyGate;
 import com.reasoning.common.story.model.FrozenSnapshotCodec;
 import com.reasoning.common.util.CommonUtil;
 
@@ -177,15 +179,23 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class HttpAssembly {
         @Bean
-        Assembly workerAssembly(JdbcTemplate db, CryptoService crypto) {
+        Assembly workerAssembly(
+                JdbcTemplate db,
+                CryptoService crypto,
+                PlaytestPolicyGate policy,
+                MemberPolicyGate memberPolicy) {
             var registry = registry();
             var manager = new DataSourceTransactionManager(db.getDataSource());
             var installed = Map.of(CODE, fixture.installation);
-            return new Assembly(
+            return Assembly.forTest(
                     registry,
-                    new GradeStartService(db, manager, registry, installed),
-                    new GradeCompletionService(
-                            db, manager, registry, installed, crypto, "HTTP_SYNTHETIC_SYSTEM"));
+                    db,
+                    manager,
+                    installed,
+                    policy,
+                    memberPolicy,
+                    crypto,
+                    "HTTP_SYNTHETIC_SYSTEM");
         }
 
         @Bean
@@ -207,7 +217,7 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
                                 "SELECT version FROM flyway_schema_history WHERE success ORDER BY"
                                         + " installed_rank DESC LIMIT 1",
                                 String.class))
-                .isEqualTo("19");
+                .isEqualTo("23");
         var registered =
                 new GradeRuntimeRepository(db)
                         .registerRuntime(
@@ -866,6 +876,197 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
                 .isZero();
     }
 
+    /** 실제 HTTPS에서 TEST poll의 인증·행동 허용과 BATCH 출처 격리를 한 번씩 확인한다. */
+    @Test
+    void testPollRequiresPermissionAndNeverClaimsBatch() throws Exception {
+        URI poll = URI.create("https://localhost:" + port + "/internal/api/grading/poll/" + CODE);
+        assertThat(assembly.supportsTest()).isTrue();
+        var anonymous = send(client, poll, "POST", new byte[0], List.of(), Map.of());
+        error(anonymous, 401, "WORKER_AUTH_REQUIRED");
+        assertAudit(anonymous, "ANONYMOUS", null, "/internal/api/grading/poll/{runtimeCode}");
+        var denied = send(client, poll, "POST", new byte[0], List.of(header(RESTRICTED)), Map.of());
+        error(denied, 403, "REMOTE_EXECUTION_FORBIDDEN");
+        assertAudit(
+                denied, "WORKER", "HTTP_START_ONLY", "/internal/api/grading/poll/{runtimeCode}");
+        var method = send(client, poll, "GET", new byte[0], List.of(header(SECRET)), Map.of());
+        error(method, 403, "REMOTE_EXECUTION_FORBIDDEN");
+        var running = send(client, poll, "POST", new byte[0], List.of(header(SECRET)), Map.of());
+        assertNoContent(running);
+        assertAudit(running, "WORKER", WORKER, "/internal/api/grading/poll/{runtimeCode}");
+        assertThat(
+                        db.queryForMap(
+                                "SELECT state,batch_id,report_id,lease_gen,call_count FROM"
+                                        + " grade_job WHERE id=?",
+                                job))
+                .containsEntry("state", "RUNNING")
+                .containsEntry("report_id", null)
+                .containsEntry("lease_gen", 1L)
+                .containsEntry("call_count", 0);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT batch_id IS NOT NULL FROM grade_job WHERE id=?",
+                                Boolean.class,
+                                job))
+                .isTrue();
+        db.update(
+                "UPDATE grade_job SET state='QUEUED',worker_key=NULL,lease_until=NULL,"
+                        + "next_run_at=clock_timestamp() WHERE id=?",
+                job);
+        var empty = send(client, poll, "POST", new byte[0], List.of(header(SECRET)), Map.of());
+        assertNoContent(empty);
+        assertThat(
+                        db.queryForMap(
+                                "SELECT state,worker_key,lease_gen,call_count FROM grade_job WHERE"
+                                        + " id=?",
+                                job))
+                .containsEntry("state", "QUEUED")
+                .containsEntry("worker_key", null)
+                .containsEntry("lease_gen", 1L)
+                .containsEntry("call_count", 0);
+    }
+
+    /** 실제 PG/HTTPS 복구 격리: 다른 runtime의 누락된 필수 루트는 건강한 runtime의 임대 취득을 막지 않는다. */
+    @Test
+    void testPollIsolatesUnrelatedRecoveryFailureWithoutExtendingBudget() throws Exception {
+        db.update(
+                "UPDATE grade_job SET state='CANCELLED',worker_key=NULL,lease_until=NULL WHERE"
+                        + " id=?",
+                job);
+        long otherRuntime =
+                id(
+                        "INSERT INTO grade_runtime(code,config_hash,config_data,state)"
+                                + " VALUES (?,?,'{}','AVAILABLE') RETURNING id",
+                        "HTTP_OTHER_" + UUID.randomUUID().toString().replace("-", "").toUpperCase(),
+                        fixture.installation.configHash());
+        long failed = testPollingJob(otherRuntime, true);
+        long healthy = testPollingJob(runtime, false);
+        var failedBefore = db.queryForMap("SELECT * FROM grade_job WHERE id=?", failed);
+        var reportBefore =
+                db.queryForMap(
+                        "SELECT * FROM test_report WHERE id=?", failedBefore.get("report_id"));
+        var testBefore =
+                db.queryForMap("SELECT * FROM play_test WHERE id=?", reportBefore.get("test_id"));
+        var budgetBefore =
+                db.queryForMap("SELECT accepted_at,deadline_at FROM grade_job WHERE id=?", healthy);
+        try {
+            String otherCode =
+                    db.queryForObject(
+                            "SELECT code FROM grade_runtime WHERE id=?",
+                            String.class,
+                            otherRuntime);
+            var forbidden =
+                    send(
+                            client,
+                            URI.create(
+                                    "https://localhost:"
+                                            + port
+                                            + "/internal/api/grading/poll/"
+                                            + otherCode),
+                            "POST",
+                            new byte[0],
+                            List.of(header(SECRET)),
+                            Map.of());
+            error(forbidden, 403, "REMOTE_EXECUTION_FORBIDDEN");
+            assertAudit(forbidden, "WORKER", WORKER, "/internal/api/grading/poll/{runtimeCode}");
+            URI poll =
+                    URI.create("https://localhost:" + port + "/internal/api/grading/poll/" + CODE);
+            var response =
+                    send(client, poll, "POST", new byte[0], List.of(header(SECRET)), Map.of());
+            JsonNode lease = body(response, 200);
+            assertThat(lease.path("jobKey").asText())
+                    .isEqualTo(
+                            db.queryForObject(
+                                            "SELECT job_key FROM grade_job WHERE id=?",
+                                            UUID.class,
+                                            healthy)
+                                    .toString());
+            assertThat(lease.path("leaseGen").asLong()).isEqualTo(1);
+            assertThat(Instant.parse(lease.path("deadline").asText()))
+                    .isEqualTo(((Timestamp) budgetBefore.get("deadline_at")).toInstant());
+            assertAudit(response, "WORKER", WORKER, "/internal/api/grading/poll/{runtimeCode}");
+            assertThat(
+                            db.queryForMap(
+                                    "SELECT accepted_at,deadline_at FROM grade_job WHERE id=?",
+                                    healthy))
+                    .isEqualTo(budgetBefore);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT deadline_at=accepted_at+interval '120 seconds'"
+                                            + " AND call_count=0 FROM grade_job WHERE id=?",
+                                    Boolean.class,
+                                    healthy))
+                    .isTrue();
+            assertThat(db.queryForMap("SELECT * FROM grade_job WHERE id=?", failed))
+                    .isEqualTo(failedBefore);
+            assertThatThrownBy(
+                            () ->
+                                    assembly.testRecovery()
+                                            .recover((UUID) failedBefore.get("job_key")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("SOURCE_NOT_CURRENT");
+            assertThat(db.queryForMap("SELECT * FROM grade_job WHERE id=?", failed))
+                    .isEqualTo(failedBefore);
+            assertThat(
+                            db.queryForMap(
+                                    "SELECT * FROM test_report WHERE id=?",
+                                    failedBefore.get("report_id")))
+                    .usingRecursiveComparison()
+                    .isEqualTo(reportBefore);
+            assertThat(
+                            db.queryForMap(
+                                    "SELECT * FROM play_test WHERE id=?",
+                                    reportBefore.get("test_id")))
+                    .usingRecursiveComparison()
+                    .isEqualTo(testBefore);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM grade_attempt WHERE job_id IN (?,?)",
+                                    Integer.class,
+                                    failed,
+                                    healthy))
+                    .isZero();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM grade_event WHERE job_id=?",
+                                    Integer.class,
+                                    failed))
+                    .isZero();
+        } finally {
+            db.update(
+                    "UPDATE grade_job SET state='CANCELLED',worker_key=NULL,lease_until=NULL WHERE"
+                            + " id=?",
+                    healthy);
+        }
+    }
+
+    /** 같은 runtime의 실패를 성공으로 숨기지 않고 실제 HTTP 503과 mandatory 접근 감사에 남긴다. */
+    @Test
+    void testPollReportsSameRuntimeRecoveryFailureWithoutMutation() throws Exception {
+        long failed = testPollingJob(runtime, true);
+        var before = db.queryForMap("SELECT * FROM grade_job WHERE id=?", failed);
+        try {
+            URI poll =
+                    URI.create("https://localhost:" + port + "/internal/api/grading/poll/" + CODE);
+            var response =
+                    send(client, poll, "POST", new byte[0], List.of(header(SECRET)), Map.of());
+            error(response, 503, "REMOTE_EXECUTION_UNAVAILABLE");
+            assertAudit(response, "WORKER", WORKER, "/internal/api/grading/poll/{runtimeCode}");
+            assertThat(db.queryForMap("SELECT * FROM grade_job WHERE id=?", failed))
+                    .isEqualTo(before);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM grade_event WHERE job_id=?",
+                                    Integer.class,
+                                    failed))
+                    .isZero();
+        } finally {
+            db.update(
+                    "UPDATE grade_job SET state='CANCELLED',worker_key=NULL,lease_until=NULL WHERE"
+                            + " id=?",
+                    failed);
+        }
+    }
+
     /** trust를 생성 인증서로 제한하고 일반 client의 인증서 거절과 별도 인증서의 hostname 거절을 실제 TLS로 검사한다. */
     @Test
     void certificateAndHostnameValidationAreNotBypassed() throws Exception {
@@ -943,6 +1144,20 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
                             URI.create("https://localhost:" + disabledPort + path("start")),
                             "POST",
                             bytes("{\"leaseGen\":1}"),
+                            List.of(header(SECRET)),
+                            Map.of()),
+                    503,
+                    "REMOTE_EXECUTION_UNAVAILABLE");
+            error(
+                    send(
+                            client,
+                            URI.create(
+                                    "https://localhost:"
+                                            + disabledPort
+                                            + "/internal/api/grading/poll/"
+                                            + CODE),
+                            "POST",
+                            new byte[0],
                             List.of(header(SECRET)),
                             Map.of()),
                     503,
@@ -1610,6 +1825,15 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
         return SnapshotJson.parse(response.body());
     }
 
+    /** TEST poll의 빈 응답은 실제 전송 본문과 세션 발급이 모두 없어야 한다. */
+    private static void assertNoContent(HttpResponse<byte[]> response) {
+        assertThat(response.statusCode()).isEqualTo(204);
+        assertThat(response.body()).isEmpty();
+        assertThat(response.headers().firstValue("Cache-Control")).contains("no-store");
+        assertThat(response.headers().allValues("Set-Cookie")).isEmpty();
+        requestId(response);
+    }
+
     private void error(HttpResponse<byte[]> response, int status, String code) {
         var error = body(response, status);
         assertThat(fields(error)).containsExactlyInAnyOrder("code", "message", "requestId");
@@ -1693,6 +1917,96 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
         return result;
     }
 
+    /**
+     * 실제 TEST FK와 수락 시점의 불변 120초를 갖는 polling fixture다. 의도적으로 retention·회원 정책 루트가 없어 복구는
+     * SOURCE_NOT_CURRENT로 닫힌다. 임대 취득 격리만 검증하며 실행 자격 증명 fixture는 아니다.
+     */
+    private long testPollingJob(long runtimeId, boolean expiredLease) {
+        long snapshot =
+                db.queryForObject("SELECT snapshot_id FROM grade_job WHERE id=?", Long.class, job);
+        long version =
+                db.queryForObject(
+                        "SELECT version_id FROM review_snapshot WHERE id=?", Long.class, snapshot);
+        db.update(
+                "INSERT INTO story_role(version_id,code,name) VALUES (?,'R1','R1'),(?,'R2','R2') ON"
+                        + " CONFLICT DO NOTHING",
+                version,
+                version);
+        db.update(
+                "INSERT INTO story_pair(version_id,role_a,role_b) VALUES (?,'R1','R2') ON CONFLICT"
+                        + " DO NOTHING",
+                version);
+        long test =
+                id(
+                        "WITH t AS MATERIALIZED (SELECT clock_timestamp() n) INSERT INTO"
+                            + " play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,"
+                            + " runtime_epoch,role_a,role_b,mode,state,invite_until,started_at,deadline_at,created_by,created_at,updated_at)"
+                            + " SELECT ?,?,?,?,?,0,'R1','R2','FUNCTIONAL','RUNNING',t.n+interval '7"
+                            + " days', t.n,t.n+interval '15 minutes',?,t.n,t.n FROM t RETURNING id",
+                        UUID.randomUUID(),
+                        version,
+                        snapshot,
+                        runtimeId,
+                        fixture.installation.configHash(),
+                        creator);
+        long proposer =
+                id(
+                        "INSERT INTO member_account(member_key,state) VALUES (?,'ACTIVE') RETURNING"
+                                + " id",
+                        UUID.randomUUID());
+        long acceptor =
+                id(
+                        "INSERT INTO member_account(member_key,state) VALUES (?,'ACTIVE') RETURNING"
+                                + " id",
+                        UUID.randomUUID());
+        db.update(
+                "INSERT INTO test_member(test_id,member_id,slot) VALUES (?,?,1),(?,?,2)",
+                test,
+                proposer,
+                test,
+                acceptor);
+        long report =
+                id(
+                        "INSERT INTO"
+                            + " test_report(report_key,test_id,snapshot_id,runtime_id,config_hash,"
+                            + " runtime_epoch,source_draft_rev,proposer_id,payload_cipher,payload_hash)"
+                            + " VALUES (?,?,?,?,?,0,0,?,decode(repeat('00',32),'hex'),?) RETURNING"
+                            + " id",
+                        UUID.randomUUID(),
+                        test,
+                        snapshot,
+                        runtimeId,
+                        fixture.installation.configHash(),
+                        proposer,
+                        GradeSchemaIT.HASH);
+        db.update(
+                "UPDATE test_report SET state='ACCEPTED',accepted_by=?,submit_no=1,"
+                        + " accepted_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=?",
+                acceptor,
+                report);
+        long queued =
+                id(
+                        "INSERT INTO"
+                            + " grade_job(job_key,snapshot_id,runtime_id,report_id,report_hash,state,"
+                            + " config_hash,rubric_hash,accepted_at,deadline_at) SELECT"
+                            + " ?,?,?,r.id,?,'QUEUED',?,?,r.accepted_at,r.accepted_at+interval '120"
+                            + " seconds' FROM test_report r WHERE r.id=? RETURNING id",
+                        UUID.randomUUID(),
+                        snapshot,
+                        runtimeId,
+                        GradeSchemaIT.HASH,
+                        fixture.installation.configHash(),
+                        frozen.rubricHash(),
+                        report);
+        if (expiredLease)
+            db.update(
+                    "UPDATE grade_job SET state='RUNNING',worker_key=?,lease_gen=1,"
+                            + " lease_until=clock_timestamp()-interval '1 second' WHERE id=?",
+                    "HTTP_FAILED_" + test,
+                    queued);
+        return queued;
+    }
+
     private long id(String sql, Object... args) {
         return db.queryForObject(sql, Long.class, args);
     }
@@ -1722,7 +2036,7 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
                                 WORKER,
                                 CommonUtil.sha256(SECRET),
                                 Set.of(CODE),
-                                Set.of(Action.START, Action.RENEW, Action.COMPLETE)),
+                                Set.of(Action.CLAIM, Action.START, Action.RENEW, Action.COMPLETE)),
                         new Registration(
                                 "HTTP_START_ONLY",
                                 CommonUtil.sha256(RESTRICTED),

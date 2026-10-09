@@ -65,12 +65,14 @@ final class GradeRemoteReplyDecoder {
 
     record Input(
             Identity identity,
+            String sourceKind,
             String variant,
             Instant deadlineAt,
             long snapshotId,
             String payloadHash,
             String rubricHash,
             String datasetHash,
+            String reportHash,
             String originalAttemptHash,
             Runtime10 runtime,
             ModelBytes modelInput,
@@ -89,6 +91,28 @@ final class GradeRemoteReplyDecoder {
     }
 
     record Observed(Identity identity, String originalAttemptHash, Limits limits) {}
+
+    record Poll(UUID jobKey, long leaseGen, Instant deadline) {}
+
+    /**
+     * 인증된 TEST poll의 닫힌 세 필드를 검사한다. 임대의 실제 권위는 후속 START가 다시 확인한다.
+     *
+     * @param body null 불가인 전체 UTF-8 응답
+     * @return 원문 그대로 검증된 작업·세대·마감
+     * @throws IllegalArgumentException 잘못된 응답은 원인 없는 INVALID_REMOTE_REPLY
+     */
+    static Poll decodePoll(byte[] body) {
+        try {
+            JsonNode node = SnapshotJson.parse(body);
+            keys(node, "jobKey", "leaseGen", "deadline");
+            return new Poll(
+                    uuid(node, "jobKey"),
+                    integer(node, "leaseGen", 1, Long.MAX_VALUE),
+                    time(node, "deadline"));
+        } catch (RuntimeException exception) {
+            throw failure();
+        }
+    }
 
     /**
      * 실제 서버 완료 영수증의 여덟 필드와 상태 조합만 검사한다. 호출 소유권이나 실제 요청과의 일치는 별도 owner 책임이다.
@@ -278,26 +302,47 @@ final class GradeRemoteReplyDecoder {
      * @throws IllegalArgumentException 원인 없는 INVALID_REMOTE_REPLY
      */
     private static Input input(JsonNode node) {
-        keys(
-                node,
-                "formatNo",
-                "jobKey",
-                "leaseGen",
-                "attemptNo",
-                "sourceKind",
-                "variant",
-                "deadlineAt",
-                "snapshotId",
-                "payloadHash",
-                "rubricHash",
-                "datasetHash",
-                "originalAttemptHash",
-                "runtime",
-                "modelInput",
-                "fault");
+        String sourceKind = text(node, "sourceKind");
+        if (sourceKind.equals("BATCH")) {
+            keys(
+                    node,
+                    "formatNo",
+                    "jobKey",
+                    "leaseGen",
+                    "attemptNo",
+                    "sourceKind",
+                    "variant",
+                    "deadlineAt",
+                    "snapshotId",
+                    "payloadHash",
+                    "rubricHash",
+                    "datasetHash",
+                    "originalAttemptHash",
+                    "runtime",
+                    "modelInput",
+                    "fault");
+        } else if (sourceKind.equals("TEST")) {
+            keys(
+                    node,
+                    "formatNo",
+                    "jobKey",
+                    "leaseGen",
+                    "attemptNo",
+                    "sourceKind",
+                    "variant",
+                    "deadlineAt",
+                    "snapshotId",
+                    "payloadHash",
+                    "rubricHash",
+                    "reportHash",
+                    "originalAttemptHash",
+                    "runtime",
+                    "modelInput",
+                    "fault");
+        } else throw failure();
         Identity identity = identity(node);
-        if (!text(node, "sourceKind").equals("BATCH")) throw failure();
         String variant = text(node, "variant");
+        if (sourceKind.equals("TEST") && !variant.equals("MODEL")) throw failure();
         ModelBytes model = null;
         Fault fault = null;
         if (variant.equals("MODEL")) {
@@ -330,12 +375,14 @@ final class GradeRemoteReplyDecoder {
         if (id <= 0) throw failure();
         return new Input(
                 identity,
+                sourceKind,
                 variant,
                 time(node, "deadlineAt"),
                 id,
                 hash(node, "payloadHash"),
                 hash(node, "rubricHash"),
-                hash(node, "datasetHash"),
+                sourceKind.equals("BATCH") ? hash(node, "datasetHash") : null,
+                sourceKind.equals("TEST") ? hash(node, "reportHash") : null,
                 hash(node, "originalAttemptHash"),
                 runtime(node.get("runtime")),
                 model,

@@ -14,6 +14,7 @@ import java.text.Normalizer;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 
@@ -70,7 +71,33 @@ public final class MemberPolicyGate {
         return registry.snapshot();
     }
 
+    /** 회원 정책의 현재·고정 소유자를 잠금 전에 발견한다. 결과는 잠금 후 반드시 다시 검사한다. */
+    public Set<Long> ownerIds(long memberId) {
+        List<Policy> active =
+                policies(
+                        "env_code=? AND scope='MEMBER_AUTH' AND state='ACTIVE'",
+                        configuration.getEnvCode());
+        if (!configuration.isCollectionEnabled() || active.size() != 1) throw notReady();
+        List<Long> pinned =
+                db.query(
+                        "SELECT policy_id FROM member_profile WHERE member_id=?",
+                        (rs, row) -> rs.getLong(1),
+                        memberId);
+        if (pinned.size() != 1) throw notReady();
+        List<Policy> previous = policies("id=?", pinned.getFirst());
+        if (previous.size() != 1) throw notReady();
+        TreeSet<Long> owners = new TreeSet<>();
+        owners.add(active.getFirst().ownerId());
+        owners.add(previous.getFirst().ownerId());
+        return owners;
+    }
+
     public Permit lock(Snapshot snapshot, Long memberId) {
+        return lock(snapshot, memberId, null);
+    }
+
+    /** 이미 정렬 잠금한 소유자만 허용하며 정책 변경 시 새로운 소유자를 잠그지 않고 거절한다. */
+    public Permit lock(Snapshot snapshot, Long memberId, Set<Long> lockedOwners) {
         if (!configuration.isCollectionEnabled()) throw notReady();
         List<Policy> active =
                 policies(
@@ -92,25 +119,42 @@ public final class MemberPolicyGate {
         owners.add(selected.ownerId());
         TreeSet<Long> ids = new TreeSet<>();
         ids.add(selected.id());
+        Long pinnedOwner = null;
         if (pinned != null) {
             List<Policy> values = policies("id=?", pinned);
             if (values.size() != 1) throw notReady();
-            owners.add(values.getFirst().ownerId());
+            pinnedOwner = values.getFirst().ownerId();
+            owners.add(pinnedOwner);
             ids.add(pinned);
         }
+        if (lockedOwners != null && !lockedOwners.containsAll(owners)) throw notReady();
         for (Long owner : owners) {
-            List<Long> accounts =
-                    db.query(
-                            "SELECT id FROM admin_account WHERE id=? FOR SHARE",
-                            (rs, row) -> rs.getLong(1),
-                            owner);
-            if (accounts.size() != 1) throw notReady();
+            if (lockedOwners == null) {
+                List<Long> accounts =
+                        db.query(
+                                "SELECT id FROM admin_account WHERE id=? FOR SHARE",
+                                (rs, row) -> rs.getLong(1),
+                                owner);
+                if (accounts.size() != 1) throw notReady();
+            }
             db.query(
                     "SELECT account_id FROM admin_credential WHERE account_id=? FOR SHARE",
                     (rs, row) -> rs.getLong(1),
                     owner);
         }
         for (Long id : ids) if (policies("id=? FOR SHARE", id).size() != 1) throw notReady();
+        List<Policy> current =
+                policies(
+                        "env_code=? AND scope='MEMBER_AUTH' AND state='ACTIVE'",
+                        configuration.getEnvCode());
+        if (current.size() != 1
+                || current.getFirst().id() != selected.id()
+                || current.getFirst().ownerId() != selected.ownerId()) throw notReady();
+        if (pinned != null) {
+            List<Policy> previous = policies("id=?", pinned);
+            if (previous.size() != 1 || previous.getFirst().ownerId() != pinnedOwner)
+                throw notReady();
+        }
         Permit permit = new Permit(selected, pinned, snapshot);
         check(permit);
         return permit;
@@ -123,7 +167,8 @@ public final class MemberPolicyGate {
                         configuration.getEnvCode());
         if (!configuration.isCollectionEnabled()
                 || active.size() != 1
-                || active.getFirst().id() != permit.current().id()) throw notReady();
+                || active.getFirst().id() != permit.current().id()
+                || active.getFirst().ownerId() != permit.current().ownerId()) throw notReady();
         Policy current = active.getFirst();
         Boolean ready =
                 db.queryForObject(

@@ -33,6 +33,7 @@ class GradeLeaseRepositoryIT {
     private static DataSourceTransactionManager manager;
     private static GradeLeaseRepository repository;
     private long owner;
+    private long version;
     private long snapshot;
     private RuntimeFixture runtime;
 
@@ -52,11 +53,10 @@ class GradeLeaseRepositoryIT {
 
     @BeforeEach
     void fixtures() {
-        // 이 클래스 전용 폐기 DB에서 이전 임대가 후보 조회 시험에 섞이지 않게 한다.
+        // 이전 임대를 지우되 V22의 삭제 금지 보고서가 참조하는 runtime은 유지한다.
         jdbc.update("DELETE FROM public.grade_attempt");
         jdbc.update("DELETE FROM public.grade_job");
         jdbc.update("DELETE FROM public.grade_batch");
-        jdbc.update("DELETE FROM public.grade_runtime");
         owner =
                 id(
                         "INSERT INTO public.admin_account(account_key) VALUES (?) RETURNING id",
@@ -66,7 +66,7 @@ class GradeLeaseRepositoryIT {
                         "INSERT INTO public.story(code,owner_id) VALUES (?,?) RETURNING id",
                         token(),
                         owner);
-        long version =
+        version =
                 id(
                         """
                         INSERT INTO public.story_version(story_id,version_no,title,policy_code,created_by,updated_by)
@@ -122,6 +122,122 @@ class GradeLeaseRepositoryIT {
         assertThat(leases).allSatisfy(value -> assertThat(value).isPresent());
         assertThat(leases.stream().map(value -> value.orElseThrow().jobId()).toList())
                 .containsExactlyInAnyOrder(first, second);
+    }
+
+    /** 출처별 후보와 재전송을 분리하면서 worker당 하나의 임대만 유지한다. */
+    @Test
+    void testClaimNeverConsumesBatchAndBatchClaimNeverConsumesTest() {
+        long batch = queued(runtime);
+        long test = queuedTest(runtime);
+        String testWorker = token();
+        Lease testLease = repository.claimTest(testWorker, runtime.code()).orElseThrow();
+        assertThat(testLease.jobId()).isEqualTo(test);
+        assertThat(testLease.batchId()).isNull();
+        assertThat(repository.claimTest(testWorker, runtime.code())).isEmpty();
+        assertThat(repository.claim(testWorker, runtime.code())).isEmpty();
+        assertThat(row(batch)).containsEntry("state", "QUEUED").containsEntry("worker_key", null);
+
+        String batchWorker = token();
+        Lease batchLease = repository.claim(batchWorker, runtime.code()).orElseThrow();
+        assertThat(batchLease.jobId()).isEqualTo(batch);
+        assertThat(batchLease.batchId()).isEqualTo(runtime.batch());
+        assertThat(repository.claim(batchWorker, runtime.code())).contains(batchLease);
+        assertThat(repository.claimTest(batchWorker, runtime.code())).isEmpty();
+        assertThat(row(test))
+                .containsEntry("batch_id", null)
+                .containsEntry("sample_code", null)
+                .containsEntry("repeat_no", null)
+                .containsEntry("input_hash", null)
+                .containsEntry("call_count", 0);
+        assertThat(((java.sql.Timestamp) row(test).get("deadline_at")).toInstant())
+                .isEqualTo(testLease.deadlineAt().toInstant());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM public.grade_attempt", Integer.class))
+                .isZero();
+    }
+
+    /** 세 번째 호출을 위한 두 회 소비 상태는 임대 가능하며 원래 접수 마감만 사용한다. */
+    @Test
+    void testClaimPreservesOriginalDeadlineAndLeavesExpiredQueueForRecovery() {
+        long expired = queuedTest(runtime, true);
+        long exhausted = queuedTest(runtime);
+        jdbc.update("UPDATE public.grade_job SET call_count=3 WHERE id=?", exhausted);
+        long eligible = queuedTest(runtime);
+        jdbc.update("UPDATE public.grade_job SET call_count=2,lease_gen=8 WHERE id=?", eligible);
+        var expiredBefore = row(expired);
+        var exhaustedBefore = row(exhausted);
+        var before = row(eligible);
+        Lease lease = repository.claimTest(token(), runtime.code()).orElseThrow();
+        assertThat(lease.jobId()).isEqualTo(eligible);
+        assertThat(lease.leaseGen()).isEqualTo(9);
+        assertThat(lease.deadlineAt().toInstant())
+                .isEqualTo(((java.sql.Timestamp) before.get("deadline_at")).toInstant());
+        assertThat(row(eligible))
+                .containsEntry("accepted_at", before.get("accepted_at"))
+                .containsEntry("deadline_at", before.get("deadline_at"))
+                .containsEntry("call_count", 2);
+        assertThat(row(expired)).isEqualTo(expiredBefore);
+        assertThat(row(exhausted)).isEqualTo(exhaustedBefore);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT deadline_at=accepted_at+interval '120 seconds' FROM"
+                                        + " public.grade_job WHERE id=?",
+                                Boolean.class,
+                                eligible))
+                .isTrue();
+        assertThat(repository.getExpiredTestQueueList(100)).contains(expired);
+        assertThat(repository.claimTest(token(), runtime.code())).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM public.grade_attempt", Integer.class))
+                .isZero();
+    }
+
+    /** runtime별 bounded TEST 발견은 다른 runtime과 BATCH를 건드리지 않으며 글로벌 조회도 유지한다. */
+    @Test
+    void expiredTestRuntimeCandidatesAreBoundedReadOnlyAndSourceScoped() {
+        long expiredQueue = queuedTest(runtime, true);
+        long expiredLease = queuedTest(runtime);
+        Lease running = repository.claimTest(token(), runtime.code()).orElseThrow();
+        assertThat(running.jobId()).isEqualTo(expiredLease);
+        jdbc.update(
+                "UPDATE public.grade_job SET lease_until=clock_timestamp()-interval '1 second'"
+                        + " WHERE id=?",
+                expiredLease);
+        long healthy = queuedTest(runtime);
+        RuntimeFixture other = runtime();
+        long unrelated = queuedTest(other, true);
+        long batch = queued(runtime);
+        Lease batchLease = repository.claim(token(), runtime.code()).orElseThrow();
+        assertThat(batchLease.jobId()).isEqualTo(batch);
+        jdbc.update(
+                "UPDATE public.grade_job SET lease_until=clock_timestamp()-interval '1 second'"
+                        + " WHERE id=?",
+                batch);
+        var before =
+                List.of(
+                        row(expiredQueue),
+                        row(expiredLease),
+                        row(healthy),
+                        row(unrelated),
+                        row(batch));
+        var keys = repository.getExpiredTestRuntimeList(runtime.code(), 100);
+        assertThat(keys)
+                .containsExactlyInAnyOrder(
+                        (UUID) row(expiredQueue).get("job_key"), running.jobKey());
+        assertThat(repository.getExpiredTestRuntimeList(runtime.code(), 1)).hasSize(1);
+        assertThat(repository.getExpiredTestRuntimeList(other.code(), 100))
+                .containsExactly((UUID) row(unrelated).get("job_key"));
+        assertThat(repository.getExpiredTestRuntimeList("UNKNOWN", 100)).isEmpty();
+        assertThatThrownBy(() -> keys.add(UUID.randomUUID()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(repository.getExpiredTestQueueList(100)).contains(expiredQueue, unrelated);
+        assertThat(repository.getExpiredLeaseList(100)).contains(expiredLease, batch);
+        assertThat(
+                        List.of(
+                                row(expiredQueue),
+                                row(expiredLease),
+                                row(healthy),
+                                row(unrelated),
+                                row(batch)))
+                .isEqualTo(before);
     }
 
     @Test
@@ -437,6 +553,14 @@ class GradeLeaseRepositoryIT {
                 .isInstanceOf(DataAccessResourceFailureException.class);
         assertThat(row(job)).isEqualTo(before);
         assertThat(repository.claim(worker, runtime.code())).contains(lease);
+
+        long test = queuedTest(runtime);
+        var testBefore = row(test);
+        assertThatThrownBy(() -> failing.claimTest(token(), runtime.code()))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+        assertThat(row(test)).isEqualTo(testBefore);
+        assertThat(repository.claimTest(token(), runtime.code()).orElseThrow().jobId())
+                .isEqualTo(test);
     }
 
     @Test
@@ -463,9 +587,13 @@ class GradeLeaseRepositoryIT {
         Lease lease = observed.claim(token(), runtime.code()).orElseThrow();
         assertThat(observed.renew(lease.jobKey(), lease.workerKey(), lease.leaseGen())).isPresent();
         assertThat(observed.getExpiredLeaseList(1)).isEmpty();
+        assertThat(observed.getExpiredTestRuntimeList(runtime.code(), 1)).isEmpty();
         assertThat(settings)
                 .containsExactly(
-                        "read committed|5s|off", "read committed|5s|off", "read committed|5s|on");
+                        "read committed|5s|off",
+                        "read committed|5s|off",
+                        "read committed|5s|on",
+                        "read committed|5s|on");
         assertThat(jdbc.queryForObject("SELECT current_setting('lock_timeout')", String.class))
                 .isEqualTo("0");
     }
@@ -479,12 +607,20 @@ class GradeLeaseRepositoryIT {
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> repository.claim(token(), bad))
                     .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> repository.claimTest(bad, runtime.code()))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> repository.claimTest(token(), bad))
+                    .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> repository.renew(UUID.randomUUID(), bad, 1))
                     .isInstanceOf(IllegalArgumentException.class);
         }
         assertThatThrownBy(() -> repository.claim(null, runtime.code()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> repository.claim(token(), null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.claimTest(null, runtime.code()))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.claimTest(token(), null))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> repository.renew(null, token(), 1))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -497,7 +633,14 @@ class GradeLeaseRepositoryIT {
         for (int limit : List.of(0, -1, 101)) {
             assertThatThrownBy(() -> repository.getExpiredLeaseList(limit))
                     .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> repository.getExpiredTestRuntimeList(runtime.code(), limit))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
+        for (String bad : List.of("", "   ", "x".repeat(81)))
+            assertThatThrownBy(() -> repository.getExpiredTestRuntimeList(bad, 1))
+                    .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.getExpiredTestRuntimeList(null, 1))
+                .isInstanceOf(IllegalArgumentException.class);
         var transaction = new TransactionTemplate(manager);
         for (boolean readOnly : List.of(false, true)) {
             transaction.setReadOnly(readOnly);
@@ -506,10 +649,19 @@ class GradeLeaseRepositoryIT {
                         assertThatThrownBy(() -> repository.claim(token(), runtime.code()))
                                 .isInstanceOf(IllegalStateException.class)
                                 .hasMessage("LEASE_REQUIRES_SEPARATE_TRANSACTION");
+                        assertThatThrownBy(() -> repository.claimTest(token(), runtime.code()))
+                                .isInstanceOf(IllegalStateException.class)
+                                .hasMessage("LEASE_REQUIRES_SEPARATE_TRANSACTION");
                         assertThatThrownBy(() -> repository.renew(UUID.randomUUID(), token(), 1))
                                 .isInstanceOf(IllegalStateException.class)
                                 .hasMessage("LEASE_REQUIRES_SEPARATE_TRANSACTION");
                         assertThatThrownBy(() -> repository.getExpiredLeaseList(1))
+                                .isInstanceOf(IllegalStateException.class)
+                                .hasMessage("LEASE_REQUIRES_SEPARATE_TRANSACTION");
+                        assertThatThrownBy(
+                                        () ->
+                                                repository.getExpiredTestRuntimeList(
+                                                        runtime.code(), 1))
                                 .isInstanceOf(IllegalStateException.class)
                                 .hasMessage("LEASE_REQUIRES_SEPARATE_TRANSACTION");
                     });
@@ -635,6 +787,98 @@ class GradeLeaseRepositoryIT {
                 """,
                 job);
         return job;
+    }
+
+    /** 실제 TEST 부모와 두 회원의 접수 보고서를 만들어 불변 접수 시각으로 단일 대기 작업을 생성한다. */
+    private long queuedTest(RuntimeFixture fixture) {
+        return queuedTest(fixture, false);
+    }
+
+    /** 마감 fixture도 수락 시점에 시각을 고정해 V22의 접수 출처 불변 규칙을 지킨다. */
+    private long queuedTest(RuntimeFixture fixture, boolean expired) {
+        jdbc.update(
+                "INSERT INTO public.story_role(version_id,code,name) VALUES"
+                        + " (?,'R1','R1'),(?,'R2','R2') ON CONFLICT DO NOTHING",
+                version,
+                version);
+        jdbc.update(
+                "INSERT INTO public.story_pair(version_id,role_a,role_b) VALUES (?,'R1','R2')"
+                        + " ON CONFLICT DO NOTHING",
+                version);
+        long test =
+                id(
+                        """
+                        WITH t AS MATERIALIZED (SELECT clock_timestamp() n)
+                        INSERT INTO public.play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,
+                            runtime_epoch,role_a,role_b,mode,state,invite_until,started_at,deadline_at,
+                            created_by,created_at,updated_at)
+                        SELECT ?,?,?,?,?,0,'R1','R2','FUNCTIONAL','RUNNING',t.n+interval '7 days',
+                            t.n,t.n+interval '15 minutes',?,t.n,t.n FROM t RETURNING id
+                        """,
+                        UUID.randomUUID(),
+                        version,
+                        snapshot,
+                        fixture.id(),
+                        GradeSchemaIT.HASH,
+                        owner);
+        long proposer =
+                id(
+                        "INSERT INTO public.member_account(member_key,state)"
+                                + " VALUES (?,'ACTIVE') RETURNING id",
+                        UUID.randomUUID());
+        long acceptor =
+                id(
+                        "INSERT INTO public.member_account(member_key,state)"
+                                + " VALUES (?,'ACTIVE') RETURNING id",
+                        UUID.randomUUID());
+        jdbc.update(
+                "INSERT INTO public.test_member(test_id,member_id,slot) VALUES (?,?,1),(?,?,2)",
+                test,
+                proposer,
+                test,
+                acceptor);
+        long report =
+                id(
+                        """
+                        WITH t AS MATERIALIZED (SELECT clock_timestamp() n)
+                        INSERT INTO public.test_report(report_key,test_id,snapshot_id,runtime_id,config_hash,
+                            runtime_epoch,source_draft_rev,proposer_id,payload_cipher,payload_hash,
+                            created_at,updated_at)
+                        SELECT ?,?,?,?, ?,0,0,?,decode(repeat('00',32),'hex'),?,
+                            t.n-interval '125 seconds',t.n-interval '125 seconds' FROM t RETURNING id
+                        """,
+                        UUID.randomUUID(),
+                        test,
+                        snapshot,
+                        fixture.id(),
+                        GradeSchemaIT.HASH,
+                        proposer,
+                        GradeSchemaIT.HASH);
+        jdbc.update(
+                """
+                WITH t AS MATERIALIZED (SELECT clock_timestamp() n)
+                UPDATE public.test_report SET state='ACCEPTED',accepted_by=?,submit_no=1,
+                    accepted_at=t.n-?*interval '1 second',updated_at=t.n
+                FROM t WHERE id=?
+                """,
+                acceptor,
+                expired ? 121 : 0,
+                report);
+        return id(
+                """
+                INSERT INTO public.grade_job(job_key,snapshot_id,runtime_id,report_id,report_hash,
+                    state,config_hash,rubric_hash,accepted_at,deadline_at)
+                SELECT ?,?,?,r.id,?,'QUEUED',?,?,r.accepted_at,
+                    r.accepted_at+interval '120 seconds' FROM public.test_report r WHERE r.id=?
+                RETURNING id
+                """,
+                UUID.randomUUID(),
+                snapshot,
+                fixture.id(),
+                GradeSchemaIT.HASH,
+                GradeSchemaIT.HASH,
+                GradeSchemaIT.HASH,
+                report);
     }
 
     /** 단일 실제 DB 시각으로 고정 120초를 유지하며 남은 시한을 설정한다. */

@@ -30,7 +30,7 @@ class GradeEventSchemaIT {
     private long job;
     private long noAttemptJob;
 
-    /** 고정 digest의 폐기 DB에 현재 V1~V18을 적용하며 일반 DB나 환경 자격은 사용하지 않는다. */
+    /** 고정 digest의 폐기 DB에 현재 V1~V21을 적용하며 일반 DB나 환경 자격은 사용하지 않는다. */
     @BeforeAll
     static void open() {
         postgres =
@@ -48,7 +48,7 @@ class GradeEventSchemaIT {
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             jdbc = GradeSchemaIT.jdbc(postgres);

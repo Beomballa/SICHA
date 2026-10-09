@@ -42,14 +42,14 @@ class LocalMemberSchemaIT {
     private static CryptoService crypto;
     private static String password;
 
-    /** 기존 원본과 같은 독립 이미지에서 V19까지 적용하며 키와 암호는 합성 값만 생성한다. */
+    /** 기존 원본과 같은 독립 이미지에서 V23까지 적용하며 키와 암호는 합성 값만 생성한다. */
     @BeforeAll
     static void open() {
         postgres = database();
         postgres.start();
         jdbc = jdbc(postgres);
         var migration = flyway(postgres, null);
-        assertThat(migration.migrate().migrationsExecuted).isEqualTo(19);
+        assertThat(migration.migrate().migrationsExecuted).isEqualTo(23);
         assertThat(migration.migrate().migrationsExecuted).isZero();
         migration.validate();
         var properties = new AuthProperties();
@@ -79,7 +79,7 @@ class LocalMemberSchemaIT {
             var history =
                     db.queryForList(
                             "SELECT * FROM public.flyway_schema_history ORDER BY installed_rank");
-            var latest = flyway(database, null);
+            var latest = flyway(database, "19");
             assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);
             assertThat(latest.migrate().migrationsExecuted).isZero();
             latest.validate();
@@ -104,7 +104,7 @@ class LocalMemberSchemaIT {
     void cleanNineteenHasExactShapeAndNoSeeds() {
         try (var database = database()) {
             database.start();
-            var latest = flyway(database, null);
+            var latest = flyway(database, "19");
             assertThat(latest.migrate().migrationsExecuted).isEqualTo(19);
             latest.validate();
             assertThat(latest.migrate().migrationsExecuted).isZero();
@@ -527,6 +527,10 @@ class LocalMemberSchemaIT {
             jdbc.execute(
                     "GRANT SELECT ON public.privacy_policy,public.member_auth_audit TO " + role);
             jdbc.execute("GRANT UPDATE (code) ON public.privacy_policy TO " + role);
+            jdbc.execute(
+                    "GRANT EXECUTE ON FUNCTION public.valid_playtest_policy_document(jsonb,text) TO"
+                            + " "
+                            + role);
             try (Connection connection = postgres.createConnection("");
                     var statement = connection.createStatement()) {
                 statement.execute("SET ROLE " + role);
@@ -629,7 +633,7 @@ class LocalMemberSchemaIT {
                         document.replace("2026-12-31T00:00:00Z", "2025-01-01T00:00:00Z"),
                         document.substring(0, document.length() - 1) + ",\"extra\":true}")) {
             assertThatThrownBy(() -> insertPolicy(actor, "DRAFT", invalid))
-                    .hasMessageContaining("ck_pp_local_document");
+                    .hasMessageContaining("ck_pp_document");
         }
         assertThatThrownBy(() -> insertPolicy(actor, "ACTIVE", document))
                 .hasMessageContaining("DRAFT insert only");
@@ -651,7 +655,7 @@ class LocalMemberSchemaIT {
                     + " 'PLAYTEST_PROBE',env_code,'PLAYTEST',state,notice_hash,policy_data,owner_id"
                     + " FROM public.privacy_policy WHERE id="
                         + policy,
-                "ck_pp_scope");
+                "ck_pp_document");
         rejected(
                 "INSERT INTO"
                     + " public.privacy_policy(code,env_code,scope,state,notice_hash,policy_data,owner_id)"

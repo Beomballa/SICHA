@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.reasoning.common.grading.model.SnapshotJson;
+import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
 import com.reasoning.common.util.CommonUtil;
 
 import java.time.Duration;
@@ -312,6 +313,51 @@ public final class GradeRemoteExecutionProtocol {
         return SnapshotJson.hash(node);
     }
 
+    /** 실제 TEST 출처의 고정 좌표와 단일 보고서 입력을 별도 도메인으로 결속한다. */
+    static String testOriginalHash(
+            TestRootEvidence root,
+            String worker,
+            long generation,
+            int attempt,
+            Instant deadline,
+            Runtime10 runtime,
+            CanonicalModelInput model) {
+        if (root == null
+                || worker == null
+                || worker.isBlank()
+                || deadline == null
+                || runtime == null
+                || model == null) invalid();
+        identity(root.jobKey(), generation, attempt);
+        var node =
+                object().put("formatNo", 1).put("domain", "GRADE_REMOTE_TEST_ORIGINAL_ATTEMPT-v1");
+        node.put("jobId", Long.toString(root.jobId()))
+                .put("jobKey", root.jobKey().toString())
+                .put("reportId", Long.toString(root.reportId()))
+                .put("testId", Long.toString(root.testId()))
+                .put("storyId", Long.toString(root.storyId()))
+                .put("versionId", Long.toString(root.versionId()))
+                .put("snapshotId", Long.toString(root.snapshotId()))
+                .put("runtimeId", Long.toString(root.runtimeId()))
+                .put("runtimeCode", root.runtimeCode())
+                .put("configHash", root.configHash())
+                .put("runtimeEpoch", Long.toString(root.runtimeEpoch()))
+                .put("snapshotRev", Long.toString(root.snapshotRev()))
+                .put("snapshotFormat", Long.toString(root.snapshotFormat()))
+                .put("policyCode", root.policyCode())
+                .put("payloadHash", root.payloadHash())
+                .put("reportHash", root.reportHash())
+                .put("rubricHash", root.rubricHash())
+                .put("sourceDraftRev", Long.toString(root.sourceDraftRev()))
+                .put("workerKey", worker)
+                .put("leaseGen", Long.toString(generation))
+                .put("attemptNo", attempt)
+                .put("deadlineAt", deadline.toString())
+                .put("modelInputHash", model.sha256());
+        node.set("runtime", runtime.toJson());
+        return SnapshotJson.hash(node);
+    }
+
     /**
      * 서버 사본의 공개 식별자와 승인 입력만 BATCH 봉투에 복사한다.
      *
@@ -366,6 +412,41 @@ public final class GradeRemoteExecutionProtocol {
         node.set(
                 "modelInput", model == null ? JsonNodeFactory.instance.nullNode() : model.toJson());
         node.set("fault", fault == null ? JsonNodeFactory.instance.nullNode() : fault.toJson());
+        return new ApprovedExecutionInput(node);
+    }
+
+    /** TEST만의 실제 보고서 해시를 운반하며 BATCH dataset/fixture 제어를 재사용하지 않는다. */
+    static ApprovedExecutionInput testInput(
+            UUID key,
+            long generation,
+            int attempt,
+            Instant deadline,
+            long snapshotId,
+            String payloadHash,
+            String rubricHash,
+            String reportHash,
+            Runtime10 runtime,
+            CanonicalModelInput model,
+            String originalHash) {
+        identity(key, generation, attempt);
+        hash(payloadHash);
+        hash(rubricHash);
+        hash(reportHash);
+        hash(originalHash);
+        if (snapshotId <= 0 || deadline == null || runtime == null || model == null) invalid();
+        var node =
+                identityNode(key, generation, attempt)
+                        .put("sourceKind", "TEST")
+                        .put("variant", "MODEL")
+                        .put("deadlineAt", deadline.toString())
+                        .put("snapshotId", Long.toString(snapshotId))
+                        .put("payloadHash", payloadHash)
+                        .put("rubricHash", rubricHash)
+                        .put("reportHash", reportHash)
+                        .put("originalAttemptHash", originalHash);
+        node.set("runtime", runtime.toJson());
+        node.set("modelInput", model.toJson());
+        node.set("fault", JsonNodeFactory.instance.nullNode());
         return new ApprovedExecutionInput(node);
     }
 
