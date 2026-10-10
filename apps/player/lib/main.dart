@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -28,11 +29,12 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
   void initState() {
     super.initState();
     _router = GoRouter(
-      initialLocation: '/invitations',
+      initialLocation: kIsWeb ? '/account' : '/invitations',
       redirect: (context, state) {
         final phase = ref.read(authProvider).phase;
         final location = state.matchedLocation;
-        if (phase != AuthPhase.signedIn &&
+        if (!kIsWeb &&
+            phase != AuthPhase.signedIn &&
             (location.startsWith('/invitations/') ||
                 location.startsWith('/investigation/'))) {
           _returnTo = state.uri.toString();
@@ -44,7 +46,7 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
           return location == '/login' ? null : '/login';
         }
         if (location == '/login' || location == '/session') {
-          final target = _returnTo ?? '/invitations';
+          final target = kIsWeb ? '/account' : (_returnTo ?? '/invitations');
           _returnTo = null;
           return target;
         }
@@ -56,24 +58,32 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
           builder: (context, state) => const SessionPage(),
         ),
         GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
-        GoRoute(
-          path: '/invitations',
-          builder: (context, state) => const InvitationListPage(),
-        ),
-        GoRoute(
-          path: '/invitations/:testKey',
-          builder: (context, state) => InvitationDetailPage(
-            key: ValueKey(state.pathParameters['testKey']),
-            testKey: state.pathParameters['testKey']!,
+        if (kIsWeb)
+          GoRoute(
+            path: '/account',
+            builder: (context, state) => const WebAccountPage(),
           ),
-        ),
-        GoRoute(
-          path: '/investigation/:testKey',
-          builder: (context, state) => InvestigationPage(
-            key: ValueKey(state.pathParameters['testKey']),
-            testKey: state.pathParameters['testKey']!,
+        if (!kIsWeb)
+          GoRoute(
+            path: '/invitations',
+            builder: (context, state) => const InvitationListPage(),
           ),
-        ),
+        if (!kIsWeb)
+          GoRoute(
+            path: '/invitations/:testKey',
+            builder: (context, state) => InvitationDetailPage(
+              key: ValueKey(state.pathParameters['testKey']),
+              testKey: state.pathParameters['testKey']!,
+            ),
+          ),
+        if (!kIsWeb)
+          GoRoute(
+            path: '/investigation/:testKey',
+            builder: (context, state) => InvestigationPage(
+              key: ValueKey(state.pathParameters['testKey']),
+              testKey: state.pathParameters['testKey']!,
+            ),
+          ),
       ],
     );
     _subscription = ref.listenManual(
@@ -96,6 +106,28 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
     theme: PlayerTheme.data,
     routerConfig: _router,
   );
+}
+
+/// 웹 1단계는 서버가 확인한 계정과 명시 로그아웃만 제공한다.
+class WebAccountPage extends ConsumerWidget {
+  const WebAccountPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider);
+    return PlayerPage(
+      title: '웹 계정 확인',
+      children: [
+        const PlayerNotice('웹 인증 검증 단계입니다. 2인 조사·게임은 후속 단계에서 연결됩니다.'),
+        Text('현재 계정: ${auth.nickname ?? ''}'),
+        if (auth.error != null) PlayerNotice(auth.error!),
+        PlayerButton(
+          '로그아웃',
+          onPressed: () => ref.read(authProvider.notifier).logout(),
+        ),
+      ],
+    );
+  }
 }
 
 class SessionPage extends ConsumerWidget {

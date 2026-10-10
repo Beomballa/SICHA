@@ -2,6 +2,10 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 
+import 'player_transport_native.dart'
+    if (dart.library.js_interop) 'player_transport_web.dart'
+    as transport;
+
 /// 연결 설정 오류는 원본 주소나 비밀 없이 고정된 안내만 제공한다.
 class PlayerConfigurationError extends StateError {
   PlayerConfigurationError()
@@ -10,7 +14,7 @@ class PlayerConfigurationError extends StateError {
       );
 }
 
-/// Native bearer API. No cookies, browser Origin, redirects, logging, or mutation retries.
+/// 네이티브 Bearer와 제한된 브라우저 인증 전송을 제공하며 변이를 재시도하지 않는다.
 class PlayerApi {
   PlayerApi(String endpoint)
     : dio = Dio(
@@ -22,7 +26,9 @@ class PlayerApi {
           followRedirects: false,
           headers: {'Accept': 'application/json'},
         ),
-      );
+      ) {
+    transport.configurePlayerTransport(dio, endpoint);
+  }
 
   final Dio dio;
 
@@ -54,22 +60,50 @@ class PlayerApi {
     )).data,
   );
 
+  /// JSON 객체를 한 번 전송한다. headers는 브라우저 epoch 등 명시적 헤더다.
+  /// access가 있으면 Bearer를 보내며 응답이 객체가 아니면 거부한다.
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
     String? access,
+    Map<String, String>? headers,
   }) async => _object(
     (await dio.post<dynamic>(
       path,
       data: body,
       options: Options(
         headers: {
+          ...?headers,
           'Content-Type': 'application/json',
           if (access != null) 'Authorization': 'Bearer $access',
         },
       ),
     )).data,
   );
+
+  /// 브라우저 refresh의 빈 204는 null, 그 외 응답은 JSON 객체로만 반환한다.
+  /// 원문 refresh 대신 공개 세션 epoch만 명시한다. 재전송하지 않는다.
+  Future<Map<String, dynamic>?> browserPost(
+    String path,
+    Map<String, dynamic> body, {
+    required String epoch,
+  }) async {
+    final response = await dio.post<dynamic>(
+      path,
+      data: body,
+      options: Options(
+        headers: {
+          'X-Sicha-Player-Web-Epoch': epoch,
+          'Content-Type': 'application/json',
+        },
+      ),
+    );
+    if (response.statusCode == 204 &&
+        (response.data == null || response.data == '')) {
+      return null;
+    }
+    return _object(response.data);
+  }
 
   /// 현재 Bearer로 변경 본문을 한 번만 보내며 불확실한 응답은 재전송하지 않는다.
   Future<Map<String, dynamic>> patch(

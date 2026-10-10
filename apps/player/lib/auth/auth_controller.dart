@@ -1,117 +1,18 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show ProviderException;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 
 import '../core/player_api.dart';
+import 'auth_session.dart';
+import 'auth_session_native.dart'
+    if (dart.library.js_interop) 'auth_session_web.dart'
+    as platform;
 
 const _baseUrl = String.fromEnvironment('PLAYER_API_BASE_URL');
 final apiProvider = Provider<PlayerApi>((ref) => PlayerApi(_baseUrl));
 final authProvider = NotifierProvider<AuthController, AuthSnapshot>(
   AuthController.new,
 );
-
-const _ios = IOSOptions(
-  accountName: 'sicha.player.auth',
-  accessibility: KeychainAccessibility.unlocked_this_device,
-  synchronizable: false,
-);
-
-/// 네이티브 Keychain 없이 인증 상태를 검증할 수 있는 저장소 경계다.
-abstract class AuthTokenStorage {
-  Future<String?> read(String key);
-  Future<void> write(String key, String value);
-  Future<void> delete(String key);
-}
-
-/// 설치 표지 확인·앱 인증 공간 삭제·표지 기록을 하나의 실행으로 직렬화한다.
-/// 콜백 오류는 호출자에게 전달하며 같은 소유자의 다음 호출에서 재시도한다.
-/// readMarker는 유효한 표지만 true로, eraseCredentials는 앱 인증 전체를
-/// 정리하고, writeMarker는 비밀이 없는 표지의 기록 확인까지 수행한다.
-class AuthInstallationGuard {
-  AuthInstallationGuard({
-    required this._readMarker,
-    required this._eraseCredentials,
-    required this._writeMarker,
-  });
-
-  final Future<bool> Function() _readMarker;
-  final Future<void> Function() _eraseCredentials;
-  final Future<void> Function() _writeMarker;
-  Future<void>? _flight;
-  bool _ready = false;
-  bool _eraseRequired = false;
-
-  /// 성공한 설치 확인 뒤에만 자격 저장소 접근을 허용한다.
-  Future<void> ensureInstalled() {
-    if (_ready) return Future<void>.value();
-    return _flight ??= _check().whenComplete(() => _flight = null);
-  }
-
-  Future<void> _check() async {
-    if (!_eraseRequired && await _readMarker()) {
-      _ready = true;
-      return;
-    }
-    // 표지 쓰기가 실패했지만 일부 반영되어도 같은 소유자는 재삭제한다.
-    _eraseRequired = true;
-    await _eraseCredentials();
-    await _writeMarker();
-    _eraseRequired = false;
-    _ready = true;
-  }
-}
-
-class _KeychainTokenStorage implements AuthTokenStorage {
-  static const _storage = FlutterSecureStorage(iOptions: _ios);
-  static const _installationChannel = MethodChannel(
-    'sicha.player/auth_installation',
-  );
-  static final _installation = AuthInstallationGuard(
-    readMarker: () async {
-      if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
-        throw UnsupportedError('네이티브 인증은 iOS에서만 지원합니다.');
-      }
-      final marker = await _installationChannel.invokeMethod<bool>(
-        'readMarker',
-      );
-      if (marker == null) throw StateError('설치 표지를 확인하지 못했습니다.');
-      return marker;
-    },
-    eraseCredentials: () async {
-      await _storage.deleteAll(iOptions: _ios);
-      if ((await _storage.readAll(iOptions: _ios)).isNotEmpty) {
-        throw StateError('앱 인증 저장소를 정리하지 못했습니다.');
-      }
-    },
-    writeMarker: () async {
-      if (await _installationChannel.invokeMethod<bool>('writeMarker') !=
-          true) {
-        throw StateError('설치 표지를 확인하지 못했습니다.');
-      }
-    },
-  );
-
-  @override
-  Future<String?> read(String key) async {
-    await _installation.ensureInstalled();
-    return _storage.read(key: key, iOptions: _ios);
-  }
-
-  @override
-  Future<void> write(String key, String value) async {
-    await _installation.ensureInstalled();
-    await _storage.write(key: key, value: value, iOptions: _ios);
-  }
-
-  @override
-  Future<void> delete(String key) async {
-    await _installation.ensureInstalled();
-    await _storage.delete(key: key, iOptions: _ios);
-  }
-}
 
 class AuthSnapshot {
   const AuthSnapshot(this.phase, {this.nickname, this.error});
@@ -123,10 +24,20 @@ class AuthSnapshot {
 enum AuthPhase { checking, signedOut, signedIn, recovery, loginRequired }
 
 class AuthController extends Notifier<AuthSnapshot> {
-  AuthController({AuthTokenStorage? storage})
-    : _storage = storage ?? _KeychainTokenStorage();
+  AuthController({AuthTokenStorage? storage, AuthSession? session})
+    : _session = _selectSession(storage, session);
 
-  final AuthTokenStorage _storage;
+  static AuthSession _selectSession(
+    AuthTokenStorage? storage,
+    AuthSession? session,
+  ) {
+    if (storage != null && session != null) {
+      throw ArgumentError('인증 경계는 하나만 지정하세요.');
+    }
+    return session ?? platform.createAuthSession(storage: storage);
+  }
+
+  final AuthSession _session;
   String? _access;
   DateTime? _accessUntil;
   Future<bool>? _refreshFlight;
@@ -137,40 +48,66 @@ class AuthController extends Notifier<AuthSnapshot> {
 
   int get generation => _generation;
   bool get signedIn => state.phase == AuthPhase.signedIn;
-  String get _key =>
-      'player:${Uri.encodeComponent(ref.read(apiProvider).endpoint)}:refresh';
-  String get _marker => '$_key:rotating';
 
   @override
-  AuthSnapshot build() => const AuthSnapshot(AuthPhase.checking);
+  AuthSnapshot build() {
+    final subscription = _session.invalidations.listen((_) => _checkCurrent());
+    ref.onDispose(() {
+      subscription.cancel();
+      _session.dispose();
+    });
+    return const AuthSnapshot(AuthPhase.checking);
+  }
 
+  void _checkCurrent() {
+    if (_access != null && !_session.current) {
+      ++_generation;
+      _access = null;
+      _accessUntil = null;
+      state = const AuthSnapshot(AuthPhase.loginRequired);
+    }
+  }
+
+  void _accept(AccessCredentials credentials) {
+    if (!_session.current) throw AuthSessionBlocked();
+    _access = credentials.token;
+    _accessUntil = credentials.expiresAt;
+  }
+
+  /// 새 프로세스의 세션 복원을 한 번 수행한다. 불확실한 회전은 자동 재시도하지 않는다.
   Future<void> restore() async {
     if (_started) return;
     _started = true;
     final generation = _generation;
     try {
-      ref.read(
-        apiProvider,
-      ); // Reject missing or non-HTTPS configuration before any auth attempt.
-      if (await _storage.read(_marker) != null) {
-        await _storage.delete(_key);
-        if (generation != _generation) return;
-        state = const AuthSnapshot(AuthPhase.loginRequired);
-        return;
+      final api = ref.read(apiProvider);
+      final flight = () async {
+        final credentials = await _session.restore(api);
+        if (generation != _generation) return false;
+        if (credentials == null) {
+          state = const AuthSnapshot(AuthPhase.signedOut);
+          return false;
+        }
+        _accept(credentials);
+        return true;
+      }();
+      _refreshFlight = flight;
+      bool restored;
+      try {
+        restored = await flight;
+      } finally {
+        if (identical(_refreshFlight, flight)) _refreshFlight = null;
       }
-      if (await _storage.read(_key) == null) {
-        if (generation != _generation) return;
-        state = const AuthSnapshot(AuthPhase.signedOut);
-        return;
-      }
-      if (generation != _generation) return;
-      if (await _refresh()) await _loadMe();
+      if (restored && generation == _generation) await _loadMe();
     } catch (error) {
       if (generation != _generation) return;
       _access = null;
+      _accessUntil = null;
       final cause = error is ProviderException ? error.exception : error;
       state = AuthSnapshot(
-        AuthPhase.recovery,
+        cause is AuthSessionBlocked
+            ? AuthPhase.loginRequired
+            : AuthPhase.recovery,
         error: cause is PlayerConfigurationError
             ? cause.message.toString()
             : '저장된 인증을 확인할 수 없습니다. 잠금 해제와 연결 상태를 확인한 뒤 다시 시도해 주세요.',
@@ -178,6 +115,7 @@ class AuthController extends Notifier<AuthSnapshot> {
     }
   }
 
+  /// 사용자의 명시적 로그인만 실행하며 중복 클릭은 단일 명령으로 합친다.
   Future<void> login(String email, String password) async {
     while (_logoutFlight != null) {
       await _logoutFlight;
@@ -191,47 +129,34 @@ class AuthController extends Notifier<AuthSnapshot> {
   Future<void> _login(String email, String password) async {
     final generation = ++_generation;
     _access = null;
+    _accessUntil = null;
     state = const AuthSnapshot(AuthPhase.signedOut);
     try {
-      await _refreshFlight;
-      await _storage.delete(_key);
-      await _storage.delete(_marker);
+      try {
+        await _refreshFlight;
+      } catch (_) {
+        // 명시적 로그인은 세션 경계의 회수 절차로 불확실성을 처리한다.
+      }
       if (generation != _generation) return;
-      final tokens = await ref.read(apiProvider).post(
-        '/api/member/auth/login/local',
-        {'email': email, 'password': password},
+      final credentials = await _session.login(
+        ref.read(apiProvider),
+        email,
+        password,
       );
       if (generation != _generation) return;
-      await _storeTokens(tokens);
-      if (generation != _generation) return;
+      _accept(credentials);
       await _loadMe();
     } catch (error) {
-      if (generation == _generation) {
-        _access = null;
-        try {
-          await _storage.delete(_key);
-        } catch (_) {
-          state = const AuthSnapshot(
-            AuthPhase.loginRequired,
-            error: '인증 저장소를 정리하지 못했습니다.',
-          );
-          return;
-        }
-        state = AuthSnapshot(AuthPhase.signedOut, error: playerError(error));
-      }
+      if (generation != _generation) return;
+      _access = null;
+      _accessUntil = null;
+      state = AuthSnapshot(
+        error is AuthSessionBlocked
+            ? AuthPhase.loginRequired
+            : AuthPhase.signedOut,
+        error: playerError(error),
+      );
     }
-  }
-
-  Future<void> _storeTokens(Map<String, dynamic> tokens) async {
-    if (tokens['tokenType'] != 'Bearer') {
-      throw const FormatException('인증 응답 오류');
-    }
-    final access = tokens['accessToken'] as String;
-    final refresh = tokens['refreshToken'] as String;
-    final until = DateTime.parse(tokens['accessExpiresAt'] as String);
-    await _storage.write(_key, refresh);
-    _access = access;
-    _accessUntil = until;
   }
 
   Future<bool> _refresh() =>
@@ -239,64 +164,44 @@ class AuthController extends Notifier<AuthSnapshot> {
 
   Future<bool> _rotate() async {
     final generation = _generation;
-    var requestSent = false;
     try {
-      if (await _storage.read(_marker) != null) {
-        await _forget(AuthPhase.loginRequired);
-        return false;
-      }
-      final token = await _storage.read(_key);
-      if (token == null) {
-        await _forget(AuthPhase.loginRequired);
-        return false;
-      }
-      await _storage.write(_marker, '1');
-      // A lost response cannot safely reuse the consumed refresh token.
-      requestSent = true;
-      final result = await ref.read(apiProvider).post(
-        '/api/member/auth/refresh',
-        {'refreshToken': token},
-      );
+      final credentials = await _session.refresh(ref.read(apiProvider));
       if (generation != _generation) return false;
-      await _storeTokens(result);
-      await _storage.delete(_marker);
-      return generation == _generation;
-    } on DioException catch (error) {
-      if (!requestSent) rethrow;
-      if (generation == _generation) {
-        await _rotationFailed(playerError(error));
+      if (credentials == null) {
+        _access = null;
+        _accessUntil = null;
+        state = const AuthSnapshot(AuthPhase.loginRequired);
+        return false;
       }
-      return false;
-    } catch (_) {
-      if (!requestSent) rethrow;
+      _accept(credentials);
+      return true;
+    } on AuthSessionBlocked catch (_) {
       if (generation == _generation) {
-        await _rotationFailed('갱신 결과를 확인할 수 없습니다. 다시 로그인해 주세요.');
+        _access = null;
+        _accessUntil = null;
+        state = const AuthSnapshot(
+          AuthPhase.loginRequired,
+          error: '갱신 결과를 확인할 수 없습니다. 다시 로그인해 주세요.',
+        );
       }
       return false;
     }
   }
 
-  /// 회전 응답이 불확실할 때 기존 토큰 재사용을 막고 회전 마커를 유지한다.
-  Future<void> _rotationFailed(String message) async {
-    _access = null;
-    _accessUntil = null;
-    await _storage.delete(_key);
-    state = AuthSnapshot(AuthPhase.loginRequired, error: message);
-  }
-
   Future<void> _forget(AuthPhase phase) async {
     _access = null;
     _accessUntil = null;
-    await _storage.delete(_key);
-    await _storage.delete(_marker);
+    await _session.clearLocal();
     state = AuthSnapshot(phase);
   }
 
-  Future<Map<String, dynamic>> authorizedGet(
-    String path, {
-    Map<String, dynamic>? query,
-  }) async {
-    final generation = _generation;
+  void _assertGeneration(int generation) {
+    _checkCurrent();
+    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
+  }
+
+  Future<void> _ensureAccess(int generation) async {
+    _assertGeneration(generation);
     if (_access == null ||
         _accessUntil == null ||
         DateTime.now().isAfter(
@@ -304,25 +209,36 @@ class AuthController extends Notifier<AuthSnapshot> {
         )) {
       if (!await _refresh()) throw StateError('로그인이 필요합니다.');
     }
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
+    _assertGeneration(generation);
+  }
+
+  /// 명시적인 인증 실패에 한해 GET을 한 번 재시도한다.
+  Future<Map<String, dynamic>> authorizedGet(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    final generation = _generation;
+    await _ensureAccess(generation);
     final access = _access!;
     try {
       final value = await ref.read(apiProvider).get(path, access, query: query);
-      if (generation != _generation) throw StateError('계정이 변경되었습니다.');
+      _assertGeneration(generation);
       return value;
     } on DioException catch (error) {
+      _checkCurrent();
       if (!_authorizationFailure(error) || generation != _generation) rethrow;
       if (_access == access && !await _refresh()) rethrow;
       if (_access == null || generation != _generation) rethrow;
       final value = await ref
           .read(apiProvider)
           .get(path, _access!, query: query);
-      if (generation != _generation) throw StateError('계정이 변경되었습니다.');
+      _assertGeneration(generation);
       return value;
+    } finally {
+      _checkCurrent();
     }
   }
 
-  /// 서버가 명시한 인증 실패만 읽기 재시도 대상으로 판정한다.
   bool _authorizationFailure(DioException error) {
     final status = error.response?.statusCode;
     final data = error.response?.data;
@@ -331,58 +247,50 @@ class AuthController extends Notifier<AuthSnapshot> {
         data['code'] == 'MEMBER_AUTH_REQUIRED';
   }
 
+  /// 변경 요청은 한 번만 전송하며 인증 오류에도 재전송하지 않는다.
   Future<Map<String, dynamic>> authorizedPost(
     String path,
     Map<String, dynamic> body,
   ) async {
     final generation = _generation;
-    if (_access == null ||
-        _accessUntil == null ||
-        DateTime.now().isAfter(
-          _accessUntil!.subtract(const Duration(seconds: 30)),
-        )) {
-      if (!await _refresh()) throw StateError('로그인이 필요합니다.');
+    await _ensureAccess(generation);
+    try {
+      final result = await ref
+          .read(apiProvider)
+          .post(path, body, access: _access!);
+      _assertGeneration(generation);
+      return result;
+    } finally {
+      _checkCurrent();
     }
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
-    final result = await ref
-        .read(apiProvider)
-        .post(path, body, access: _access!);
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
-    return result;
   }
 
-  /// 현재 세대의 Bearer로 PATCH를 한 번만 전송한다. 인증 오류나 불확실한 응답은 자동 재전송하지 않는다.
+  /// 현재 세대의 Bearer로 PATCH를 한 번만 전송한다.
   Future<Map<String, dynamic>> authorizedPatch(
     String path,
     Map<String, dynamic> body,
   ) async {
     final generation = _generation;
-    if (_access == null ||
-        _accessUntil == null ||
-        DateTime.now().isAfter(
-          _accessUntil!.subtract(const Duration(seconds: 30)),
-        )) {
-      if (!await _refresh()) throw StateError('로그인이 필요합니다.');
+    await _ensureAccess(generation);
+    try {
+      final result = await ref.read(apiProvider).patch(path, body, _access!);
+      _assertGeneration(generation);
+      return result;
+    } finally {
+      _checkCurrent();
     }
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
-    final response = await ref.read(apiProvider).patch(path, body, _access!);
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
-    return response;
   }
 
-  /// 세대가 바뀐 뒤 도착한 빈 하트비트 응답도 이전 계정의 성공으로 취급하지 않는다.
+  /// 빈 응답에도 세대 검증을 적용하며 하트비트를 재전송하지 않는다.
   Future<void> authorizedPostNoContent(String path) async {
     final generation = _generation;
-    if (_access == null ||
-        _accessUntil == null ||
-        DateTime.now().isAfter(
-          _accessUntil!.subtract(const Duration(seconds: 30)),
-        )) {
-      if (!await _refresh()) throw StateError('로그인이 필요합니다.');
+    await _ensureAccess(generation);
+    try {
+      await ref.read(apiProvider).postNoContent(path, _access!);
+      _assertGeneration(generation);
+    } finally {
+      _checkCurrent();
     }
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
-    await ref.read(apiProvider).postNoContent(path, _access!);
-    if (generation != _generation) throw StateError('계정이 변경되었습니다.');
   }
 
   Future<void> _loadMe() async {
@@ -412,13 +320,12 @@ class AuthController extends Notifier<AuthSnapshot> {
     }
   }
 
+  /// 저장소 접근 이전의 실패만 재시도한다. 불확실한 인증 명령은 재실행하지 않는다.
   Future<void> retryRestore() async {
     if (state.phase != AuthPhase.recovery) return;
     state = const AuthSnapshot(AuthPhase.checking);
     try {
-      if (_access == null) {
-        if (!await _refresh()) return;
-      }
+      if (_access == null && !await _refresh()) return;
       await _loadMe();
     } catch (_) {
       state = const AuthSnapshot(
@@ -433,11 +340,10 @@ class AuthController extends Notifier<AuthSnapshot> {
 
   Future<void> _logout() async {
     ++_generation;
-    final access = _access;
     final loginFlight = _loginFlight;
     _access = null;
+    _accessUntil = null;
     state = const AuthSnapshot(AuthPhase.signedOut);
-    // The in-flight rotation must settle before deleting Keychain values.
     try {
       await _refreshFlight;
     } catch (_) {}
@@ -445,26 +351,17 @@ class AuthController extends Notifier<AuthSnapshot> {
       await loginFlight;
     } catch (_) {}
     try {
-      await _storage.delete(_key);
-      await _storage.delete(_marker);
-    } catch (_) {
+      await _session.logout(ref.read(apiProvider));
+    } on AuthSessionBlocked catch (_) {
       state = const AuthSnapshot(
         AuthPhase.loginRequired,
-        error: '인증 저장소를 정리하지 못했습니다.',
+        error: '서버 로그아웃 결과는 확인되지 않았습니다. 자동 재전송하지 않습니다.',
       );
-      return;
-    }
-    if (access != null) {
-      try {
-        await ref.read(apiProvider).post('/api/member/auth/logout', {
-          'requestKey': requestKey(),
-        }, access: access);
-      } catch (_) {
-        state = const AuthSnapshot(
-          AuthPhase.signedOut,
-          error: '기기의 인증은 삭제했지만 서버 로그아웃 결과는 확인되지 않았습니다. 자동 재전송하지 않습니다.',
-        );
-      }
+    } catch (_) {
+      state = const AuthSnapshot(
+        AuthPhase.signedOut,
+        error: '기기의 인증은 삭제했지만 서버 로그아웃 결과는 확인되지 않았습니다. 자동 재전송하지 않습니다.',
+      );
     }
   }
 }

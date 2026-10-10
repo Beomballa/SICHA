@@ -155,7 +155,7 @@ public class MemberAuthController {
     }
 
     /** UTF-8 JSON을 읽는 중16KiB로 제한하고 중복·후행·누락·미지 키를 거절한다. */
-    private static JsonNode body(HttpServletRequest request, String... fields) {
+    static JsonNode body(HttpServletRequest request, String... fields) {
         try {
             MediaType type = MediaType.parseMediaType(request.getContentType());
             if (!type.getType().equals("application")
@@ -194,21 +194,21 @@ public class MemberAuthController {
         }
     }
 
-    private static String text(JsonNode node, String field) {
+    static String text(JsonNode node, String field) {
         JsonNode value = node.get(field);
         if (value == null || !value.isTextual()) throw invalid();
         return value.textValue();
     }
 
     /** 공개 요청 키는 canonical 소문자 UUID v4만 허용한다. */
-    private static UUID uuid(JsonNode node, String field) {
+    static UUID uuid(JsonNode node, String field) {
         String value = text(node, field);
         if (!value.matches("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"))
             throw invalid();
         return UUID.fromString(value);
     }
 
-    private static UUID id(HttpServletRequest request) {
+    static UUID id(HttpServletRequest request) {
         return RequestAuditKernel.requestId(request);
     }
 

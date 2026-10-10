@@ -52,7 +52,11 @@ public class MemberSecurityConfig {
     @Bean
     @Order(0)
     SecurityFilterChain memberSecurity(
-            HttpSecurity http, MemberAuthService service, ObjectMapper mapper, JdbcTemplate db)
+            HttpSecurity http,
+            MemberAuthService service,
+            ObjectMapper mapper,
+            JdbcTemplate db,
+            MemberWebPolicy web)
             throws Exception {
         http.securityMatcher(
                         request ->
@@ -98,13 +102,14 @@ public class MemberSecurityConfig {
                                                                 403,
                                                                 "FORBIDDEN")))
                 .addFilterBefore(
-                        new MemberFilter(service, mapper), ExceptionTranslationFilter.class)
+                        new MemberFilter(service, mapper, web), ExceptionTranslationFilter.class)
                 .addFilterBefore(new AccessFilter(db), MemberFilter.class);
         return http.build();
     }
 
     /** 메서드와 exact 경로를 함께 검사하여 미래 회원 API를 자동 공개하지 않는다. */
     static boolean route(HttpServletRequest request) {
+        if (MemberWebPolicy.route(request)) return true;
         String path = request.getRequestURI();
         if (path.startsWith(PLAYTEST + "/")) {
             String suffix = path.substring(PLAYTEST.length());
@@ -224,10 +229,12 @@ public class MemberSecurityConfig {
     private static final class MemberFilter extends OncePerRequestFilter {
         private final MemberAuthService service;
         private final ObjectMapper mapper;
+        private final MemberWebPolicy web;
 
-        private MemberFilter(MemberAuthService service, ObjectMapper mapper) {
+        private MemberFilter(MemberAuthService service, ObjectMapper mapper, MemberWebPolicy web) {
             this.service = service;
             this.mapper = mapper;
+            this.web = web;
         }
 
         @Override
@@ -236,8 +243,30 @@ public class MemberSecurityConfig {
                 throws ServletException, IOException {
             response.setHeader("Cache-Control", "no-store");
             SecurityContextHolder.setContext(SecurityContextHolder.createEmptyContext());
+            if (request.getRequestURI().equals(MemberWebPolicy.BASE)
+                    || request.getRequestURI().startsWith(MemberWebPolicy.BASE + "/")
+                    || request.getHeader(MemberWebPolicy.WEB) != null) {
+                try {
+                    boolean cookieAuth = MemberWebPolicy.route(request);
+                    boolean me =
+                            "GET".equals(request.getMethod())
+                                    && request.getRequestURI().equals(AUTH + "/me");
+                    if (!cookieAuth && !me) throw new AuthException(403, "FORBIDDEN", "FORBIDDEN");
+                    web.admit(request, cookieAuth);
+                    if (me) principal(service.authenticate(bearer(request), false));
+                } catch (AuthException failure) {
+                    error(mapper, request, response, failure.status(), failure.code());
+                    return;
+                }
+                chain.doFilter(request, response);
+                return;
+            }
             if (!request.isSecure()
                     || request.getHeader("Origin") != null
+                    || request.getHeader("Sec-Fetch-Site") != null
+                    || request.getHeader("Sec-Fetch-Mode") != null
+                    || request.getHeader("Sec-Fetch-Dest") != null
+                    || request.getHeader("Sec-Fetch-User") != null
                     || (request.getRequestURI().startsWith(PLAYTEST + "/")
                             && request.getHeader("Cookie") != null)) {
                 error(mapper, request, response, 403, "FORBIDDEN");

@@ -98,6 +98,7 @@ tasks.register('browserTest', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     include '**/*BrowserIT.class'
+    exclude '**/MemberWebBrowserIT.class'
     useJUnitPlatform()
     dependsOn tasks.named('uiTest')
     shouldRunAfter tasks.named('integrationTest')
@@ -105,4 +106,26 @@ tasks.register('browserTest', Test) {
 
 tasks.named('check') {
     dependsOn tasks.named('integrationTest')
+}
+
+tasks.register('playerWebBrowserTest', Test) {
+    description = '명시한 Flutter 웹 산출물과 폐기 HTTPS/PG에서 회원 인증·복구를 검증한다.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/MemberWebBrowserIT.class'
+    filter {
+        includeTestsMatching 'com.reasoning.common.member.MemberWebBrowserIT.webAuthenticationLifecycle'
+    }
+    useJUnitPlatform()
+    inputs.property('playerWebOrigin', providers.environmentVariable('PLAYER_WEB_TEST_ORIGIN').orElse(''))
+    inputs.files('src/test/browser/player-web-auth.mjs')
+    doFirst {
+        def origin = System.getenv('PLAYER_WEB_TEST_ORIGIN')
+        def assets = System.getenv('PLAYER_WEB_TEST_ASSETS')
+        if (!origin || !assets || !file(assets).isDirectory()) {
+            throw new GradleException('PLAYER_WEB_TEST_ORIGIN과 완성된 PLAYER_WEB_TEST_ASSETS가 필요합니다.')
+        }
+    }
+    outputs.upToDateWhen { false }
 }

@@ -78,6 +78,8 @@ public final class MemberAuthService {
 
     public record Logout(String state, UUID requestId) {}
 
+    public record Revoked(Logout response, MemberPrincipal principal) {}
+
     private record Flow(
             long id,
             UUID key,
@@ -754,6 +756,71 @@ public final class MemberAuthService {
                     }
                     return new Logout("LOGGED_OUT", requestId);
                 });
+    }
+
+    /**
+     * 원래 만료 전 ISSUED 또는 USED refresh 증명으로만 family를 회수하며 정책 수집은 재개하지 않는다.
+     *
+     * @param refreshToken canonical 32바이트 refresh 원문이며 저장·감사하지 않는다
+     * @param requestKey null이 아닌 UUID v4 요청 키
+     * @param requestId null이 아닌 서버 감사 요청 키
+     * @return 회수를 완료한 상태와 검증된 감사 주체
+     */
+    public Revoked revokeByRefresh(String refreshToken, UUID requestKey, UUID requestId) {
+        return safe(
+                () -> {
+                    request(requestId);
+                    request(requestKey);
+                    if (requestKey.version() != 4 || requestKey.variant() != 2)
+                        throw AuthException.badRequest("INVALID_REQUEST");
+                    outside();
+                    secret(refreshToken, "REFRESH_UNAVAILABLE");
+                    Token provisional = token(hash(REFRESH, refreshToken), false);
+                    if (provisional == null || !provisional.kind().equals("REFRESH"))
+                        throw refreshUnavailable();
+                    Family family = family(provisional.sessionId(), false);
+                    if (family == null) throw refreshUnavailable();
+                    MemberPrincipal verified =
+                            committed(
+                                    () -> {
+                                        Bound bound =
+                                                lockBound(
+                                                        refreshToken,
+                                                        "REFRESH",
+                                                        family.memberId(),
+                                                        family.id());
+                                        if (!validRefreshRevocation(bound))
+                                            return Result.denied(refreshUnavailable());
+                                        MemberPrincipal actor =
+                                                principal(bound.account(), bound.family());
+                                        revoke(bound.family().id(), "LOGOUT");
+                                        return Result.ok(actor);
+                                    });
+                    try {
+                        independentAudit("LOGOUT", "LOGGED_OUT", verified, requestId);
+                    } catch (RuntimeException failure) {
+                        emergency();
+                    }
+                    return new Revoked(new Logout("LOGGED_OUT", requestId), verified);
+                });
+    }
+
+    /** 소비된 증명도 회수에만 허용하며 발급·업무 인증의 valid 조건을 변경하지 않는다. */
+    private boolean validRefreshRevocation(Bound bound) {
+        if (bound == null
+                || !bound.token().kind().equals("REFRESH")
+                || !(bound.token().state().equals("ISSUED") || bound.token().state().equals("USED"))
+                || !bound.account().state().equals("ACTIVE")
+                || bound.family().revoked() != null
+                || bound.family().authRev() != bound.account().revision()
+                || bound.identity() == null
+                || bound.identity().memberId() != bound.account().id()
+                || !bound.identity().active()
+                || bound.identity().proofAt() == null) return false;
+        Instant now = gate.clock();
+        return now.isBefore(bound.token().expires())
+                && now.isBefore(bound.family().idle())
+                && now.isBefore(bound.family().absolute());
     }
 
     public MemberPolicyGate.Notice getNotice(UUID requestId) {
