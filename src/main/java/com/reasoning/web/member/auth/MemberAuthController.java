@@ -143,7 +143,7 @@ public class MemberAuthController {
     /** 입력·업무 실패의 원문을 반사하지 않고 실제 고정 상태를 유지한다. */
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<?> failure(AuthException failure, HttpServletRequest request) {
-        var response = ResponseEntity.status(failure.status()).header("Cache-Control", "no-store");
+        var response = ResponseEntity.status(failure.status());
         if (failure instanceof MemberAuthService.RateLimited limited)
             response.header("Retry-After", Long.toString(limited.retryAfterSeconds()));
         return response.body(MemberSecurityConfig.errorBody(request, failure.code()));
@@ -217,6 +217,6 @@ public class MemberAuthController {
     }
 
     private static ResponseEntity<?> response(int status, Object value) {
-        return ResponseEntity.status(status).header("Cache-Control", "no-store").body(value);
+        return ResponseEntity.status(status).body(value);
     }
 }

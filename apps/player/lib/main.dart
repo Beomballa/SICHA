@@ -25,19 +25,22 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
   late final ProviderSubscription<AuthSnapshot> _subscription;
   String? _returnTo;
 
+  /// 인증 뒤에는 내부 초대·조사 경로만 복귀하며 웹 기본 확인은 계정 화면을 유지한다.
   @override
   void initState() {
     super.initState();
+    // 웹 push도 실제 주소에 반영하여 새로고침이 현재 초대·조사로 복귀하게 한다.
+    if (kIsWeb) GoRouter.optionURLReflectsImperativeAPIs = true;
     _router = GoRouter(
       initialLocation: kIsWeb ? '/account' : '/invitations',
       redirect: (context, state) {
         final phase = ref.read(authProvider).phase;
         final location = state.matchedLocation;
-        if (!kIsWeb &&
-            phase != AuthPhase.signedIn &&
-            (location.startsWith('/invitations/') ||
+        if (phase != AuthPhase.signedIn &&
+            (location == '/invitations' ||
+                location.startsWith('/invitations/') ||
                 location.startsWith('/investigation/'))) {
-          _returnTo = state.uri.toString();
+          _returnTo = location;
         }
         if (phase == AuthPhase.checking || phase == AuthPhase.recovery) {
           return location == '/session' ? null : '/session';
@@ -46,7 +49,7 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
           return location == '/login' ? null : '/login';
         }
         if (location == '/login' || location == '/session') {
-          final target = kIsWeb ? '/account' : (_returnTo ?? '/invitations');
+          final target = _returnTo ?? (kIsWeb ? '/account' : '/invitations');
           _returnTo = null;
           return target;
         }
@@ -63,27 +66,24 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
             path: '/account',
             builder: (context, state) => const WebAccountPage(),
           ),
-        if (!kIsWeb)
-          GoRoute(
-            path: '/invitations',
-            builder: (context, state) => const InvitationListPage(),
+        GoRoute(
+          path: '/invitations',
+          builder: (context, state) => const InvitationListPage(),
+        ),
+        GoRoute(
+          path: '/invitations/:testKey',
+          builder: (context, state) => InvitationDetailPage(
+            key: ValueKey(state.pathParameters['testKey']),
+            testKey: state.pathParameters['testKey']!,
           ),
-        if (!kIsWeb)
-          GoRoute(
-            path: '/invitations/:testKey',
-            builder: (context, state) => InvitationDetailPage(
-              key: ValueKey(state.pathParameters['testKey']),
-              testKey: state.pathParameters['testKey']!,
-            ),
+        ),
+        GoRoute(
+          path: '/investigation/:testKey',
+          builder: (context, state) => InvestigationPage(
+            key: ValueKey(state.pathParameters['testKey']),
+            testKey: state.pathParameters['testKey']!,
           ),
-        if (!kIsWeb)
-          GoRoute(
-            path: '/investigation/:testKey',
-            builder: (context, state) => InvestigationPage(
-              key: ValueKey(state.pathParameters['testKey']),
-              testKey: state.pathParameters['testKey']!,
-            ),
-          ),
+        ),
       ],
     );
     _subscription = ref.listenManual(
@@ -108,7 +108,7 @@ class _PlayerAppState extends ConsumerState<PlayerApp> {
   );
 }
 
-/// 웹 1단계는 서버가 확인한 계정과 명시 로그아웃만 제공한다.
+/// 서버가 확인한 웹 계정과 2단계 초대 진입점을 제공한다.
 class WebAccountPage extends ConsumerWidget {
   const WebAccountPage({super.key});
 
@@ -118,9 +118,12 @@ class WebAccountPage extends ConsumerWidget {
     return PlayerPage(
       title: '웹 계정 확인',
       children: [
-        const PlayerNotice('웹 인증 검증 단계입니다. 2인 조사·게임은 후속 단계에서 연결됩니다.'),
+        const PlayerNotice(
+          '웹 2단계에서는 초대와 2인 조사를 제공합니다. 보고서·결과·피드백은 아직 제공하지 않습니다.',
+        ),
         Text('현재 계정: ${auth.nickname ?? ''}'),
         if (auth.error != null) PlayerNotice(auth.error!),
+        PlayerButton('초대로 이동', onPressed: () => context.go('/invitations')),
         PlayerButton(
           '로그아웃',
           onPressed: () => ref.read(authProvider.notifier).logout(),

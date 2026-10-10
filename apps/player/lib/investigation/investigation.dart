@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +10,8 @@ import '../auth/auth_controller.dart';
 import '../core/player_api.dart';
 import '../core/player_theme.dart';
 import '../lobby/invitations.dart';
+import 'private_note_renderer_native.dart'
+    if (dart.library.js_interop) 'private_note_renderer_web.dart';
 import 'report_sheet.dart';
 import 'result_sheet.dart';
 
@@ -619,6 +622,12 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
   int _editVersion = 0;
   ResultView? _result;
   final _notes = TextEditingController();
+  final _noteFocus = FocusNode();
+  String _noteIdentifier = 'sicha-private-note-${requestKey()}';
+  int _noteRendererRevision = 0;
+  bool _restoreNoteFocus = false;
+  bool _noteReconciliationPending = false;
+  bool _noteEditorReadOnly = false;
   final Map<String, String> _roleNotes = {};
   String? _roleCode;
   Timer? _pollTimer;
@@ -665,6 +674,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
 
   /// 접근 회수·종료·계정 변경 시 역할 자료와 임시 기록을 함께 제거한다.
   void _purge() {
+    _retireNoteRenderer(purge: true);
     _intent = null;
     _uncertain = false;
     _postOwner = null;
@@ -687,6 +697,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
 
   /// 숨긴 기록은 새 역할 자료의 접근 증명 전에는 컨트롤러에도 노출하지 않는다.
   void _hide() {
+    _retireNoteRenderer(purge: false);
     _state = null;
     _materials = null;
     _report = null;
@@ -695,6 +706,19 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     _serverAt = null;
     _sampledAt = null;
     _heartbeatEpoch = null;
+  }
+
+  /// 숨긴 탭의 RAF가 멈춰도 남은 semantic textarea 값을 즉시 폐기한다.
+  void _retireNoteRenderer({required bool purge}) {
+    if (!kIsWeb) return;
+    _restoreNoteFocus = !purge && (_restoreNoteFocus || _noteFocus.hasFocus);
+    _noteReconciliationPending = !purge;
+    _noteEditorReadOnly = !purge;
+    ++_noteRendererRevision;
+    _notes.clear();
+    privateNoteEraser?.call(_noteIdentifier);
+    _noteIdentifier = 'sicha-private-note-${requestKey()}';
+    _noteFocus.unfocus();
   }
 
   bool _revoked(Object error) =>
@@ -752,7 +776,8 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     }
   }
 
-  /// 현재 상태의 수정번호와 서버 기준 시각을 갱신하며 다른 방의 응답은 폐기한다.
+  /// 수정번호·서버 시각을 갱신하며 다른 방의 응답은 폐기한다.
+  /// 웹에서는 역할 자료만 조회하고 종료 시 개인 원문을 폐기하며 결과는 요청하지 않는다.
   Future<void> _refresh() async {
     if (!_current || _loadingEpoch == _epoch || _busy) return;
     final epoch = _epoch;
@@ -784,14 +809,16 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
         if (materials.role['code'] != (state.data['self'] as Map)['roleCode']) {
           throw const FormatException('배정된 역할과 자료가 일치하지 않습니다.');
         }
-        report = await repo.report(widget.testKey);
-        if (report.testKey != widget.testKey ||
-            report.draftRev != state.data['draftRev'] ||
-            report.submissionState != state.data['submissionState']) {
-          // 서로 다른 조회 사이에 공동 보고서가 바뀐 경우 다음 polling에서 다시 확인한다.
-          return;
+        if (!kIsWeb) {
+          report = await repo.report(widget.testKey);
+          if (report.testKey != widget.testKey ||
+              report.draftRev != state.data['draftRev'] ||
+              report.submissionState != state.data['submissionState']) {
+            // 서로 다른 조회 사이에 공동 보고서가 바뀐 경우 다음 polling에서 다시 확인한다.
+            return;
+          }
         }
-      } else if (state.state == 'ENDED') {
+      } else if (state.state == 'ENDED' && !kIsWeb) {
         result = await repo.result(widget.testKey);
         if (result.testKey != widget.testKey) {
           throw const FormatException('결과 테스트 키가 일치하지 않습니다.');
@@ -802,12 +829,22 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
           BigInt.parse(state.rev) < BigInt.parse(_state!.rev)) {
         return;
       }
+      if (kIsWeb && state.state == 'ENDED') {
+        _stop();
+        _purge();
+      }
       final roleCode = materials?.role['code'] as String?;
       if (_roleCode != null && roleCode != _roleCode) {
         _purge();
       }
       _roleCode = roleCode;
-      _notes.text = roleCode == null ? '' : _roleNotes[roleCode] ?? '';
+      final noteText = roleCode == null ? '' : _roleNotes[roleCode] ?? '';
+      if (_notes.text != noteText) {
+        _notes.value = TextEditingValue(
+          text: noteText,
+          selection: TextSelection.collapsed(offset: noteText.length),
+        );
+      }
       setState(() {
         _state = state;
         _materials = state.state == 'RUNNING' ? materials : null;
@@ -817,7 +854,57 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
         _sampledAt = DateTime.now();
         if (!_uncertain) _message = null;
       });
+      if (kIsWeb && _noteReconciliationPending && roleCode != null) {
+        final revision = _noteRendererRevision;
+        final testKey = widget.testKey;
+        bool currentRenderer() =>
+            _current &&
+            epoch == _epoch &&
+            revision == _noteRendererRevision &&
+            widget.testKey == testKey &&
+            _state?.state == 'RUNNING' &&
+            _materials?.role['code'] == roleCode &&
+            _roleCode == roleCode;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!currentRenderer()) return;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!currentRenderer()) return;
+            // 엔진이 재연결 중 컨트롤러를 바꿔도 권한이 확인된 역할 메모리만 기준으로 한다.
+            final authorizedNote = _roleNotes[roleCode] ?? '';
+            _notes.value = TextEditingValue(
+              text: authorizedNote,
+              selection: TextSelection.collapsed(offset: authorizedNote.length),
+            );
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!currentRenderer()) return;
+              final currentNote = _roleNotes[roleCode] ?? '';
+              if (_notes.text != currentNote) {
+                _notes.value = TextEditingValue(
+                  text: currentNote,
+                  selection: TextSelection.collapsed(
+                    offset: currentNote.length,
+                  ),
+                );
+              }
+              final restoreFocus = _restoreNoteFocus;
+              setState(() {
+                _noteEditorReadOnly = false;
+                _noteReconciliationPending = false;
+                _restoreNoteFocus = false;
+              });
+              if (restoreFocus) {
+                _noteFocus.requestFocus();
+                privateNoteFocuser?.call(_noteIdentifier);
+              }
+            });
+            WidgetsBinding.instance.scheduleFrame();
+          });
+          WidgetsBinding.instance.scheduleFrame();
+        });
+      }
       if (_heartbeatEpoch != epoch &&
+          state.accepted &&
+          (state.data['partner'] as Map)['accepted'] == true &&
           (state.state == 'WAITING' || state.state == 'RUNNING')) {
         _heartbeatEpoch = epoch;
         _heartbeat();
@@ -842,6 +929,8 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     if (!_current ||
         _busy ||
         _heartbeatFlight != null ||
+        _state?.accepted != true ||
+        (_state?.data['partner'] as Map?)?['accepted'] != true ||
         (_state?.state != 'WAITING' && _state?.state != 'RUNNING')) {
       return;
     }
@@ -970,12 +1059,14 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     _stop();
     _purge();
     _notes.dispose();
+    _noteFocus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final noteRendererRevision = _noteRendererRevision;
     ref.listen<AuthSnapshot>(authProvider, (previous, next) {
       if (next.phase != AuthPhase.signedIn ||
           _generation != ref.read(authProvider.notifier).generation) {
@@ -1017,7 +1108,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
             '내 준비: ${self?['ready'] == true ? '완료' : '대기'} · 상대 준비: ${partner?['ready'] == true ? '완료' : '대기'}',
           ),
           Text('상대 접속: ${partner?['online'] == true ? '최근 활동' : '확인되지 않음'}'),
-          if (state.accepted)
+          if (state.accepted && partner?['accepted'] == true)
             PlayerButton(
               self?['ready'] == true ? '준비 해제' : '준비하기',
               onPressed: _busy || _intent != null
@@ -1116,18 +1207,34 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
             const PlayerNotice(
               '개인 기록은 현재 화면의 메모리에서만 보관되며 서버에 저장되지 않습니다. 화면을 닫거나 로그아웃하면 사라집니다.',
             ),
-            TextField(
-              controller: _notes,
-              maxLines: 8,
-              onChanged: (value) {
-                if (_roleCode != null) _roleNotes[_roleCode!] = value;
-              },
-              decoration: const InputDecoration(
-                labelText: '개인 조사 기록 (임시 메모)',
-                alignLabelWithHint: true,
+            Semantics(
+              identifier: _noteIdentifier,
+              container: true,
+              explicitChildNodes: true,
+              child: TextField(
+                key: kIsWeb ? ValueKey(noteRendererRevision) : null,
+                controller: _notes,
+                focusNode: _noteFocus,
+                readOnly: kIsWeb && _noteEditorReadOnly,
+                maxLines: 8,
+                onChanged: (value) {
+                  if (_current &&
+                      (!kIsWeb || !_noteReconciliationPending) &&
+                      _state?.state == 'RUNNING' &&
+                      _materials != null &&
+                      _roleCode != null &&
+                      _materials!.role['code'] == _roleCode &&
+                      noteRendererRevision == _noteRendererRevision) {
+                    _roleNotes[_roleCode!] = value;
+                  }
+                },
+                decoration: const InputDecoration(
+                  labelText: '개인 조사 기록 (임시 메모)',
+                  alignLabelWithHint: true,
+                ),
               ),
             ),
-            if (_report != null)
+            if (!kIsWeb && _report != null)
               ReportSheet(
                 key: ValueKey(
                   '${widget.testKey}-${_generation ?? 0}-${_editedReport == null ? _report!.draftRev : 'edited'}-$_editVersion',
@@ -1178,7 +1285,8 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
                   ),
                 ),
               ),
-            if (state.data['submissionState'] != 'PENDING' &&
+            if (!kIsWeb &&
+                state.data['submissionState'] != 'PENDING' &&
                 remaining != null &&
                 remaining > 0)
               PlayerButton(
@@ -1188,7 +1296,11 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
               ),
           ],
         ],
-        if (state.state == 'ENDED' && _result != null)
+        if (kIsWeb && state.state == 'ENDED')
+          const PlayerNotice(
+            '조사가 종료되었습니다. 역할 자료와 개인 기록은 폐기되었습니다. 웹 보고서·결과·피드백은 3단계에서 제공되며 현재는 조회할 수 없습니다.',
+          ),
+        if (!kIsWeb && state.state == 'ENDED' && _result != null)
           ResultSheet(
             key: ValueKey('${widget.testKey}-${_generation ?? 0}'),
             result: _result!.data,
@@ -1235,9 +1347,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
         ),
       ],
       children: [
-        // Keep one stable sliver child. Conditional notices, refresh hiding,
-        // hints and retained editable fields must not shift lazy-list indices
-        // and trigger contradictory scroll-offset corrections on recovery.
+        // 고정된 자식으로 고지·힌트·복구 시 목록 인덱스와 스크롤 보정 충돌을 막는다.
         Column(
           key: const ValueKey('investigation-content'),
           crossAxisAlignment: CrossAxisAlignment.stretch,

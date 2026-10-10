@@ -39,7 +39,7 @@ class _InvitationStub extends InvitationRepository {
       ConsentNoticeData(_notice());
 
   @override
-  Future<void> accept(ConsentNoticeData notice, String key) async {
+  Future<void> accept(InvitationAcceptIntent intent) async {
     attempts++;
     if (fail) throw StateError('uncertain');
   }
@@ -109,7 +109,359 @@ Map<String, dynamic> _tokens(String access, String refresh) => {
   'accessExpiresAt': '2030-01-01T00:00:00Z',
 };
 
+Map<String, dynamic> _consentReceipt() => {
+  'action': 'INVITATION_ACCEPT',
+  'changed': true,
+  'replayed': false,
+  'original': {
+    'testKey': 'test-1',
+    'rev': '8',
+    'state': 'WAITING',
+    'inviteExpiresAt': '2030-01-01T00:00:00Z',
+  },
+  'current': {
+    'testKey': 'test-1',
+    'rev': '8',
+    'state': 'WAITING',
+    'inviteExpiresAt': '2030-01-01T00:00:00Z',
+  },
+  'requestId': 'request-1',
+};
+
+/// 실제 동의 저장소의 요청·영수증·후속 조회를 관찰하는 합성 전송 경계다.
+class _ConsentHarness {
+  final api = PlayerApi('https://example.invalid');
+  final posts = <Map<String, dynamic>>[];
+  Map<String, dynamic> state = _testState();
+  Map<String, dynamic> notice = _notice();
+  bool loseResponse = true;
+  bool malformed = false;
+  bool failRead = false;
+  int? denial;
+
+  _ConsentHarness() {
+    api.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final path = options.uri.path;
+          if (path.endsWith('/login/local')) {
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: _tokens('access', 'refresh'),
+              ),
+            );
+          } else if (path.endsWith('/me')) {
+            handler.resolve(
+              Response(requestOptions: options, data: {'nickname': 'tester'}),
+            );
+          } else if (path.endsWith('/logout')) {
+            handler.resolve(
+              Response(requestOptions: options, data: {'ok': true}),
+            );
+          } else if (path.endsWith('/accept')) {
+            posts.add(Map<String, dynamic>.from(options.data as Map));
+            if (denial != null) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  response: Response(
+                    requestOptions: options,
+                    statusCode: denial,
+                  ),
+                  type: DioExceptionType.badResponse,
+                ),
+              );
+            } else if (loseResponse) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  type: DioExceptionType.receiveTimeout,
+                ),
+              );
+            } else {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  data: {
+                    ..._consentReceipt(),
+                    'changed': posts.length == 1,
+                    'replayed': malformed ? '잘못된 값' : posts.length > 1,
+                  },
+                ),
+              );
+            }
+          } else if (path.endsWith('/policy-notice')) {
+            handler.resolve(Response(requestOptions: options, data: notice));
+          } else {
+            if (failRead) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  type: DioExceptionType.receiveTimeout,
+                ),
+              );
+            } else {
+              handler.resolve(Response(requestOptions: options, data: state));
+            }
+          }
+        },
+      ),
+    );
+  }
+
+  Future<ProviderContainer> signIn() async {
+    final container = ProviderContainer(
+      overrides: [
+        apiProvider.overrideWith((ref) => api),
+        authProvider.overrideWith(
+          () => AuthController(storage: _MemoryStorage()),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(authProvider.notifier)
+        .login('tester@example.invalid', 'password');
+    expect(container.read(authProvider).phase, AuthPhase.signedIn);
+    return container;
+  }
+}
+
+Future<void> _mountConsent(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: InvitationDetailPage(testKey: 'test-1')),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// 실제 목록을 스크롤해 관찰할 위젯을 표시한다.
+Future<void> _consentShow(WidgetTester tester, Finder target) async {
+  final scrollable = find.byType(Scrollable).first;
+  if (target.evaluate().isEmpty) {
+    for (var step = 0; step < 30; step++) {
+      final position = tester.state<ScrollableState>(scrollable).position;
+      if (position.pixels <= position.minScrollExtent) break;
+      await tester.drag(scrollable, const Offset(0, 300));
+      await tester.pump();
+    }
+    await tester.scrollUntilVisible(target, 200, scrollable: scrollable);
+  }
+  await tester.ensureVisible(target);
+  await tester.pumpAndSettle();
+}
+
+/// 표시된 버튼이나 체크박스로만 명시 명령을 실행한다.
+Future<void> _consentTap(WidgetTester tester, Finder target) async {
+  await _consentShow(tester, target);
+  await tester.tap(target);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _agreeAndAccept(WidgetTester tester) async {
+  await _consentTap(tester, find.byType(CheckboxListTile));
+  await _consentTap(tester, find.text('동의하고 초대 수락'));
+}
+
 void main() {
+  for (final malformed in [false, true]) {
+    testWidgets('원본 동의 재전송은 최신 조회로 바뀌지 않는다: malformed=$malformed', (
+      tester,
+    ) async {
+      final harness = _ConsentHarness()
+        ..loseResponse = !malformed
+        ..malformed = malformed;
+      final container = (await tester.runAsync(harness.signIn))!;
+      await _mountConsent(tester, container);
+      await _agreeAndAccept(tester);
+      final original = Map<String, dynamic>.from(harness.posts.single);
+      harness.state = {
+        ..._testState(),
+        'rev': '8',
+        'self': {..._testState()['self'] as Map, 'inviteGen': 4},
+      };
+      harness.notice = {
+        ..._notice(),
+        'revision': '8',
+        'generation': 4,
+        'policyCode': 'NEW_POLICY',
+        'version': 'v2',
+        'body': '새 고지',
+        'contact': 'new@example.invalid',
+      };
+      await _consentTap(tester, find.text('서버 상태 확인'));
+      expect(harness.posts, hasLength(1));
+      expect(find.text('동의하고 초대 수락'), findsNothing);
+      await _consentShow(tester, find.text('테스트 고지'));
+      expect(find.text('테스트 고지'), findsOneWidget);
+      expect(find.text('새 고지'), findsNothing);
+      await _consentShow(tester, find.byType(CheckboxListTile));
+      expect(
+        tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+        isTrue,
+      );
+      harness.loseResponse = false;
+      harness.malformed = false;
+      harness.state = {
+        ...harness.state,
+        'self': {...harness.state['self'] as Map, 'accepted': true},
+      };
+      await _consentTap(tester, find.text('원본 동의 요청 다시 보내기'));
+      expect(harness.posts, hasLength(2));
+      expect(harness.posts.last, equals(original));
+      expect(find.text('원본 동의 요청 다시 보내기'), findsNothing);
+      expect(find.text('조사 화면으로'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('유효 영수증 뒤 조회 실패는 새 동의를 만들지 않으며 조회만으로 회복한다', (tester) async {
+    final harness = _ConsentHarness()..loseResponse = false;
+    final container = (await tester.runAsync(harness.signIn))!;
+    await _mountConsent(tester, container);
+    harness.failRead = true;
+    await _agreeAndAccept(tester);
+    expect(harness.posts, hasLength(1));
+    expect(find.text('동의하고 초대 수락'), findsNothing);
+    await _consentTap(tester, find.text('서버 상태 확인'));
+    expect(harness.posts, hasLength(1));
+    harness.failRead = false;
+    harness.state = {
+      ..._testState(),
+      'self': {..._testState()['self'] as Map, 'accepted': true},
+    };
+    await _consentTap(tester, find.text('서버 상태 확인'));
+    expect(harness.posts, hasLength(1));
+    expect(find.text('원본 동의 요청 다시 보내기'), findsNothing);
+    expect(find.text('조사 화면으로'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('영수증 없는 동의는 수락된 조회만으로 해결하거나 진행하지 않는다', (tester) async {
+    final harness = _ConsentHarness();
+    final container = (await tester.runAsync(harness.signIn))!;
+    await _mountConsent(tester, container);
+    await _agreeAndAccept(tester);
+    harness.state = {
+      ..._testState(),
+      'self': {..._testState()['self'] as Map, 'accepted': true},
+    };
+    await _consentTap(tester, find.text('서버 상태 확인'));
+    expect(harness.posts, hasLength(1));
+    expect(find.text('원본 동의 요청 다시 보내기'), findsOneWidget);
+    expect(find.text('조사 화면으로'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('성공 POST 뒤 조회 실패의 명시 재전송도 원본 키와 본문을 사용한다', (tester) async {
+    final harness = _ConsentHarness()..loseResponse = false;
+    final container = (await tester.runAsync(harness.signIn))!;
+    await _mountConsent(tester, container);
+    harness.failRead = true;
+    await _agreeAndAccept(tester);
+    final original = Map<String, dynamic>.from(harness.posts.single);
+    await _consentTap(tester, find.text('서버 상태 확인'));
+    expect(harness.posts, hasLength(1));
+    harness.failRead = false;
+    harness.state = {
+      ..._testState(),
+      'rev': '9',
+      'self': {..._testState()['self'] as Map, 'accepted': true},
+    };
+    await _consentTap(tester, find.text('원본 동의 요청 다시 보내기'));
+    expect(harness.posts, hasLength(2));
+    expect(harness.posts.last, equals(original));
+    expect(find.text('원본 동의 요청 다시 보내기'), findsNothing);
+    expect(find.text('조사 화면으로'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final status in [401, 403, 404, 410]) {
+    testWidgets('확정 거절 $status 는 고지와 원본 의도를 폐기한다', (tester) async {
+      final harness = _ConsentHarness();
+      final container = (await tester.runAsync(harness.signIn))!;
+      await _mountConsent(tester, container);
+      await _agreeAndAccept(tester);
+      harness.denial = status;
+      await _consentTap(tester, find.text('원본 동의 요청 다시 보내기'));
+      expect(harness.posts, hasLength(2));
+      expect(find.text('테스트 고지'), findsNothing);
+      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(find.text('원본 동의 요청 다시 보내기'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('계정 변경과 화면 폐기는 원본 동의 의도를 재사용하지 않는다', (tester) async {
+    final harness = _ConsentHarness();
+    final container = (await tester.runAsync(harness.signIn))!;
+    await _mountConsent(tester, container);
+    await _agreeAndAccept(tester);
+    final firstKey = harness.posts.single['requestKey'];
+    await tester.runAsync(
+      () => container
+          .read(authProvider.notifier)
+          .login('other@example.invalid', 'password'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('테스트 고지'), findsNothing);
+    expect(find.text('원본 동의 요청 다시 보내기'), findsNothing);
+    await _consentTap(tester, find.text('초대 다시 조회'));
+    await _agreeAndAccept(tester);
+    expect(harness.posts.last['requestKey'], isNot(firstKey));
+    final secondKey = harness.posts.last['requestKey'];
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _mountConsent(tester, container);
+    expect(
+      tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+      isFalse,
+    );
+    await _agreeAndAccept(tester);
+    expect(harness.posts.last['requestKey'], isNot(secondKey));
+    expect(harness.posts, hasLength(3));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final field in [
+    'revision',
+    'generation',
+    'policyCode',
+    'noticeHash',
+    'version',
+    'body',
+    'contact',
+  ]) {
+    testWidgets('동의 전 고지 $field 변경은 체크를 초기화하고 자동 전송하지 않는다', (tester) async {
+      final harness = _ConsentHarness();
+      final container = (await tester.runAsync(harness.signIn))!;
+      await _mountConsent(tester, container);
+      await _consentTap(tester, find.byType(CheckboxListTile));
+      if (field == 'revision') {
+        harness.state['rev'] = '8';
+        harness.notice[field] = '8';
+      } else if (field == 'generation') {
+        (harness.state['self'] as Map)['inviteGen'] = 4;
+        harness.notice[field] = 4;
+      } else {
+        harness.notice[field] = '바뀐 고지 값';
+      }
+      await _consentTap(tester, find.text('초대 다시 조회'));
+      await _consentShow(tester, find.byType(CheckboxListTile));
+      expect(
+        tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+        isFalse,
+      );
+      expect(harness.posts, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   test(
     'absent installation marker erases all auth before mark and read',
     () async {
@@ -441,15 +793,7 @@ void main() {
           } else {
             sent = Map<String, dynamic>.from(options.data as Map);
             handler.resolve(
-              Response(
-                requestOptions: options,
-                data: {
-                  'action': 'INVITATION_ACCEPT',
-                  'changed': true,
-                  'replayed': false,
-                  'current': {'testKey': 'test-1'},
-                },
-              ),
+              Response(requestOptions: options, data: _consentReceipt()),
             );
           }
         },
@@ -464,8 +808,9 @@ void main() {
     addTearDown(container.dispose);
     final auth = container.read(authProvider.notifier);
     await auth.login('tester@example.invalid', 'password');
-    await InvitationRepository(auth)
-        .accept(ConsentNoticeData(_notice()), requestKey());
+    await InvitationRepository(auth).accept(
+      InvitationAcceptIntent(ConsentNoticeData(_notice()), auth.generation),
+    );
     expect(sent!['expectedRev'], '7');
     expect(sent!['inviteGen'], 3);
     expect(sent!['blindDeclared'], false);
@@ -690,45 +1035,43 @@ void main() {
     expect(container.read(authProvider).error, contains('PLAYER_API_BASE_URL'));
   });
 
-  testWidgets(
-    'uncertain consent preserves checkbox and forbids resending until a read',
-    (tester) async {
-      final storage = _MemoryStorage();
-      final api = PlayerApi('https://example.invalid');
-      final container = ProviderContainer(
-        overrides: [
-          apiProvider.overrideWith((ref) => api),
-          authProvider.overrideWith(() => AuthController(storage: storage)),
-        ],
-      );
-      addTearDown(container.dispose);
-      final repository = _InvitationStub(container.read(authProvider.notifier))
-        ..fail = true;
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: ProviderScope(
-            overrides: [
-              invitationRepositoryProvider.overrideWith((ref) => repository),
-            ],
-            child: const MaterialApp(
-              home: InvitationDetailPage(testKey: 'test-1'),
-            ),
+  testWidgets('불확실한 동의는 체크와 원본 명시 재전송을 유지한다', (tester) async {
+    final storage = _MemoryStorage();
+    final api = PlayerApi('https://example.invalid');
+    final container = ProviderContainer(
+      overrides: [
+        apiProvider.overrideWith((ref) => api),
+        authProvider.overrideWith(() => AuthController(storage: storage)),
+      ],
+    );
+    addTearDown(container.dispose);
+    final repository = _InvitationStub(container.read(authProvider.notifier))
+      ..fail = true;
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: ProviderScope(
+          overrides: [
+            invitationRepositoryProvider.overrideWith((ref) => repository),
+          ],
+          child: const MaterialApp(
+            home: InvitationDetailPage(testKey: 'test-1'),
           ),
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(CheckboxListTile));
-      await tester.pump();
-      await tester.tap(find.text('동의하고 초대 수락'));
-      await tester.pumpAndSettle();
-      expect(repository.attempts, 1);
-      expect(
-        (tester.widget<CheckboxListTile>(find.byType(CheckboxListTile))).value,
-        isTrue,
-      );
-      expect(find.text('동의하고 초대 수락'), findsNothing);
-      expect(find.text('서버 상태 확인'), findsOneWidget);
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pump();
+    await tester.tap(find.text('동의하고 초대 수락'));
+    await tester.pumpAndSettle();
+    expect(repository.attempts, 1);
+    expect(
+      (tester.widget<CheckboxListTile>(find.byType(CheckboxListTile))).value,
+      isTrue,
+    );
+    expect(find.text('동의하고 초대 수락'), findsNothing);
+    await tester.scrollUntilVisible(find.text('서버 상태 확인'), 150);
+    expect(find.text('서버 상태 확인'), findsOneWidget);
+  });
 }

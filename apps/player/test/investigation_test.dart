@@ -568,6 +568,42 @@ void main() {
     }
   });
 
+  testWidgets('상대 동의 전에는 활동을 보내지 않고 새 동의 상태에서만 접속을 갱신한다', (tester) async {
+    final api = PlayerApi('https://example.invalid');
+    var partnerAccepted = false;
+    var reads = 0;
+    var heartbeats = 0;
+    var mutations = 0;
+    _intercept(api, (options, handler) {
+      if (options.uri.path.endsWith('/heartbeat')) {
+        heartbeats++;
+        handler.resolve(Response(requestOptions: options, statusCode: 204));
+      } else if (options.method == 'GET') {
+        reads++;
+        final state = _waitingState();
+        (state['partner'] as Map)['accepted'] = partnerAccepted;
+        handler.resolve(Response(requestOptions: options, data: state));
+      } else {
+        mutations++;
+        handler.reject(DioException(requestOptions: options));
+      }
+    });
+    final (container, _) = (await tester.runAsync(() => _signedIn(api)))!;
+    await _mount(tester, container);
+    await _until(tester, () => reads > 0);
+    await tester.pump(const Duration(seconds: 16));
+    await tester.pump();
+    expect(heartbeats, 0);
+    expect(mutations, 0);
+    expect(find.text('준비하기'), findsNothing);
+    partnerAccepted = true;
+    await _tap(tester, '서버 상태 다시 조회');
+    await _until(tester, () => heartbeats == 1);
+    expect(find.text('준비하기'), findsOneWidget);
+    expect(mutations, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final malformed in [false, true]) {
     testWidgets(
       malformed
@@ -1505,6 +1541,57 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('네이티브 종료는 개인 기록을 폐기하고 실제 결과 흐름을 유지한다', (tester) async {
+    final api = PlayerApi('https://example.invalid');
+    var ended = false;
+    var resultReads = 0;
+    final mutations = <String>[];
+    _intercept(api, (options, handler) {
+      if (options.uri.path.endsWith('/heartbeat')) {
+        handler.resolve(Response(requestOptions: options, statusCode: 204));
+      } else if (options.uri.path.endsWith('/materials')) {
+        handler.resolve(Response(requestOptions: options, data: _materials()));
+      } else if (options.uri.path.endsWith('/report')) {
+        handler.resolve(
+          Response(
+            requestOptions: options,
+            data: {..._sharedReport(), 'draftRev': '0'},
+          ),
+        );
+      } else if (options.uri.path.endsWith('/result')) {
+        resultReads++;
+        handler.resolve(
+          Response(requestOptions: options, data: _endedResult()),
+        );
+      } else if (options.method == 'GET') {
+        handler.resolve(
+          Response(
+            requestOptions: options,
+            data: ended ? _endedState() : _runningState(),
+          ),
+        );
+      } else {
+        mutations.add(options.uri.path);
+        handler.reject(DioException(requestOptions: options));
+      }
+    });
+    final (container, _) = (await tester.runAsync(() => _signedIn(api)))!;
+    await _mount(tester, container);
+    await _show(tester, _notesField);
+    await tester.enterText(_notesField, '종료 때 폐기할 개인 기록');
+    final notes = tester.widget<TextField>(_notesField).controller!;
+    ended = true;
+    await _tap(tester, '서버 상태 다시 조회');
+    await _show(tester, find.text('본인 피드백 제출'));
+    expect(resultReads, greaterThan(0));
+    expect(notes.text, isEmpty);
+    expect(_notesField, findsNothing);
+    expect(find.text('조사 포기'), findsNothing);
+    expect(find.textContaining('최종 점수'), findsNothing);
+    expect(mutations, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'transient report loss hides consent and notes; revocation purges role notes',

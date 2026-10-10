@@ -49,8 +49,23 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                 .content(body);
     }
 
+    /** 단일 43자 access 자격으로 웹 회원 확인 요청을 만든다. */
     private MockHttpServletRequestBuilder me(String access) {
-        return get("/api/member/auth/me")
+        return protectedWeb("GET", "/api/member/auth/me", access);
+    }
+
+    /**
+     * 실제 HTTPS authority와 단일 웹 Bearer로 보호 요청을 만든다.
+     *
+     * @param method 검사할 HTTP 메서드(대문자, null 불가)
+     * @param path query를 포함할 수 있는 내부 API 경로(null 불가)
+     * @param access 실제 로그인으로 발급받은 43자 접근 자격(null 불가)
+     * @return 실제 dispatcher에 전달할 요청
+     */
+    private MockHttpServletRequestBuilder protectedWeb(String method, String path, String access) {
+        return org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(
+                        org.springframework.http.HttpMethod.valueOf(method),
+                        java.net.URI.create(path))
                 .secure(true)
                 .with(
                         request -> {
@@ -62,6 +77,302 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                 .header("X-Sicha-Player-Web", "1")
                 .header("Sec-Fetch-Site", "same-origin")
                 .header("Authorization", "Bearer " + access);
+    }
+
+    /**
+     * 실제 dispatcher의 JSON 응답을 읽으며 변이 본문은 원래 값 그대로 전달한다.
+     *
+     * @param method GET 또는 POST
+     * @param path query를 포함할 수 있는 내부 API 경로
+     * @param access 실제 로그인으로 발급받은 접근 자격
+     * @param value POST의 실제 의도 본문이며 GET이면 null
+     * @return 성공 응답의 JSON 원문 구조
+     * @throws Exception 요청 실행 또는 JSON 해석에 실패한 경우
+     */
+    private JsonNode protectedJson(String method, String path, String access, Object value)
+            throws Exception {
+        var request = protectedWeb(method, path, access);
+        if (value != null)
+            request.contentType("application/json").content(JSON.writeValueAsBytes(value));
+        var result = mvc.perform(request).andExpect(status().isOk()).andReturn();
+        assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        return body(result);
+    }
+
+    /** 웹 허용 목록·raw 커서·중복 헤더는 실제 PG 회원 자격을 사용해 검사한다. */
+    @Test
+    void browserBearerAllowlistAndRawCursorBoundary() throws Exception {
+        playtestPolicy();
+        String email = "web-boundary-" + UUID.randomUUID() + "@example.invalid";
+        var nativeIssued = account(email);
+        String access = body(login(email, UUID.randomUUID())).path("accessToken").asText();
+        var identity = protectedJson("GET", "/api/playtests/identity", access, null);
+        assertThat(identity.path("memberKey").asText())
+                .isEqualTo(
+                        invitations
+                                .getMemberIdentity(
+                                        nativeIssued.path("accessToken").asText(),
+                                        UUID.randomUUID())
+                                .memberKey()
+                                .toString());
+        for (String query :
+                List.of(
+                        "",
+                        "?cursor=1",
+                        "?cursor=9223372036854775807",
+                        "?size=1",
+                        "?size=20",
+                        "?size=100",
+                        "?cursor=1&size=20",
+                        "?size=100&cursor=9223372036854775807")) {
+            assertThat(
+                            protectedJson("GET", "/api/playtests/invitations" + query, access, null)
+                                    .path("items"))
+                    .isEmpty();
+        }
+        for (String query :
+                List.of(
+                        "cursor=0",
+                        "cursor=-1",
+                        "cursor=01",
+                        "cursor=+1",
+                        "cursor=1&cursor=2",
+                        "cursor=%31",
+                        "cursor=9223372036854775808",
+                        "cursor=10000000000000000000",
+                        "cursor=",
+                        "size=0",
+                        "size=101",
+                        "size=01",
+                        "size=%32%30",
+                        "size=20&size=20",
+                        "cursor=1&size=20&size=20",
+                        "size=10000000000000000000",
+                        "other=1")) {
+            mvc.perform(protectedWeb("GET", "/api/playtests/invitations?" + query, access))
+                    .andExpect(status().isBadRequest());
+        }
+        String key = UUID.randomUUID().toString();
+        for (String suffix : List.of("", "/policy-notice", "/materials")) {
+            mvc.perform(protectedWeb("GET", "/api/playtests/" + key + suffix, access))
+                    .andExpect(status().isNotFound());
+        }
+        for (String path :
+                List.of(
+                        "/api/playtests/" + key + "/report",
+                        "/api/playtests/" + key + "/result",
+                        "/api/playtests/" + key + "/forfeit",
+                        "/api/playtests/" + key + "/feedback",
+                        "/api/playtests/" + key + "/report/proposals",
+                        "/api/playtests/" + key + "/hints/4/open",
+                        "/api/playtests/" + key.toUpperCase(),
+                        "/api/playtests/11111111-1111-1111-8111-111111111111",
+                        "/api/playtests/not-a-uuid")) {
+            for (String method : List.of("GET", "POST", "PATCH")) {
+                mvc.perform(
+                                protectedWeb(method, path, access)
+                                        .contentType("application/json")
+                                        .content("{}"))
+                        .andExpect(status().isForbidden());
+            }
+        }
+        for (String method : List.of("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")) {
+            mvc.perform(protectedWeb(method, "/api/playtests/identity", access))
+                    .andExpect(status().isForbidden());
+        }
+        for (String suffix :
+                List.of(
+                        "accept",
+                        "ready",
+                        "start",
+                        "heartbeat",
+                        "hints/1/open",
+                        "hints/2/open",
+                        "hints/3/open")) {
+            String path = "/api/playtests/" + key + "/" + suffix;
+            for (String method : List.of("GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")) {
+                mvc.perform(protectedWeb(method, path, access)).andExpect(status().isForbidden());
+            }
+        }
+        for (String suffix : List.of("", "/policy-notice", "/materials")) {
+            for (String method : List.of("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")) {
+                mvc.perform(protectedWeb(method, "/api/playtests/" + key + suffix, access))
+                        .andExpect(status().isForbidden());
+            }
+        }
+        for (int level : List.of(2, 3)) {
+            mvc.perform(
+                            protectedWeb(
+                                            "POST",
+                                            "/api/playtests/" + key + "/hints/" + level + "/open",
+                                            access)
+                                    .contentType("application/json")
+                                    .content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(protectedWeb("GET", "/api/playtests/identity?cursor=1", access))
+                .andExpect(status().isBadRequest());
+        mvc.perform(me(access).header("Cookie", "nonsecret=probe"))
+                .andExpect(status().isForbidden());
+        mvc.perform(me(access).header("Origin", "https://foreign.example.invalid"))
+                .andExpect(status().isForbidden());
+        for (String header : List.of("Authorization", "X-Sicha-Player-Web", "Sec-Fetch-Site")) {
+            String value =
+                    switch (header) {
+                        case "Authorization" -> "Bearer " + access;
+                        case "X-Sicha-Player-Web" -> "1";
+                        default -> "same-origin";
+                    };
+            mvc.perform(me(access).header(header, value))
+                    .andExpect(status().is(header.equals("Authorization") ? 401 : 403));
+        }
+        mvc.perform(
+                        me(access)
+                                .with(
+                                        request -> {
+                                            request.removeHeader("X-Sicha-Player-Web");
+                                            request.addHeader("X-Sicha-Player-Web", "0");
+                                            return request;
+                                        }))
+                .andExpect(status().isForbidden());
+        mvc.perform(me(access).header("Origin", ORIGIN, ORIGIN)).andExpect(status().isForbidden());
+        mvc.perform(
+                        me(access)
+                                .with(
+                                        request -> {
+                                            request.removeHeader("Sec-Fetch-Site");
+                                            return request;
+                                        }))
+                .andExpect(status().isForbidden());
+        mvc.perform(me(access).header("Sec-Fetch-Mode", "navigate"))
+                .andExpect(status().isForbidden());
+        mvc.perform(me(access).header("Sec-Fetch-Dest", "document"))
+                .andExpect(status().isForbidden());
+        mvc.perform(me(access).header("Origin", ORIGIN)).andExpect(status().isOk());
+    }
+
+    /** 실제 웹 발급 자격 두 개로 고지부터 역할 자료·힌트까지 거래·감사를 검증한다. */
+    @Test
+    void pairedBrowserConsentReadyStartAndRoleIsolation() throws Exception {
+        playtestPolicy();
+        String emailA = "web-pair-a-" + UUID.randomUUID() + "@example.invalid";
+        String emailB = "web-pair-b-" + UUID.randomUUID() + "@example.invalid";
+        var nativeA = account(emailA);
+        var nativeB = account(emailB);
+        UUID key =
+                invitation(
+                        List.of(
+                                invitations
+                                        .getMemberIdentity(
+                                                nativeA.path("accessToken").asText(),
+                                                UUID.randomUUID())
+                                        .memberKey(),
+                                invitations
+                                        .getMemberIdentity(
+                                                nativeB.path("accessToken").asText(),
+                                                UUID.randomUUID())
+                                        .memberKey()));
+        String a = body(login(emailA, UUID.randomUUID())).path("accessToken").asText();
+        String b = body(login(emailB, UUID.randomUUID())).path("accessToken").asText();
+        String base = "/api/playtests/" + key;
+        Map<String, Object> original = null;
+        for (String access : List.of(a, b)) {
+            var notice = protectedJson("GET", base + "/policy-notice", access, null);
+            var intent =
+                    Map.<String, Object>of(
+                            "expectedRev",
+                            notice.path("revision").asText(),
+                            "inviteGen",
+                            notice.path("generation").asInt(),
+                            "blindDeclared",
+                            false,
+                            "policyCode",
+                            notice.path("policyCode").asText(),
+                            "noticeHash",
+                            notice.path("noticeHash").asText(),
+                            "requestKey",
+                            UUID.randomUUID().toString());
+            if (original == null) original = intent;
+            var accepted = protectedJson("POST", base + "/accept", access, intent);
+            assertThat(accepted.path("action").asText()).isEqualTo("INVITATION_ACCEPT");
+            assertThat(accepted.path("changed").asBoolean()).isTrue();
+            assertThat(accepted.path("replayed").asBoolean()).isFalse();
+        }
+        for (String access : List.of(a, b)) {
+            mvc.perform(
+                            protectedWeb("POST", base + "/heartbeat", access)
+                                    .contentType("application/json")
+                                    .content("{}"))
+                    .andExpect(status().isNoContent());
+        }
+        var replay = protectedJson("POST", base + "/accept", a, original);
+        assertThat(replay.path("replayed").asBoolean()).isTrue();
+        assertThat(replay.path("original").path("rev").asText()).isEqualTo("1");
+        assertThat(replay.path("current").path("rev").asText()).isEqualTo("2");
+        for (String access : List.of(a, b)) {
+            String rev = protectedJson("GET", base, access, null).path("rev").asText();
+            var ready =
+                    protectedJson(
+                            "POST",
+                            base + "/ready",
+                            access,
+                            Map.of(
+                                    "expectedRev",
+                                    rev,
+                                    "ready",
+                                    true,
+                                    "requestKey",
+                                    UUID.randomUUID().toString()));
+            assertThat(ready.path("action").asText()).isEqualTo("TEST_READY");
+        }
+        var started =
+                protectedJson(
+                        "POST",
+                        base + "/start",
+                        a,
+                        Map.of("expectedRev", "4", "requestKey", UUID.randomUUID().toString()));
+        assertThat(started.path("action").asText()).isEqualTo("TEST_START");
+        assertThat(started.path("current").path("state").asText()).isEqualTo("RUNNING");
+        var materialsA = protectedJson("GET", base + "/materials", a, null);
+        var materialsB = protectedJson("GET", base + "/materials", b, null);
+        assertThat(materialsA.path("role").path("code"))
+                .isNotEqualTo(materialsB.path("role").path("code"));
+        for (var material : List.of(materialsA, materialsB)) {
+            String role = material.path("role").path("code").asText();
+            assertThat(role).isIn("R1", "R2");
+            assertThat(material.path("clues")).hasSize(1);
+            assertThat(material.path("clues").get(0).path("code").asText())
+                    .isEqualTo(role.equals("R1") ? "C1" : "C2");
+            assertThat(material.toString())
+                    .doesNotContain("secretText", "sourceText", "gradeSamples", "ruleData");
+        }
+        var hint =
+                protectedJson(
+                        "POST",
+                        base + "/hints/1/open",
+                        a,
+                        Map.of("expectedRev", "5", "requestKey", UUID.randomUUID().toString()));
+        assertThat(hint.path("action").asText()).isEqualTo("HINT_OPEN");
+        assertThat(protectedJson("GET", base + "/materials", a, null).path("openedHints"))
+                .hasSize(1);
+        assertThat(protectedJson("GET", base + "/materials", b, null).path("openedHints"))
+                .isEmpty();
+        for (String table : List.of("test_action", "test_audit")) {
+            for (var expected :
+                    Map.of("INVITATION_ACCEPT", 2, "TEST_READY", 2, "TEST_START", 1, "HINT_OPEN", 1)
+                            .entrySet()) {
+                assertThat(
+                                db.queryForObject(
+                                        "SELECT count(*) FROM "
+                                                + table
+                                                + " WHERE scope_key=? AND action=?",
+                                        Integer.class,
+                                        "test:" + key,
+                                        expected.getKey()))
+                        .isEqualTo(expected.getValue());
+            }
+        }
     }
 
     private MvcResult login(String email, UUID epoch) throws Exception {

@@ -94,11 +94,38 @@ public final class MemberWebPolicy {
         if (request.getHeader("Sec-Fetch-Dest") != null
                 && !"empty".equals(single(request, "Sec-Fetch-Dest"))) throw forbidden();
         if (request.getHeader("Sec-Fetch-User") != null) throw forbidden();
-        if (request.getQueryString() != null) throw AuthException.badRequest("INVALID_REQUEST");
+        if (request.getQueryString() != null && !invitationQuery(request))
+            throw AuthException.badRequest("INVALID_REQUEST");
         if (cookieAuth) {
             if (request.getHeader("Authorization") != null) throw forbidden();
             epoch(request);
         } else if (request.getHeader("Cookie") != null) throw forbidden();
+    }
+
+    /** 웹 목록은 선택적 양의 long 커서와 1~100 크기만 허용하며 중복·다른 query는 거절한다. */
+    private static boolean invitationQuery(HttpServletRequest request) {
+        String query = request.getQueryString();
+        if (!"GET".equals(request.getMethod())
+                || !request.getRequestURI().equals(MemberSecurityConfig.PLAYTEST + "/invitations")
+                || query == null) return false;
+        String[] fields = query.split("&", -1);
+        if (fields.length > 2) return false;
+        boolean cursor = false;
+        boolean size = false;
+        try {
+            for (String field : fields) {
+                if (field.matches("cursor=[1-9][0-9]{0,18}") && !cursor) {
+                    cursor = true;
+                    if (Long.parseLong(field.substring(7)) <= 0) return false;
+                } else if (field.matches("size=[1-9][0-9]{0,2}") && !size) {
+                    size = true;
+                    if (Integer.parseInt(field.substring(5)) > 100) return false;
+                } else return false;
+            }
+            return true;
+        } catch (NumberFormatException failure) {
+            return false;
+        }
     }
 
     /** POST에서 canonical UUID v4 epoch를 정확히 한 번 요구한다. */

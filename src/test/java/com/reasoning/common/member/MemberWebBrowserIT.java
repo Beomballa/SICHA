@@ -17,6 +17,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -240,6 +241,180 @@ public class MemberWebBrowserIT extends LocalMemberAuthIT {
                 observations.set(name, value);
             }
             System.out.println("PLAYER_WEB_AUTH_EVIDENCE " + safeResult);
+        } finally {
+            Files.deleteIfExists(receipt);
+            Files.deleteIfExists(errors);
+        }
+    }
+
+    /** 별도 두 LOCAL 계정의 실제 초대를 컴파일된 Flutter 조사 화면에서 진행한다. */
+    @Test
+    void webInvestigationLifecycle() throws Exception {
+        playtestPolicy();
+        String emailA = "web-investigation-a-" + UUID.randomUUID() + "@example.invalid";
+        String emailB = "web-investigation-b-" + UUID.randomUUID() + "@example.invalid";
+        var nativeA = account(emailA);
+        var nativeB = account(emailB);
+        UUID memberA =
+                invitations
+                        .getMemberIdentity(nativeA.path("accessToken").asText(), UUID.randomUUID())
+                        .memberKey();
+        UUID memberB =
+                invitations
+                        .getMemberIdentity(nativeB.path("accessToken").asText(), UUID.randomUUID())
+                        .memberKey();
+        UUID key = invitation(List.of(memberA, memberB));
+        List<Long> memberIds =
+                List.of(nativeA, nativeB).stream()
+                        .map(
+                                issued ->
+                                        db.queryForObject(
+                                                "SELECT member_id FROM member_session WHERE"
+                                                    + " session_key=?",
+                                                Long.class,
+                                                UUID.fromString(
+                                                        issued.path("sessionKey").asText())))
+                        .toList();
+        Path receipt = Files.createTempFile("player-investigation-result-", ".json");
+        Path errors = Files.createTempFile("player-investigation-error-", ".txt");
+        try {
+            Process browser =
+                    new ProcessBuilder("node", "src/test/browser/player-web-investigation.mjs")
+                            .redirectOutput(receipt.toFile())
+                            .redirectError(errors.toFile())
+                            .start();
+            try (var input = browser.getOutputStream()) {
+                JSON.writeValue(
+                        input,
+                        Map.of(
+                                "origin",
+                                ORIGIN.toString(),
+                                "testKey",
+                                key.toString(),
+                                "accounts",
+                                List.of(
+                                        Map.of("email", emailA, "memberKey", memberA.toString()),
+                                        Map.of("email", emailB, "memberKey", memberB.toString())),
+                                "password",
+                                "Synthetic-member-password-987!"));
+            }
+            if (!browser.waitFor(150, TimeUnit.SECONDS)) {
+                browser.destroyForcibly();
+                throw new AssertionError("Compiled Flutter investigation deadline exceeded");
+            }
+            assertThat(browser.exitValue())
+                    .withFailMessage("Browser investigation failed: %s", Files.readString(errors))
+                    .isZero();
+            var result = JSON.readTree(receipt.toFile());
+            assertThat(result.path("ok").asBoolean()).isTrue();
+            var safe = JSON.createObjectNode().put("ok", true);
+            var counts = safe.putObject("counters");
+            for (String name :
+                    List.of(
+                            "login",
+                            "logout",
+                            "accept",
+                            "ready",
+                            "start",
+                            "hint",
+                            "heartbeat",
+                            "materials",
+                            "validatedMaterials",
+                            "droppedAccept",
+                            "originalReplay",
+                            "boundaryProbes",
+                            "backgroundHidden",
+                            "sameRoleRecovered",
+                            "accountPurged",
+                            "runtimeErrors",
+                            "excludedCalls")) {
+                var value = result.path("counters").path(name);
+                assertThat(value.isIntegralNumber() && value.canConvertToLong()).isTrue();
+                assertThat(value.longValue()).isBetween(0L, 9007199254740991L);
+                counts.set(name, value);
+            }
+            assertThat(counts.path("accept").asInt()).isEqualTo(3);
+            assertThat(counts.path("ready").asInt()).isEqualTo(2);
+            assertThat(counts.path("start").asInt()).isEqualTo(1);
+            assertThat(counts.path("hint").asInt()).isEqualTo(1);
+            assertThat(counts.path("materials").asInt())
+                    .isPositive()
+                    .isEqualTo(counts.path("validatedMaterials").asInt());
+            for (String name :
+                    List.of(
+                            "droppedAccept",
+                            "originalReplay",
+                            "backgroundHidden",
+                            "sameRoleRecovered",
+                            "accountPurged")) {
+                assertThat(counts.path(name).asInt()).isEqualTo(1);
+            }
+            assertThat(counts.path("runtimeErrors").asInt()).isZero();
+            assertThat(counts.path("excludedCalls").asInt()).isZero();
+            for (long member : memberIds) {
+                assertThat(
+                                db.queryForObject(
+                                        "SELECT count(*) FROM member_session WHERE member_id=? AND"
+                                            + " revoked_at IS NULL",
+                                        Integer.class,
+                                        member))
+                        .isEqualTo(1);
+                assertThat(
+                                db.queryForObject(
+                                        "SELECT count(*) FROM member_session WHERE member_id=? AND"
+                                            + " revoke_code='REFRESH_REUSED'",
+                                        Integer.class,
+                                        member))
+                        .isZero();
+            }
+            assertThat(
+                            db.queryForList(
+                                    "SELECT session_key FROM member_session WHERE member_id IN"
+                                        + " (?,?) AND revoked_at IS NULL",
+                                    UUID.class,
+                                    memberIds.get(0),
+                                    memberIds.get(1)))
+                    .containsExactlyInAnyOrder(
+                            UUID.fromString(nativeA.path("sessionKey").asText()),
+                            UUID.fromString(nativeB.path("sessionKey").asText()));
+            var participants =
+                    db.queryForList(
+                            "SELECT slot,member_id,invite_state,role_code FROM test_member m JOIN"
+                                + " play_test t ON t.id=m.test_id WHERE t.test_key=? ORDER BY slot",
+                            key);
+            assertThat(participants).hasSize(2);
+            assertThat(participants.stream().map(row -> row.get("slot")).toList())
+                    .containsExactly(1, 2);
+            assertThat(participants.stream().map(row -> row.get("member_id")).toList())
+                    .containsExactlyElementsOf(memberIds);
+            assertThat(participants.stream().map(row -> row.get("invite_state")).toList())
+                    .containsOnly("ACCEPTED");
+            assertThat(participants.stream().map(row -> row.get("role_code")).toList())
+                    .containsExactlyInAnyOrder("R1", "R2");
+            for (String table : List.of("test_action", "test_audit")) {
+                for (var expected :
+                        Map.of(
+                                        "INVITATION_ACCEPT",
+                                        2,
+                                        "TEST_READY",
+                                        2,
+                                        "TEST_START",
+                                        1,
+                                        "HINT_OPEN",
+                                        1)
+                                .entrySet()) {
+                    assertThat(
+                                    db.queryForObject(
+                                            "SELECT count(*) FROM "
+                                                    + table
+                                                    + " WHERE scope_key=? AND action=?",
+                                            Integer.class,
+                                            "test:" + key,
+                                            expected.getKey()))
+                            .isEqualTo(expected.getValue());
+                }
+            }
+            System.out.println("PLAYER_WEB_INVESTIGATION_EVIDENCE " + safe);
         } finally {
             Files.deleteIfExists(receipt);
             Files.deleteIfExists(errors);

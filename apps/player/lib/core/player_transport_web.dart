@@ -40,7 +40,7 @@ void _checkBrowser(String origin) {
   }
 }
 
-/// 쿠키 인증 3개 POST와 Bearer me GET만 허용하며 redirect를 따라가지 않는다.
+/// 쿠키 인증 3개 POST와 Bearer 회원 확인·초대·조사만 허용하며 redirect를 따라가지 않는다.
 /// Dio의 직렬화된 본문은 UTF-8 JSON으로 검증하고 제한 초과는 잘라내지 않고 거부한다.
 class PlayerFetchAdapter implements HttpClientAdapter {
   PlayerFetchAdapter(this._dio, this._origin);
@@ -66,6 +66,13 @@ class PlayerFetchAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    // 본문 수집 중 호출자가 원래 options를 바꿔도 URL·헤더·credentials를 섞지 않는다.
+    options = options.copyWith(
+      headers: Map<String, dynamic>.unmodifiable(options.headers),
+      queryParameters: Map<String, dynamic>.unmodifiable(
+        options.queryParameters,
+      ),
+    );
     final cookieAuth = _validate(options);
     final controller = web.AbortController();
     _active.add(controller);
@@ -213,15 +220,49 @@ class PlayerFetchAdapter implements HttpClientAdapter {
     }
   }
 
+  /// 목록의 선택적 long 커서와 1~100 크기만 허용하고 중복·인코딩 우회는 거절한다.
+  bool _invitationQuery(String query) {
+    final fields = query.split('&');
+    if (fields.length > 2) return false;
+    var cursor = false;
+    var size = false;
+    for (final field in fields) {
+      if (RegExp(r'^cursor=[1-9][0-9]{0,18}$').hasMatch(field) && !cursor) {
+        cursor = true;
+        if (BigInt.parse(field.substring(7)) >
+            BigInt.parse('9223372036854775807')) {
+          return false;
+        }
+      } else if (RegExp(r'^size=[1-9][0-9]{0,2}$').hasMatch(field) && !size) {
+        size = true;
+        if (int.parse(field.substring(5)) > 100) return false;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool _validate(RequestOptions options) {
     _checkBrowser(_origin);
     final cookieAuth =
         options.method == 'POST' && _authPaths.contains(options.path);
-    final me = options.method == 'GET' && options.path == '/api/member/auth/me';
+    final resource = Uri.tryParse(options.path);
+    final path = options.path.split('?').first;
+    final bearerRoute = _bearerRoute(options.method, path);
     if (_closed ||
         _origin != _canonicalOrigin(_dio.options.baseUrl) ||
         _origin != _canonicalOrigin(options.baseUrl) ||
-        (!cookieAuth && !me) ||
+        (!cookieAuth && !bearerRoute) ||
+        resource == null ||
+        resource.hasScheme ||
+        resource.hasAuthority ||
+        resource.hasFragment ||
+        resource.path != path ||
+        (resource.hasQuery &&
+            !(options.method == 'GET' &&
+                path == '/api/playtests/invitations' &&
+                _invitationQuery(resource.query))) ||
         options.queryParameters.isNotEmpty ||
         options.uri.toString() != '$_origin${options.path}') {
       throw PlayerConfigurationError();
@@ -245,7 +286,7 @@ class PlayerFetchAdapter implements HttpClientAdapter {
     }
     final length = headers['content-length'] as String?;
     if (length != null &&
-        (!cookieAuth ||
+        (options.method != 'POST' ||
             !RegExp(r'^(0|[1-9][0-9]*)$').hasMatch(length) ||
             int.tryParse(length) == null ||
             int.parse(length) > _requestLimit)) {
@@ -263,15 +304,34 @@ class PlayerFetchAdapter implements HttpClientAdapter {
             headers['content-type'] != 'application/json')) {
       throw PlayerConfigurationError();
     }
-    if (me &&
+    if (bearerRoute &&
         (headers.containsKey('x-sicha-player-web-epoch') ||
-            !(headers['authorization'] as String? ?? '').startsWith(
-              'Bearer ',
-            ) ||
-            (headers['authorization'] as String).length <= 7)) {
+            !RegExp(r'^Bearer [A-Za-z0-9_-]{43}$')
+                .hasMatch(headers['authorization'] as String? ?? '') ||
+            (options.method == 'POST' &&
+                headers['content-type'] != 'application/json'))) {
       throw PlayerConfigurationError();
     }
     return cookieAuth;
+  }
+
+  /// 정규 UUID v4와 고정 메서드만 허용하며 보고서·채점·결과는 웹 3단계까지 닫는다.
+  bool _bearerRoute(String method, String path) {
+    const key =
+        r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+    if (method == 'GET') {
+      return const {
+            '/api/member/auth/me',
+            '/api/playtests/identity',
+            '/api/playtests/invitations',
+          }.contains(path) ||
+          RegExp('^/api/playtests/$key(?:/policy-notice|/materials)?\$')
+              .hasMatch(path);
+    }
+    return method == 'POST' &&
+        RegExp(
+          '^/api/playtests/$key/(?:accept|ready|start|heartbeat|hints/[1-3]/open)\$',
+        ).hasMatch(path);
   }
 
   Future<Uint8List> _requestBytes(StreamIterator<Uint8List> iterator) async {

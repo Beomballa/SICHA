@@ -151,7 +151,7 @@ public final class PlaytestMemberController {
         noQuery(request);
         body(request, Set.of());
         investigation.heartbeat(MemberSecurityConfig.bearer(request), uuid(testKey), id(request));
-        return ResponseEntity.noContent().header("Cache-Control", "no-store").build();
+        return ResponseEntity.noContent().build();
     }
 
     /** 자신의 확정된 역할로 허용된 고정 사본 자료만 읽는다. */
@@ -214,7 +214,6 @@ public final class PlaytestMemberController {
         JsonNode value =
                 body(request, Set.of("expectedRev", "expectedDraftRev", "requestKey"), 524288);
         return ResponseEntity.status(201)
-                .header("Cache-Control", "no-store")
                 .body(
                         reports.propose(
                                 MemberSecurityConfig.bearer(request),
@@ -283,14 +282,12 @@ public final class PlaytestMemberController {
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<?> known(AuthException failure, HttpServletRequest request) {
         return ResponseEntity.status(failure.status())
-                .header("Cache-Control", "no-store")
                 .body(MemberSecurityConfig.errorBody(request, failure.code()));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> unavailable(Exception failure, HttpServletRequest request) {
         return ResponseEntity.status(503)
-                .header("Cache-Control", "no-store")
                 .body(MemberSecurityConfig.errorBody(request, "PLAYTEST_UNAVAILABLE"));
     }
 
@@ -412,6 +409,6 @@ public final class PlaytestMemberController {
     }
 
     private static ResponseEntity<?> ok(Object value) {
-        return ResponseEntity.ok().header("Cache-Control", "no-store").body(value);
+        return ResponseEntity.ok(value);
     }
 }

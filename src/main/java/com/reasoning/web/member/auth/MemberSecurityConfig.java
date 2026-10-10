@@ -152,6 +152,25 @@ public class MemberSecurityConfig {
         return headers.getFirst().substring(7);
     }
 
+    /** 웹 2단계는 현재 회원 확인·초대·조사만 허용하고 보고서와 결과 경로는 열지 않는다. */
+    static boolean browserBearerRoute(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if ("GET".equals(request.getMethod())) {
+            return path.equals(AUTH + "/me")
+                    || path.equals(PLAYTEST + "/identity")
+                    || path.equals(PLAYTEST + "/invitations")
+                    || path.matches(PLAYTEST + "/" + TEST_KEY)
+                    || path.matches(PLAYTEST + "/" + TEST_KEY + "/policy-notice")
+                    || path.matches(PLAYTEST + "/" + TEST_KEY + "/materials");
+        }
+        return "POST".equals(request.getMethod())
+                && (path.matches(PLAYTEST + "/" + TEST_KEY + "/accept")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/ready")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/start")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/heartbeat")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/hints/[1-3]/open"));
+    }
+
     /** 검증한 서버 주체만 접근 이력에 투영하고 토큰을 context에 저장하지 않는다. */
     static void principal(MemberAuthService.MemberPrincipal principal) {
         var context = SecurityContextHolder.createEmptyContext();
@@ -248,12 +267,11 @@ public class MemberSecurityConfig {
                     || request.getHeader(MemberWebPolicy.WEB) != null) {
                 try {
                     boolean cookieAuth = MemberWebPolicy.route(request);
-                    boolean me =
-                            "GET".equals(request.getMethod())
-                                    && request.getRequestURI().equals(AUTH + "/me");
-                    if (!cookieAuth && !me) throw new AuthException(403, "FORBIDDEN", "FORBIDDEN");
+                    boolean bearerRoute = browserBearerRoute(request);
+                    if (!cookieAuth && !bearerRoute)
+                        throw new AuthException(403, "FORBIDDEN", "FORBIDDEN");
                     web.admit(request, cookieAuth);
-                    if (me) principal(service.authenticate(bearer(request), false));
+                    if (bearerRoute) principal(service.authenticate(bearer(request), false));
                 } catch (AuthException failure) {
                     error(mapper, request, response, failure.status(), failure.code());
                     return;

@@ -116,10 +116,11 @@ tasks.register('playerWebBrowserTest', Test) {
     include '**/MemberWebBrowserIT.class'
     filter {
         includeTestsMatching 'com.reasoning.common.member.MemberWebBrowserIT.webAuthenticationLifecycle'
+        includeTestsMatching 'com.reasoning.common.member.MemberWebBrowserIT.webInvestigationLifecycle'
     }
     useJUnitPlatform()
     inputs.property('playerWebOrigin', providers.environmentVariable('PLAYER_WEB_TEST_ORIGIN').orElse(''))
-    inputs.files('src/test/browser/player-web-auth.mjs')
+    inputs.files('src/test/browser/player-web-auth.mjs', 'src/test/browser/player-web-investigation.mjs')
     doFirst {
         def origin = System.getenv('PLAYER_WEB_TEST_ORIGIN')
         def assets = System.getenv('PLAYER_WEB_TEST_ASSETS')
