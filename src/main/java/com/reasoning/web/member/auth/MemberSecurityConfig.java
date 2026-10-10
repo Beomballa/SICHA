@@ -152,7 +152,7 @@ public class MemberSecurityConfig {
         return headers.getFirst().substring(7);
     }
 
-    /** 웹 2단계는 현재 회원 확인·초대·조사만 허용하고 보고서와 결과 경로는 열지 않는다. */
+    /** 웹 Bearer는 회원 확인·초대·조사와 지정된 보고서 경로만 열고 나머지는 닫는다. */
     static boolean browserBearerRoute(HttpServletRequest request) {
         String path = request.getRequestURI();
         if ("GET".equals(request.getMethod())) {
@@ -161,14 +161,28 @@ public class MemberSecurityConfig {
                     || path.equals(PLAYTEST + "/invitations")
                     || path.matches(PLAYTEST + "/" + TEST_KEY)
                     || path.matches(PLAYTEST + "/" + TEST_KEY + "/policy-notice")
-                    || path.matches(PLAYTEST + "/" + TEST_KEY + "/materials");
+                    || path.matches(PLAYTEST + "/" + TEST_KEY + "/materials")
+                    || path.matches(PLAYTEST + "/" + TEST_KEY + "/report")
+                    || path.matches(PLAYTEST + "/" + TEST_KEY + "/result");
         }
+        if ("PATCH".equals(request.getMethod()))
+            return path.matches(PLAYTEST + "/" + TEST_KEY + "/report");
         return "POST".equals(request.getMethod())
                 && (path.matches(PLAYTEST + "/" + TEST_KEY + "/accept")
                         || path.matches(PLAYTEST + "/" + TEST_KEY + "/ready")
                         || path.matches(PLAYTEST + "/" + TEST_KEY + "/start")
                         || path.matches(PLAYTEST + "/" + TEST_KEY + "/heartbeat")
-                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/hints/[1-3]/open"));
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/hints/[1-3]/open")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/report/proposals")
+                        || path.matches(
+                                PLAYTEST
+                                        + "/"
+                                        + TEST_KEY
+                                        + "/report/proposals/"
+                                        + TEST_KEY
+                                        + "/respond")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/forfeit")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/feedback"));
     }
 
     /** 검증한 서버 주체만 접근 이력에 투영하고 토큰을 context에 저장하지 않는다. */

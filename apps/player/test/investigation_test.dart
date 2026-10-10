@@ -418,6 +418,79 @@ void main() {
     }
   });
 
+  test(
+    'report and feedback intents retain immutable original nested fields',
+    () {
+      for (final field in ['report', 'feedback']) {
+        final original = <String, dynamic>{'text': '원본 내용'};
+        final intent = InvestigationIntent(
+          'test-1',
+          7,
+          '/api/playtests/test-1/$field',
+          field == 'report' ? 'REPORT_EDIT' : 'TEST_FEEDBACK',
+          {field: original, 'requestKey': 'original-key'},
+        );
+        original['text'] = '후속 변경';
+        expect((intent.body[field] as Map)['text'], '원본 내용');
+        expect(
+          () => (intent.body[field] as Map)['text'] = '재전송 변조',
+          throwsUnsupportedError,
+        );
+        expect(
+          () => intent.body['requestKey'] = 'replacement-key',
+          throwsUnsupportedError,
+        );
+      }
+    },
+  );
+
+  test('report receipts require server draft revision without investigation clocks', () async {
+    final api = PlayerApi('https://example.invalid');
+    late Map<String, dynamic> receipt;
+    _intercept(api, (options, handler) {
+      handler.resolve(Response(requestOptions: options, data: receipt));
+    });
+    final (container, auth) = await _signedIn(api);
+    addTearDown(container.dispose);
+    final repo = InvestigationRepository(auth);
+    final intents = [
+      repo.editIntent(
+        'test-1',
+        '7',
+        '4',
+        _sharedReport()['report'] as Map<String, dynamic>,
+      ),
+      repo.proposeIntent('test-1', '7', '4'),
+      for (final decision in ['ACCEPT', 'REJECT', 'WITHDRAW'])
+        repo.respondIntent('test-1', '7', 'report-1', decision),
+      repo.forfeitIntent('test-1', '7'),
+      repo.feedbackIntent('test-1', {
+        'blockedAt': '',
+        'roleContribution': '',
+        'fairness': '',
+        'gradingConcern': '',
+      }),
+    ];
+    for (final intent in intents) {
+      receipt = _reportReceipt(intent.action)..['replayed'] = true;
+      await repo.send(intent);
+      for (final key in ['original', 'current']) {
+        for (final mutate in <void Function(Map<String, dynamic>)>[
+          (state) => state.remove('draftRev'),
+          (state) => state['draftRev'] = 4,
+          (state) => state['draftRev'] = '04',
+          (state) => state.remove('outcome'),
+          (state) => state['startedAt'] = null,
+          (state) => state['playDeadline'] = '2030-01-01T00:00:00Z',
+        ]) {
+          receipt = _reportReceipt(intent.action);
+          mutate(receipt[key] as Map<String, dynamic>);
+          await expectLater(repo.send(intent), throwsFormatException);
+        }
+      }
+    }
+  });
+
   test('authenticated PATCH refreshes once for concurrent edits and never retries a rejected mutation', () async {
     final api = PlayerApi('https://example.invalid');
     final sent = <RequestOptions>[];
@@ -864,6 +937,7 @@ void main() {
       await _mount(tester, container);
       await _show(tester, _notesField);
       await tester.enterText(_notesField, 'private-note');
+      final retiredNote = tester.widget<TextField>(_notesField);
       offline = true;
       await _tap(tester, '서버 상태 다시 조회');
       await _until(
@@ -879,6 +953,13 @@ void main() {
       expect(find.text('private-note'), findsNothing);
       materialReply.complete();
       materialReply = null;
+      await _show(tester, _notesField);
+      expect(
+        tester.widget<TextField>(_notesField).controller!.text,
+        'private-note',
+      );
+      retiredNote.onChanged!('retired-native-note');
+      await _tap(tester, '서버 상태 다시 조회');
       await _show(tester, _notesField);
       expect(
         tester.widget<TextField>(_notesField).controller!.text,
@@ -1188,7 +1269,7 @@ void main() {
             Response(
               requestOptions: options,
               data: _reportReceipt(
-                posts.length == 1 ? 'REPORT_PROPOSE' : 'REPORT_RESPOND',
+                posts.length == 1 ? 'REPORT_PROPOSE' : 'REPORT_ACCEPT',
               ),
             ),
           );
@@ -1408,7 +1489,7 @@ void main() {
   );
 
   testWidgets(
-    'unknown proposal retains exact request after refresh, notes and 409',
+    'unknown proposal survives ordinary 409 but definitive invitation 409 purges',
     (tester) async {
       final api = PlayerApi('https://example.invalid');
       final posts = <RequestOptions>[];
@@ -1444,7 +1525,17 @@ void main() {
               DioException(
                 requestOptions: options,
                 type: DioExceptionType.badResponse,
-                response: Response(requestOptions: options, statusCode: 409),
+                response: Response(
+                  requestOptions: options,
+                  statusCode: 409,
+                  data: posts.length >= 3
+                      ? {
+                          'code': 'INVITATION_INVALIDATED',
+                          'message': '무효화된 초대입니다.',
+                          'requestId': 'request-1',
+                        }
+                      : null,
+                ),
               ),
             );
           }
@@ -1486,15 +1577,110 @@ void main() {
         tester.widget<TextField>(_notesField).controller!.text,
         'role-private-note',
       );
+      await _tap(tester, '원본 요청 다시 보내기');
+      await _until(tester, () => posts.length == 3);
+      await _show(tester, _notesField);
+      expect(tester.widget<TextField>(_notesField).controller!.text, isEmpty);
+      expect(find.text('원본 요청 다시 보내기'), findsNothing);
+      expect(posts, hasLength(3));
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('forfeit confirmation binds revision and never reveals truth', (
+    tester,
+  ) async {
+    final api = PlayerApi('https://example.invalid');
+    final posts = <RequestOptions>[];
+    var revision = '7';
+    var ended = false;
+    var feedbackSubmitted = false;
+    _intercept(api, (options, handler) {
+      if (options.uri.path.endsWith('/heartbeat')) {
+        handler.resolve(Response(requestOptions: options, statusCode: 204));
+      } else if (options.method == 'POST') {
+        posts.add(options);
+        final feedback = options.uri.path.endsWith('/feedback');
+        if (feedback) {
+          feedbackSubmitted = true;
+        } else {
+          ended = true;
+        }
+        final receipt = _reportReceipt(
+          feedback ? 'TEST_FEEDBACK' : 'TEST_FORFEIT',
+          state: 'ENDED',
+        );
+        for (final key in ['original', 'current']) {
+          (receipt[key] as Map)['outcome'] = 'FORFEIT';
+        }
+        handler.resolve(Response(requestOptions: options, data: receipt));
+      } else if (options.uri.path.endsWith('/materials')) {
+        final materials = _materials();
+        (materials['basic'] as Map)['intro'] = 'forfeit-revision-$revision';
+        handler.resolve(Response(requestOptions: options, data: materials));
+      } else if (options.uri.path.endsWith('/report')) {
+        handler.resolve(
+          Response(requestOptions: options, data: _sharedReport()),
+        );
+      } else if (options.uri.path.endsWith('/result')) {
+        final result = _endedResult()
+          ..['outcome'] = 'FORFEIT'
+          ..['resultPhase'] = feedbackSubmitted
+              ? 'UNAVAILABLE'
+              : 'AWAITING_FEEDBACK'
+          ..['feedbackSubmitted'] = feedbackSubmitted;
+        handler.resolve(Response(requestOptions: options, data: result));
+      } else {
+        final state = ended ? _endedState() : _runningState();
+        state['rev'] = revision;
+        state['draftRev'] = '4';
+        if (ended) state['outcome'] = 'FORFEIT';
+        handler.resolve(Response(requestOptions: options, data: state));
+      }
+    });
+    final (container, _) = (await tester.runAsync(() => _signedIn(api)))!;
+    await _mount(tester, container);
+    await _tap(tester, '조사 포기');
+    await _tap(tester, '취소');
+    expect(posts, isEmpty);
+    await _tap(tester, '조사 포기');
+    revision = '8';
+    await tester.pump(const Duration(seconds: 3));
+    await _until(
+      tester,
+      () => find.text('forfeit-revision-8').evaluate().isNotEmpty,
+    );
+    await _tap(tester, '포기 요청');
+    expect(posts, isEmpty);
+    await _tap(tester, '조사 포기');
+    await _tap(tester, '포기 요청');
+    await _until(tester, () => posts.length == 1);
+    expect(posts.single.uri.path, '/api/playtests/test-1/forfeit');
+    expect((posts.single.data as Map)['expectedRev'], '8');
+    await _until(tester, () => find.text('본인 피드백 제출').evaluate().isNotEmpty);
+    await _show(tester, find.text('본인 피드백 제출'));
+    expect(find.textContaining('최종 점수'), findsNothing);
+    expect(find.text('제출본과 해설 열기'), findsNothing);
+    await _tap(tester, '본인 피드백 제출');
+    await _until(
+      tester,
+      () => find.textContaining('포기로 조사가 종료되었습니다').evaluate().isNotEmpty,
+    );
+    expect(posts.length, 2);
+    expect(posts.last.uri.path, '/api/playtests/test-1/feedback');
+    await _show(tester, find.textContaining('포기로 조사가 종료되었습니다'));
+    expect(find.textContaining('최종 점수'), findsNothing);
+    expect(find.text('본인 피드백 제출'), findsNothing);
+    expect(find.text('제출본과 해설 열기'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'feedback is personal and truth appears only after a new result GET',
     (tester) async {
       final api = PlayerApi('https://example.invalid');
       final posts = <RequestOptions>[];
+      final postReply = Completer<void>();
       final resultReply = Completer<void>();
       var resultReads = 0;
       _intercept(api, (options, handler) async {
@@ -1513,6 +1699,7 @@ void main() {
           );
         } else {
           posts.add(options);
+          await postReply.future;
           handler.resolve(
             Response(
               requestOptions: options,
@@ -1527,7 +1714,14 @@ void main() {
       expect(find.textContaining('최종 점수'), findsNothing);
       expect(find.text('SECRET_SENTINEL'), findsNothing);
       await tester.enterText(find.widgetWithText(TextField, '막힌 지점'), '내 막힘');
+      final editor = tester
+          .widget<TextField>(find.widgetWithText(TextField, '막힌 지점'))
+          .controller!;
       await _tap(tester, '본인 피드백 제출');
+      await _until(tester, () => posts.length == 1);
+      expect(editor.text, isEmpty);
+      expect(resultReads, 1);
+      postReply.complete();
       await _until(tester, () => posts.length == 1 && resultReads > 1);
       expect(posts.single.uri.path, '/api/playtests/test-1/feedback');
       expect((posts.single.data as Map)['feedback']['blockedAt'], '내 막힘');
@@ -1796,13 +1990,13 @@ Map<String, dynamic> _proposal({
 };
 
 Map<String, dynamic> _reportReceipt(String action, {String state = 'RUNNING'}) {
-  final safe = {
+  final safe = <String, dynamic>{
     'testKey': 'test-1',
     'rev': '8',
+    'draftRev': '4',
     'state': state,
     'outcome': null,
-    'startedAt': state == 'RUNNING' ? '2026-10-09T00:00:00Z' : null,
-    'playDeadline': state == 'RUNNING' ? '2030-01-01T00:00:00Z' : null,
+    if (action == 'REPORT_ACCEPT') 'submitNo': '1',
   };
   return {
     'action': action,

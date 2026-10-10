@@ -159,7 +159,14 @@ class InvestigationIntent {
     this.endpoint,
     this.action,
     Map<String, dynamic> body,
-  ) : body = Map.unmodifiable(body);
+  ) : body = Map.unmodifiable({
+        for (final entry in body.entries)
+          entry.key: entry.value is Map
+              ? Map<String, dynamic>.unmodifiable(
+                  Map<String, dynamic>.from(entry.value as Map),
+                )
+              : entry.value,
+      });
 
   final String testKey;
   final int generation;
@@ -391,16 +398,26 @@ void _actionResult(Map<String, dynamic> json, InvestigationIntent intent) {
     throw const FormatException('변경 영수증이 올바르지 않습니다.');
   }
   _nonblank(json, 'requestId');
+  final reportAction = const {
+    'REPORT_EDIT',
+    'REPORT_PROPOSE',
+    'REPORT_ACCEPT',
+    'REPORT_REJECT',
+    'REPORT_WITHDRAW',
+    'TEST_FORFEIT',
+    'TEST_FEEDBACK',
+  }.contains(intent.action);
   for (final key in ['original', 'current']) {
-    final safe = _fields(json[key], const {
+    final safe = _fields(json[key], {
       'testKey',
       'rev',
       'state',
       'outcome',
-      'startedAt',
-      'playDeadline',
+      if (!reportAction) 'startedAt',
+      if (!reportAction) 'playDeadline',
       'draftRev',
       'reportKey',
+      'submitNo',
       'acceptedAt',
       'gradeDeadline',
       'jobKey',
@@ -418,7 +435,15 @@ void _actionResult(Map<String, dynamic> json, InvestigationIntent intent) {
         }.contains(safe['state'])) {
       throw const FormatException('변경 영수증의 상태가 올바르지 않습니다.');
     }
-    for (final field in ['outcome', 'startedAt', 'playDeadline']) {
+    // 공동 보고서 영수증은 수정번호를 포함하지만 조사 시작·마감 시각을 투영하지 않는다.
+    if (reportAction && !safe.containsKey('draftRev')) {
+      throw const FormatException('변경 영수증의 수정번호가 올바르지 않습니다.');
+    }
+    for (final field in [
+      'outcome',
+      if (!reportAction) 'startedAt',
+      if (!reportAction) 'playDeadline',
+    ]) {
       _nullableText(safe, field);
     }
     for (final field in ['startedAt', 'playDeadline']) {
@@ -433,6 +458,15 @@ void _actionResult(Map<String, dynamic> json, InvestigationIntent intent) {
     }
     for (final field in ['reportKey', 'jobKey']) {
       if (safe.containsKey(field)) _nonblank(safe, field);
+    }
+    if (safe.containsKey('submitNo')) {
+      final number = safe['submitNo'];
+      if (number is! String ||
+          !RegExp(r'^[1-9][0-9]*$').hasMatch(number) ||
+          int.tryParse(number) == null ||
+          int.parse(number) > 2147483647) {
+        throw const FormatException('변경 영수증의 제출 순번이 올바르지 않습니다.');
+      }
     }
     for (final field in ['acceptedAt', 'gradeDeadline']) {
       if (safe.containsKey(field)) DateTime.parse(_nonblank(safe, field));
@@ -507,7 +541,7 @@ class InvestigationRepository {
       key,
       auth.generation,
       '/api/playtests/$key/report/proposals/$reportKey/respond',
-      'REPORT_RESPOND',
+      'REPORT_$decision',
       {'expectedRev': rev, 'decision': decision, 'requestKey': requestKey()},
     );
   }
@@ -672,7 +706,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     Future.microtask(_resume);
   }
 
-  /// 접근 회수·종료·계정 변경 시 역할 자료와 임시 기록을 함께 제거한다.
+  /// 접근 회수·계정 변경 시 개인 자료와 원본 재전송 의도를 함께 제거한다.
   void _purge() {
     _retireNoteRenderer(purge: true);
     _intent = null;
@@ -698,6 +732,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
   /// 숨긴 기록은 새 역할 자료의 접근 증명 전에는 컨트롤러에도 노출하지 않는다.
   void _hide() {
     _retireNoteRenderer(purge: false);
+    ++_editVersion;
     _state = null;
     _materials = null;
     _report = null;
@@ -708,22 +743,41 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     _heartbeatEpoch = null;
   }
 
-  /// 숨긴 탭의 RAF가 멈춰도 남은 semantic textarea 값을 즉시 폐기한다.
+  /// 종료 확인 시 조사 원문과 편집 초안만 폐기하고 결과·불확실 요청은 보존한다.
+  void _endRunningData() {
+    _retireNoteRenderer(purge: true);
+    _materials = null;
+    _report = null;
+    _editedReport = null;
+    _editedDraftRev = null;
+    ++_editVersion;
+    _roleNotes.clear();
+    _roleCode = null;
+    _notes.clear();
+  }
+
+  /// `purge`와 무관하게 이전 입력 세대를 무효화하고 웹의 남은 textarea는 즉시 폐기한다.
   void _retireNoteRenderer({required bool purge}) {
+    ++_noteRendererRevision;
     if (!kIsWeb) return;
     _restoreNoteFocus = !purge && (_restoreNoteFocus || _noteFocus.hasFocus);
     _noteReconciliationPending = !purge;
     _noteEditorReadOnly = !purge;
-    ++_noteRendererRevision;
     _notes.clear();
-    privateNoteEraser?.call(_noteIdentifier);
+    privateEditorEraser?.call(_noteIdentifier);
     _noteIdentifier = 'sicha-private-note-${requestKey()}';
     _noteFocus.unfocus();
   }
 
-  bool _revoked(Object error) =>
-      error is DioException &&
-      const {401, 403, 404, 410}.contains(error.response?.statusCode);
+  /// 일반409는 원본을 보존하되 명시적인 초대 무효화409는 접근 회수로 처리한다.
+  bool _revoked(Object error) {
+    if (error is! DioException) return false;
+    final response = error.response;
+    return const {401, 403, 404, 410}.contains(response?.statusCode) ||
+        (response?.statusCode == 409 &&
+            response?.data is Map &&
+            (response!.data as Map)['code'] == 'INVITATION_INVALIDATED');
+  }
 
   /// 비활성화 시 예약 요청을 중단하고 이전 응답의 반영을 막는다.
   void _stop() {
@@ -777,7 +831,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
   }
 
   /// 수정번호·서버 시각을 갱신하며 다른 방의 응답은 폐기한다.
-  /// 웹에서는 역할 자료만 조회하고 종료 시 개인 원문을 폐기하며 결과는 요청하지 않는다.
+  /// 현재 방의 상태와 보고서 또는 종료 결과를 일치시킨 뒤에만 화면에 반영한다.
   Future<void> _refresh() async {
     if (!_current || _loadingEpoch == _epoch || _busy) return;
     final epoch = _epoch;
@@ -797,9 +851,20 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
         if (_current) setState(() => _state = state);
         return;
       }
+      if (_state != null &&
+          BigInt.parse(state.rev) < BigInt.parse(_state!.rev)) {
+        return;
+      }
       if (_roleCode != null &&
           (state.data['self'] as Map)['roleCode'] != _roleCode) {
         _purge();
+      }
+      if (state.state == 'ENDED' && _state?.state != 'ENDED') {
+        _endRunningData();
+        setState(() {
+          _state = state;
+          _result = null;
+        });
       }
       InvestigationMaterials? materials;
       ReportView? report;
@@ -809,32 +874,24 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
         if (materials.role['code'] != (state.data['self'] as Map)['roleCode']) {
           throw const FormatException('배정된 역할과 자료가 일치하지 않습니다.');
         }
-        if (!kIsWeb) {
-          report = await repo.report(widget.testKey);
-          if (report.testKey != widget.testKey ||
-              report.draftRev != state.data['draftRev'] ||
-              report.submissionState != state.data['submissionState']) {
-            // 서로 다른 조회 사이에 공동 보고서가 바뀐 경우 다음 polling에서 다시 확인한다.
-            return;
-          }
+        report = await repo.report(widget.testKey);
+        if (report.testKey != widget.testKey ||
+            report.draftRev != state.data['draftRev'] ||
+            report.submissionState != state.data['submissionState']) {
+          // 서로 다른 조회 사이에 공동 보고서가 바뀐 경우 다음 polling에서 다시 확인한다.
+          return;
         }
-      } else if (state.state == 'ENDED' && !kIsWeb) {
+      } else if (state.state == 'ENDED') {
         result = await repo.result(widget.testKey);
         if (result.testKey != widget.testKey) {
           throw const FormatException('결과 테스트 키가 일치하지 않습니다.');
         }
       }
       if (!_current || epoch != _epoch) return;
-      if (_state != null &&
-          BigInt.parse(state.rev) < BigInt.parse(_state!.rev)) {
-        return;
-      }
-      if (kIsWeb && state.state == 'ENDED') {
-        _stop();
-        _purge();
-      }
       final roleCode = materials?.role['code'] as String?;
-      if (_roleCode != null && roleCode != _roleCode) {
+      if (state.state == 'RUNNING' &&
+          _roleCode != null &&
+          roleCode != _roleCode) {
         _purge();
       }
       _roleCode = roleCode;
@@ -894,7 +951,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
               });
               if (restoreFocus) {
                 _noteFocus.requestFocus();
-                privateNoteFocuser?.call(_noteIdentifier);
+                privateEditorFocuser?.call(_noteIdentifier);
               }
             });
             WidgetsBinding.instance.scheduleFrame();
@@ -1032,6 +1089,11 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
   }
 
   Future<void> _confirmForfeit() async {
+    final room = widget.testKey;
+    final generation = _generation;
+    final revision = _state?.rev;
+    final epoch = _epoch;
+    if (revision == null || _state?.state != 'RUNNING') return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -1049,8 +1111,14 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
         ],
       ),
     );
-    if (confirmed == true && _current && _state?.state == 'RUNNING') {
-      _act((repo, current) => repo.forfeitIntent(widget.testKey, current.rev));
+    if (confirmed == true &&
+        _current &&
+        room == widget.testKey &&
+        generation == _generation &&
+        epoch == _epoch &&
+        _state?.state == 'RUNNING' &&
+        _state?.rev == revision) {
+      _act((repo, current) => repo.forfeitIntent(room, revision));
     }
   }
 
@@ -1082,6 +1150,11 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
     }
     final state = _state;
     final materials = _materials;
+    final noteRole = materials?.role['code'] as String?;
+    final displayedReport = _report;
+    final displayedResult = _result;
+    final displayedGeneration = _generation;
+    final displayedEditVersion = _editVersion;
     final self = state?.data['self'] as Map?;
     final partner = state?.data['partner'] as Map?;
     final deadline = state?.data['playDeadline'] as String?;
@@ -1212,7 +1285,7 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
               container: true,
               explicitChildNodes: true,
               child: TextField(
-                key: kIsWeb ? ValueKey(noteRendererRevision) : null,
+                key: ValueKey(noteRendererRevision),
                 controller: _notes,
                 focusNode: _noteFocus,
                 readOnly: kIsWeb && _noteEditorReadOnly,
@@ -1222,10 +1295,11 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
                       (!kIsWeb || !_noteReconciliationPending) &&
                       _state?.state == 'RUNNING' &&
                       _materials != null &&
-                      _roleCode != null &&
-                      _materials!.role['code'] == _roleCode &&
+                      noteRole != null &&
+                      _roleCode == noteRole &&
+                      _materials!.role['code'] == noteRole &&
                       noteRendererRevision == _noteRendererRevision) {
-                    _roleNotes[_roleCode!] = value;
+                    _roleNotes[noteRole] = value;
                   }
                 },
                 decoration: const InputDecoration(
@@ -1234,16 +1308,16 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
                 ),
               ),
             ),
-            if (!kIsWeb && _report != null)
+            if (displayedReport != null)
               ReportSheet(
                 key: ValueKey(
-                  '${widget.testKey}-${_generation ?? 0}-${_editedReport == null ? _report!.draftRev : 'edited'}-$_editVersion',
+                  '${widget.testKey}-${_generation ?? 0}-${_editedReport == null ? displayedReport.draftRev : 'edited'}-$_editVersion',
                 ),
-                report: _editedReport ?? _report!.report,
+                report: _editedReport ?? displayedReport.report,
                 edited: _editedReport != null,
                 persons: _materials!.persons,
-                proposal: _report!.proposal,
-                submissionState: _report!.submissionState,
+                proposal: displayedReport.proposal,
+                submissionState: displayedReport.submissionState,
                 enabled:
                     !_busy &&
                     _intent == null &&
@@ -1251,42 +1325,74 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
                     remaining > 0,
                 staleDraft:
                     _editedDraftRev != null &&
-                    _editedDraftRev != _report!.draftRev,
-                onChanged: (report) => setState(() {
-                  _editedDraftRev ??= _report!.draftRev;
-                  _editedReport = report;
-                }),
+                    _editedDraftRev != displayedReport.draftRev,
+                onChanged: (report) {
+                  if (!_current ||
+                      _editVersion != displayedEditVersion ||
+                      _generation != displayedGeneration ||
+                      displayedReport.testKey != widget.testKey ||
+                      _state?.state != 'RUNNING' ||
+                      _report == null ||
+                      _busy ||
+                      _intent != null) {
+                    return;
+                  }
+                  setState(() {
+                    _editedDraftRev ??= displayedReport.draftRev;
+                    _editedReport = report;
+                  });
+                },
                 onDiscard: () => setState(() {
                   _editedReport = null;
                   _editedDraftRev = null;
                   ++_editVersion;
                 }),
-                onSave: (report) => _act(
-                  (repo, current) => repo.editIntent(
-                    widget.testKey,
-                    current.rev,
-                    _report!.draftRev,
-                    report,
-                  ),
-                ),
-                onPropose: () => _act(
-                  (repo, current) => repo.proposeIntent(
-                    widget.testKey,
-                    current.rev,
-                    _report!.draftRev,
-                  ),
-                ),
-                onRespond: (decision) => _act(
-                  (repo, current) => repo.respondIntent(
-                    widget.testKey,
-                    current.rev,
-                    _report!.proposal!['reportKey'] as String,
-                    decision,
-                  ),
-                ),
+                onSave: (report) {
+                  if (_report != displayedReport ||
+                      _editedDraftRev == null ||
+                      _editedDraftRev != displayedReport.draftRev) {
+                    return;
+                  }
+                  final originalRev = _editedDraftRev!;
+                  _act(
+                    (repo, current) => repo.editIntent(
+                      widget.testKey,
+                      current.rev,
+                      originalRev,
+                      report,
+                    ),
+                  );
+                },
+                onPropose: () {
+                  if (_report != displayedReport || _editedReport != null) {
+                    return;
+                  }
+                  _act(
+                    (repo, current) => repo.proposeIntent(
+                      widget.testKey,
+                      current.rev,
+                      displayedReport.draftRev,
+                    ),
+                  );
+                },
+                onRespond: (decision) {
+                  final proposalKey = displayedReport.proposal?['reportKey'];
+                  if (_report != displayedReport ||
+                      proposalKey is! String ||
+                      _report?.proposal?['reportKey'] != proposalKey) {
+                    return;
+                  }
+                  _act(
+                    (repo, current) => repo.respondIntent(
+                      widget.testKey,
+                      current.rev,
+                      proposalKey,
+                      decision,
+                    ),
+                  );
+                },
               ),
-            if (!kIsWeb &&
-                state.data['submissionState'] != 'PENDING' &&
+            if (state.data['submissionState'] != 'PENDING' &&
                 remaining != null &&
                 remaining > 0)
               PlayerButton(
@@ -1296,18 +1402,22 @@ class _InvestigationPageState extends ConsumerState<InvestigationPage>
               ),
           ],
         ],
-        if (kIsWeb && state.state == 'ENDED')
-          const PlayerNotice(
-            '조사가 종료되었습니다. 역할 자료와 개인 기록은 폐기되었습니다. 웹 보고서·결과·피드백은 3단계에서 제공되며 현재는 조회할 수 없습니다.',
-          ),
-        if (!kIsWeb && state.state == 'ENDED' && _result != null)
+        if (state.state == 'ENDED' && displayedResult != null)
           ResultSheet(
             key: ValueKey('${widget.testKey}-${_generation ?? 0}'),
-            result: _result!.data,
+            result: displayedResult.data,
             enabled: !_busy && _intent == null,
-            onFeedback: (feedback) => _act(
-              (repo, current) => repo.feedbackIntent(widget.testKey, feedback),
-            ),
+            onFeedback: (feedback) {
+              if (_result != displayedResult ||
+                  displayedResult.data['resultPhase'] != 'AWAITING_FEEDBACK' ||
+                  displayedResult.data['feedbackSubmitted'] != false) {
+                return;
+              }
+              _act(
+                (repo, current) =>
+                    repo.feedbackIntent(widget.testKey, feedback),
+              );
+            },
           ),
         if (state.state != 'WAITING' &&
             state.state != 'RUNNING' &&

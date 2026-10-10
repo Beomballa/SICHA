@@ -40,7 +40,7 @@ void _checkBrowser(String origin) {
   }
 }
 
-/// 쿠키 인증 3개 POST와 Bearer 회원 확인·초대·조사만 허용하며 redirect를 따라가지 않는다.
+/// 쿠키 인증 3개 POST와 Bearer 회원 확인·초대·조사·보고서 경로만 허용하며 redirect를 따라가지 않는다.
 /// Dio의 직렬화된 본문은 UTF-8 JSON으로 검증하고 제한 초과는 잘라내지 않고 거부한다.
 class PlayerFetchAdapter implements HttpClientAdapter {
   PlayerFetchAdapter(this._dio, this._origin);
@@ -58,6 +58,8 @@ class PlayerFetchAdapter implements HttpClientAdapter {
     r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
   );
   static const _requestLimit = 16 * 1024;
+  static const _reportLimit = 512 * 1024;
+  static const _forfeitLimit = 8192;
   static const _responseLimit = 1024 * 1024;
 
   @override
@@ -74,6 +76,7 @@ class PlayerFetchAdapter implements HttpClientAdapter {
       ),
     );
     final cookieAuth = _validate(options);
+    final requestLimit = _requestLimitFor(options.method, options.path);
     final controller = web.AbortController();
     _active.add(controller);
     final stopped = Completer<void>();
@@ -117,7 +120,7 @@ class PlayerFetchAdapter implements HttpClientAdapter {
       if (requestStream != null) {
         requestIterator = StreamIterator(requestStream);
         final bytes = await wait(
-          _requestBytes(requestIterator),
+          _requestBytes(requestIterator, requestLimit),
           options.sendTimeout,
           const Duration(seconds: 10),
         );
@@ -284,12 +287,13 @@ class PlayerFetchAdapter implements HttpClientAdapter {
       }
       headers[name] = entry.value;
     }
+    final requestLimit = _requestLimitFor(options.method, path);
     final length = headers['content-length'] as String?;
     if (length != null &&
-        (options.method != 'POST' ||
+        (options.method != 'POST' && options.method != 'PATCH' ||
             !RegExp(r'^(0|[1-9][0-9]*)$').hasMatch(length) ||
             int.tryParse(length) == null ||
-            int.parse(length) > _requestLimit)) {
+            int.parse(length) > requestLimit)) {
       throw PlayerConfigurationError();
     }
     if (headers.containsKey('x-sicha-player-web') &&
@@ -308,14 +312,14 @@ class PlayerFetchAdapter implements HttpClientAdapter {
         (headers.containsKey('x-sicha-player-web-epoch') ||
             !RegExp(r'^Bearer [A-Za-z0-9_-]{43}$')
                 .hasMatch(headers['authorization'] as String? ?? '') ||
-            (options.method == 'POST' &&
+            ((options.method == 'POST' || options.method == 'PATCH') &&
                 headers['content-type'] != 'application/json'))) {
       throw PlayerConfigurationError();
     }
     return cookieAuth;
   }
 
-  /// 정규 UUID v4와 고정 메서드만 허용하며 보고서·채점·결과는 웹 3단계까지 닫는다.
+  /// 정규 UUID v4와 고정 메서드의 조사·보고서 경로만 허용한다.
   bool _bearerRoute(String method, String path) {
     const key =
         r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
@@ -325,20 +329,41 @@ class PlayerFetchAdapter implements HttpClientAdapter {
             '/api/playtests/identity',
             '/api/playtests/invitations',
           }.contains(path) ||
-          RegExp('^/api/playtests/$key(?:/policy-notice|/materials)?\$')
-              .hasMatch(path);
+          RegExp(
+            '^/api/playtests/$key(?:/policy-notice|/materials|/report|/result)?\$',
+          ).hasMatch(path);
+    }
+    if (method == 'PATCH') {
+      return RegExp('^/api/playtests/$key/report\$').hasMatch(path);
     }
     return method == 'POST' &&
         RegExp(
-          '^/api/playtests/$key/(?:accept|ready|start|heartbeat|hints/[1-3]/open)\$',
+          '^/api/playtests/$key/(?:accept|ready|start|heartbeat|hints/[1-3]/open|report/proposals(?:/$key/respond)?|forfeit|feedback)\$',
         ).hasMatch(path);
   }
 
-  Future<Uint8List> _requestBytes(StreamIterator<Uint8List> iterator) async {
+  /// 검증된 고정 경로에 맞춰 선언 길이와 실제 본문에 동일한 상한을 적용한다.
+  int _requestLimitFor(String method, String path) {
+    if (method == 'PATCH' && path.endsWith('/report') ||
+        method == 'POST' &&
+            (path.endsWith('/report/proposals') ||
+                path.endsWith('/respond') ||
+                path.endsWith('/feedback'))) {
+      return _reportLimit;
+    }
+    if (method == 'POST' && path.endsWith('/forfeit')) return _forfeitLimit;
+    return _requestLimit;
+  }
+
+  /// 직렬화된 요청 스트림을 경로별 바이트 상한까지 수집하고 초과 시 전송하지 않는다.
+  Future<Uint8List> _requestBytes(
+    StreamIterator<Uint8List> iterator,
+    int limit,
+  ) async {
     final bytes = BytesBuilder(copy: false);
     while (await iterator.moveNext()) {
       final chunk = iterator.current;
-      if (bytes.length + chunk.length > _requestLimit) {
+      if (bytes.length + chunk.length > limit) {
         throw StateError('요청 크기가 제한을 초과했습니다.');
       }
       bytes.add(chunk);

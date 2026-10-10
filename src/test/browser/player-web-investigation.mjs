@@ -8,6 +8,8 @@ import { EventEmitter } from "node:events";
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 const fixture = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+assert.ok(fixture.mode === undefined || fixture.mode === "report");
+const reportMode = fixture.mode === "report";
 const origin = new URL(fixture.origin);
 assert.equal(origin.protocol, "https:");
 assert.equal(origin.hostname, "localhost");
@@ -41,6 +43,24 @@ const counters = {
   runtimeErrors: 0,
   excludedCalls: 0,
 };
+if (reportMode)
+  Object.assign(counters, {
+    reportEdit: 0,
+    reportPropose: 0,
+    reportAccept: 0,
+    feedback: 0,
+    reportHidden: 0,
+    feedbackHidden: 0,
+    reportReplay: 0,
+    mutationDropStatus: 0,
+    mutationDropPaused: 0,
+    feedbackReplay: 0,
+    ownFeedbackIsolation: 0,
+    freshResult: 0,
+    oldOwnerDenied: 0,
+    revokedResult: 0,
+    revokedMutation: 0,
+  });
 let phase = "launch";
 let browser;
 const memberBrowsers = [];
@@ -48,12 +68,164 @@ const failures = [];
 const pending = new Set();
 const viewStates = [];
 const signals = new EventEmitter();
-const deadline = setTimeout(() => {
-  process.stderr.write(
-    JSON.stringify({ ok: false, phase, failure: "deadline" }),
+const deadline = setTimeout(
+  () => {
+    process.stderr.write(
+      JSON.stringify({ ok: false, phase, failure: "deadline" }),
+    );
+    process.exit(1);
+  },
+  reportMode ? 240000 : 140000,
+);
+
+/** 보고서 모드의 추가 허용은 정확한 일곱 경로·동사 조합뿐이다. */
+function reportRoute(path, method) {
+  if (!reportMode) return null;
+  if (path === BASE + "/report" && method === "GET") return "reportRead";
+  if (path === BASE + "/report" && method === "PATCH") return "reportEdit";
+  if (path === BASE + "/report/proposals" && method === "POST")
+    return "reportPropose";
+  if (
+    method === "POST" &&
+    path.startsWith(BASE + "/report/proposals/") &&
+    path.endsWith("/respond") &&
+    UUID4.test(path.slice((BASE + "/report/proposals/").length, -8))
+  )
+    return "reportAccept";
+  if (path === BASE + "/forfeit" && method === "POST") return "forfeit";
+  if (path === BASE + "/result" && method === "GET") return "resultRead";
+  if (path === BASE + "/feedback" && method === "POST") return "feedback";
+  return null;
+}
+
+/** 정규 십진 revision은 JS 숫자로 축약하지 않고 Long 범위를 검사한다. */
+function revision(value) {
+  assert.equal(typeof value, "string");
+  assert.match(value, /^(0|[1-9][0-9]*)$/);
+  assert.ok(BigInt(value) <= 9223372036854775807n);
+}
+
+/** body는 닫힌 필드·원문 바이트·Unicode 글자 상한을 모두 만족해야 한다. */
+function reportBody(kind, body) {
+  const fields = {
+    reportEdit: ["expectedRev", "expectedDraftRev", "report", "requestKey"],
+    reportPropose: ["expectedRev", "expectedDraftRev", "requestKey"],
+    reportAccept: ["expectedRev", "decision", "requestKey"],
+    forfeit: ["expectedRev", "requestKey"],
+    feedback: ["requestKey", "feedback"],
+  };
+  assert.deepEqual(Object.keys(body).sort(), fields[kind].sort());
+  assert.match(body.requestKey, UUID4);
+  if (kind !== "feedback") revision(body.expectedRev);
+  if (kind === "reportEdit" || kind === "reportPropose")
+    revision(body.expectedDraftRev);
+  if (kind === "reportAccept")
+    assert.ok(["ACCEPT", "REJECT", "WITHDRAW"].includes(body.decision));
+  if (kind === "reportEdit") {
+    reportData(body.report);
+    assert.ok(
+      Buffer.byteLength(JSON.stringify(body.report), "utf8") <= 128 * 1024,
+    );
+  }
+  if (kind === "feedback") {
+    assert.deepEqual(
+      Object.keys(body.feedback).sort(),
+      ["blockedAt", "roleContribution", "fairness", "gradingConcern"].sort(),
+    );
+    for (const value of Object.values(body.feedback)) {
+      assert.equal(typeof value, "string");
+      assert.ok([...value].length <= 2000);
+    }
+  }
+}
+
+/** REPORT-1의 다섯 필드와 원문 상한을 검사한다. */
+function reportData(value) {
+  assert.deepEqual(
+    Object.keys(value).sort(),
+    ["culpritCode", "method", "time", "motive", "evidence"].sort(),
   );
-  process.exit(1);
-}, 140000);
+  assert.ok(
+    value.culpritCode === null || typeof value.culpritCode === "string",
+  );
+  let total = 0;
+  for (const field of ["method", "time", "motive", "evidence"]) {
+    assert.equal(typeof value[field], "string");
+    assert.ok([...value[field]].length <= 5000);
+    total += [...value[field]].length;
+  }
+  assert.ok(total <= 20000);
+}
+
+/** 피드백 전 투영에는 점수·제출본·해설 값이 하나도 없어야 한다. */
+function protectedResult(value) {
+  assert.equal(value.resultPhase, "AWAITING_FEEDBACK");
+  assert.equal(value.feedbackSubmitted, false);
+  for (const name of ["finalScore", "scoreSummary", "reports", "revealText"])
+    assert.equal(value[name], null);
+}
+
+/** 현재 서비스가 허용한 결과만 검증하며 점수는 caller가 만들지 않는다. */
+function resultView(value) {
+  assert.deepEqual(
+    Object.keys(value).sort(),
+    [
+      "testKey",
+      "state",
+      "outcome",
+      "endedAt",
+      "feedbackUntil",
+      "resultPhase",
+      "feedbackSubmitted",
+      "finalScore",
+      "scoreSummary",
+      "reports",
+      "revealText",
+      "requestId",
+    ].sort(),
+  );
+  assert.equal(value.testKey, fixture.testKey);
+  assert.equal(value.state, "ENDED");
+  assert.equal(value.outcome, "SUCCESS");
+  assert.match(value.requestId, UUID4);
+  if (value.resultPhase === "AWAITING_FEEDBACK") return protectedResult(value);
+  assert.equal(value.resultPhase, "AVAILABLE");
+  assert.equal(value.feedbackSubmitted, true);
+  const summary = value.scoreSummary;
+  assert.deepEqual(
+    Object.keys(summary).sort(),
+    ["baseScore", "wrongCount", "penalty", "finalScore", "categories"].sort(),
+  );
+  for (const field of ["baseScore", "wrongCount", "penalty", "finalScore"])
+    assert.ok(Number.isInteger(summary[field]) && summary[field] >= 0);
+  assert.equal(value.finalScore, summary.finalScore);
+  assert.ok(value.finalScore <= 100);
+  for (const category of summary.categories) {
+    assert.deepEqual(Object.keys(category).sort(), [
+      "category",
+      "maxScore",
+      "score",
+    ]);
+    assert.ok(Number.isInteger(category.score) && category.score >= 0);
+    assert.ok(
+      Number.isInteger(category.maxScore) &&
+        category.maxScore >= category.score,
+    );
+  }
+  assert.equal(value.reports.length, 1);
+  const submitted = value.reports[0];
+  assert.deepEqual(
+    Object.keys(submitted).sort(),
+    ["reportKey", "submitNo", "report", "baseScore", "success"].sort(),
+  );
+  assert.match(submitted.reportKey, UUID4);
+  assert.equal(submitted.submitNo, 1);
+  assert.equal(submitted.baseScore, summary.baseScore);
+  assert.equal(submitted.success, true);
+  assert.deepEqual(submitted.report, fixture.report);
+  assert.equal(typeof value.revealText, "string");
+  assert.ok(value.revealText.length > 0);
+}
 
 /** 관측 상태가 바뀔 때만 조건을 확인하고 최대 12초 뒤 고정 오류로 종료한다. */
 function signalState(predicate) {
@@ -230,12 +402,17 @@ async function instrument(page, account) {
     account,
     access: null,
     detail: null,
+    detailCount: 0,
     notice: null,
     material: null,
     materialCount: 0,
     requests: [],
     receipts: [],
     observations: 0,
+    report: null,
+    result: null,
+    resultCount: 0,
+    network: new Set(),
   };
   const observations = new Map();
   let sequence = 0;
@@ -244,6 +421,11 @@ async function instrument(page, account) {
   page.on("pageerror", () => {
     counters.runtimeErrors++;
   });
+  for (const event of ["requestfinished", "requestfailed"])
+    page.on(event, (request) => {
+      state.network.delete(request);
+      signals.emit("change");
+    });
   page.on("response", (response) => {
     if (
       new URL(response.url()).pathname === BASE + "/heartbeat" &&
@@ -258,12 +440,14 @@ async function instrument(page, account) {
       if (url.protocol === "about:") return;
       assert.equal(url.origin, fixture.origin);
       if (!url.pathname.startsWith("/api/")) return;
+      state.network.add(request);
       const headers = request.headers();
       const path = url.pathname;
       check = "web-header";
       assert.equal(headers["x-sicha-player-web"], "1");
       assert.equal(url.search, "");
       const method = request.method();
+      const reportKind = reportRoute(path, method);
       if (path.startsWith(AUTH + "/")) {
         assert.equal(method, "POST");
         assert.match(headers["x-sicha-player-web-epoch"], UUID4);
@@ -297,6 +481,8 @@ async function instrument(page, account) {
         BASE,
         BASE + "/policy-notice",
         BASE + "/materials",
+        BASE + "/report",
+        BASE + "/result",
       ];
       const mutations = [
         BASE + "/accept",
@@ -310,18 +496,36 @@ async function instrument(page, account) {
       if (
         !(
           (method === "GET" && reads.includes(path)) ||
-          (method === "POST" && mutations.includes(path))
+          (method === "POST" && mutations.includes(path)) ||
+          reportKind !== null
         )
       ) {
         counters.excludedCalls++;
         throw new Error("Excluded Flutter route");
       }
       assert.equal(headers.cookie, undefined);
-      if (method === "POST") {
+      if (method === "GET") assert.equal(request.postData(), undefined);
+      if (method === "POST" || method === "PATCH") {
         const body = request.postData();
-        assert.ok(Buffer.byteLength(body ?? "", "utf8") <= 16 * 1024);
+        const cap =
+          reportKind === "reportEdit"
+            ? 512 * 1024
+            : reportKind === "feedback"
+              ? 32 * 1024
+              : reportKind
+                ? 8 * 1024
+                : 16 * 1024;
+        assert.ok(Buffer.byteLength(body ?? "", "utf8") <= cap);
         const value = JSON.parse(body);
-        state.requests.push({ url: request.url(), path, body, value });
+        state.requests.push({ url: request.url(), path, method, body, value });
+        if (reportKind) {
+          assert.match(
+            headers["content-type"] ?? "",
+            /^application\/json(?:;|$)/i,
+          );
+          reportBody(reportKind, value);
+          if (Object.hasOwn(counters, reportKind)) counters[reportKind]++;
+        }
         if (path === BASE + "/accept") counters.accept++;
         if (path === BASE + "/ready") counters.ready++;
         if (path === BASE + "/start") counters.start++;
@@ -402,7 +606,10 @@ async function instrument(page, account) {
         } else if (path === "/api/playtests/identity") {
           assert.equal(value.memberKey, state.account.memberKey);
         } else if (path === "/api/playtests/invitations") {
-          if (phase === "logout-account-change-purge") {
+          if (
+            phase === "logout-account-change-purge" ||
+            phase.startsWith("report-account-")
+          ) {
             // 실제 목록 계약은 WAITING만 반환하며 이미 RUNNING인 초대는 없다.
             assert.equal(value.items.length, 0);
           } else {
@@ -418,12 +625,109 @@ async function instrument(page, account) {
             "ready",
           ]);
           state.detail = value;
+          state.detailCount++;
         } else if (path === BASE + "/policy-notice") {
           assert.equal(value.testKey, fixture.testKey);
           assert.equal(typeof value.revision, "string");
           state.notice = value;
         } else if (path === BASE + "/materials") {
           await validateMaterials(state, value, entry.owner);
+        } else if (
+          reportMode &&
+          path === BASE + "/report" &&
+          observation.method === "GET"
+        ) {
+          assert.deepEqual(
+            Object.keys(value).sort(),
+            [
+              "testKey",
+              "draftRev",
+              "report",
+              "proposal",
+              "submissionState",
+              "requestId",
+            ].sort(),
+          );
+          assert.equal(value.testKey, fixture.testKey);
+          revision(value.draftRev);
+          reportData(value.report);
+          assert.match(value.requestId, UUID4);
+          if (value.proposal !== null) {
+            assert.deepEqual(
+              Object.keys(value.proposal).sort(),
+              [
+                "reportKey",
+                "sourceRev",
+                "proposerSlot",
+                "state",
+                "canAccept",
+                "canReject",
+                "canWithdraw",
+              ].sort(),
+            );
+            assert.match(value.proposal.reportKey, UUID4);
+            revision(value.proposal.sourceRev);
+          }
+          state.report = value;
+        } else if (reportMode && path === BASE + "/result") {
+          resultView(value);
+          state.result = value;
+          state.resultCount++;
+        } else if (reportRoute(path, observation.method) !== null) {
+          const kind = reportRoute(path, observation.method);
+          assert.deepEqual(
+            Object.keys(value).sort(),
+            [
+              "action",
+              "changed",
+              "replayed",
+              "original",
+              "current",
+              "requestId",
+            ].sort(),
+          );
+          const expected = {
+            reportEdit: "REPORT_EDIT",
+            reportPropose: "REPORT_PROPOSE",
+            reportAccept:
+              "REPORT_" +
+              state.requests.findLast((item) => item.path === path)?.value
+                .decision,
+            feedback: "TEST_FEEDBACK",
+            forfeit: "TEST_FORFEIT",
+          }[kind];
+          assert.equal(value.action, expected);
+          assert.equal(typeof value.changed, "boolean");
+          assert.equal(typeof value.replayed, "boolean");
+          assert.match(value.requestId, UUID4);
+          for (const safe of [value.original, value.current]) {
+            for (const field of Object.keys(safe))
+              assert.ok(
+                [
+                  "testKey",
+                  "rev",
+                  "state",
+                  "outcome",
+                  "startedAt",
+                  "playDeadline",
+                  "draftRev",
+                  "reportKey",
+                  "submitNo",
+                  "acceptedAt",
+                  "gradeDeadline",
+                  "jobKey",
+                  "feedbackSubmitted",
+                ].includes(field),
+              );
+            assert.equal(safe.testKey, fixture.testKey);
+            revision(safe.rev);
+            if (safe.submitNo !== undefined) {
+              assert.equal(typeof safe.submitNo, "string");
+              assert.match(safe.submitNo, /^[1-9][0-9]*$/);
+              assert.ok(BigInt(safe.submitNo) <= 2147483647n);
+            }
+          }
+          state.receipts.push({ path, value });
         } else if (
           [
             BASE + "/accept",
@@ -492,7 +796,7 @@ async function instrument(page, account) {
       if (
         url.origin === location.origin &&
         url.pathname.startsWith("/api/") &&
-        response.status === 200
+        (response.status === 200 || response.status === 201)
       ) {
         const options = args[1];
         const id = await window.__investigationBegin(url.pathname, {
@@ -533,6 +837,7 @@ async function instrument(page, account) {
             await window.__investigationClone(id, {
               ok: true,
               path: url.pathname,
+              method: options?.method ?? "GET",
               cacheControl: response.headers.get("cache-control"),
               text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
             });
@@ -608,27 +913,112 @@ async function route(page, expected) {
 }
 
 async function button(page, label) {
+  const recovery = [
+    "서버 상태 다시 조회",
+    "원본 요청 다시 보내기",
+    "현재 초안 제안",
+    "제안 수락 및 판정 접수",
+  ].includes(label);
+  const ownerPhase = phase;
+  if (recovery) phase = ownerPhase + "-foreground";
   await page.bringToFront();
-  await reveal(page, `aria/${label}[role="button"]`);
-  await page.locator(`aria/${label}[role="button"]`).click();
+  if (recovery) phase = ownerPhase + "-reveal";
+  await reveal(page, `aria/${label}[role="button"]`, true);
+  if (recovery) phase = ownerPhase + "-enabled-locator";
+  const control = await page
+    .locator(`aria/${label}[role="button"]`)
+    .filterHandle((handle) =>
+      handle.evaluate(
+        (element) =>
+          element.isConnected &&
+          element.getAttribute("aria-disabled") !== "true",
+      ),
+    )
+    .waitHandle();
+  try {
+    if (recovery) phase = ownerPhase + "-native-click";
+    await control.click();
+    if (recovery) phase = ownerPhase + "-activated";
+  } finally {
+    await control.dispose();
+  }
 }
 
 /** 가상화된 화면은 실제 휠 입력으로 찾아야 하며 보이지 않는 요소를 만들어 내지 않는다. */
-async function reveal(page, selector) {
-  if (await page.$(selector)) return;
+async function reveal(page, selector, requireEnabled = false) {
   const viewport = page.viewport();
-  await page.mouse.move(viewport.width / 2, viewport.height / 2);
-  for (const direction of [1, -1]) {
-    for (let step = 0; step < 12; step++) {
-      await page.mouse.wheel({ deltaY: direction * 350 });
-      await page.evaluate(
-        () =>
-          new Promise((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(resolve)),
-          ),
-      );
-      if (await page.$(selector)) return;
+  const visible = async () => {
+    let element = await page.$(selector);
+    if (element === null && selector.startsWith("text/")) {
+      const candidate = await page.evaluateHandle((text) => {
+        const matches = [...document.querySelectorAll("[aria-label]")]
+          .filter((current) =>
+            current.getAttribute("aria-label").includes(text),
+          )
+          .sort((left, right) => {
+            const a = left.getBoundingClientRect();
+            const b = right.getBoundingClientRect();
+            return a.width * a.height - b.width * b.height;
+          });
+        return matches[0] ?? null;
+      }, selector.slice(5));
+      element = candidate.asElement();
+      if (element === null) await candidate.dispose();
     }
+    if (element === null) return false;
+    try {
+      if (
+        requireEnabled &&
+        !(await element.evaluate(
+          (current) =>
+            current.isConnected &&
+            current.getAttribute("aria-disabled") !== "true",
+        ))
+      )
+        return false;
+      const bounds = await element.boundingBox();
+      if (bounds === null || bounds.width <= 0 || bounds.height <= 0)
+        return false;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+      const inViewport =
+        x >= 0 &&
+        x < viewport.width &&
+        (selector.startsWith("text/")
+          ? bounds.y < viewport.height && bounds.y + bounds.height > 0
+          : bounds.y >= 0 && bounds.y + bounds.height <= viewport.height);
+      if (!inViewport) return false;
+      if (selector.startsWith("text/")) return true;
+      return await element.evaluate((current) => {
+        const bounds = current.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.x + bounds.width / 2,
+          bounds.y + bounds.height / 2,
+        );
+        return hit !== null && current.contains(hit);
+      });
+    } finally {
+      await element.dispose();
+    }
+  };
+  if (await visible()) return;
+  // PlayerPage의 최대 720px ListView 오른쪽 16px 여백에서 스크롤한다.
+  // 가운데의 native textarea가 휠을 소비해 바깥 화면이 멈추는 것을 피한다.
+  await page.mouse.move(
+    viewport.width / 2 + Math.min(viewport.width, 720) / 2 - 8,
+    viewport.height / 2,
+  );
+  const deadline = performance.now() + 12000;
+  for (let step = 0; performance.now() < deadline; step++) {
+    const direction = Math.floor(step / 12) % 2 === 0 ? 1 : -1;
+    await page.mouse.wheel({ deltaY: direction * 350 });
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    if (await visible()) return;
   }
   throw new Error("Visible semantic control unavailable");
 }
@@ -637,12 +1027,25 @@ async function reveal(page, selector) {
 async function input(page, label, value) {
   await page.bringToFront();
   // SDK의 multiline native 편집기는 textarea이며 단일행과 AX 노출 방식이 다르다.
-  const selector =
-    label === "개인 조사 기록 (임시 메모)"
+  const privateMultiline =
+    reportMode &&
+    [
+      "방법",
+      "시간",
+      "동기",
+      "근거",
+      "막힌 지점",
+      "역할 기여",
+      "공정성",
+      "채점 우려 (선택)",
+    ].includes(label);
+  const selector = privateMultiline
+    ? `textarea[aria-label*="${label}"]`
+    : label === "개인 조사 기록 (임시 메모)"
       ? 'textarea[aria-label*="개인 조사 기록"]'
       : `aria/${label}[role="textbox"]`;
   await reveal(page, selector);
-  if (label === "개인 조사 기록 (임시 메모)") {
+  if (privateMultiline || label === "개인 조사 기록 (임시 메모)") {
     // DOM focus만으로 이전 semantic 편집기를 쓰지 않고 실제 TextField tap을 먼저 수행한다.
     await page.locator(selector).click();
   }
@@ -682,9 +1085,13 @@ async function input(page, label, value) {
 }
 
 /** 응답 대기는 action과 같은 Promise.all에 즉시 등록하여 미처리 rejection을 방지한다. */
-async function actionResponse(page, path, action, expected = 200) {
+async function actionResponse(page, path, action, expected = 200, method) {
   const [response] = await Promise.all([
-    page.waitForResponse((value) => new URL(value.url()).pathname === path),
+    page.waitForResponse(
+      (value) =>
+        new URL(value.url()).pathname === path &&
+        (method === undefined || value.request().method() === method),
+    ),
     action(),
   ]);
   assert.equal(response.status(), expected);
@@ -698,7 +1105,19 @@ async function login(state, account = state.account, destination = "account") {
   await actionResponse(state.page, AUTH + "/login/local", () =>
     button(state.page, "로그인"),
   );
-  await route(state.page, destination);
+  if (destination !== null) {
+    await route(state.page, destination);
+  } else {
+    await state.page.waitForFunction(
+      (testKey) =>
+        ["#/account", "#/invitations", "#/investigation/" + testKey].includes(
+          location.hash,
+        ),
+      {},
+      fixture.testKey,
+    );
+    await semantics(state.page);
+  }
   await signalState(() => state.access !== null);
 }
 
@@ -805,6 +1224,535 @@ async function logout(state) {
     button(state.page, "로그아웃"),
   );
   await route(state.page, "login");
+}
+
+/** 실제 새 탭으로 숨기고 분리된 옛 편집기까지 원문이 지워지는지 검사한다. */
+async function hideEditor(state, label, value, kind) {
+  const selector = `textarea[aria-label*="${label}"]`;
+  await reveal(state.page, selector);
+  await state.page.locator(selector).click();
+  const old = await state.page.waitForSelector(selector);
+  assert.equal(await old.evaluate((element) => element.value), value);
+  assert.equal(
+    await old.evaluate(
+      (element, prefix) =>
+        element.closest(`[flt-semantics-identifier^="${prefix}"]`) !== null,
+      `sicha-private-${kind}-`,
+    ),
+    true,
+  );
+  const cover = await state.context.newPage();
+  await cover.goto("about:blank");
+  await cover.bringToFront();
+  await state.page.waitForFunction(
+    (text) =>
+      document.hidden &&
+      !Array.from(document.querySelectorAll("input,textarea")).some(
+        (element) =>
+          element.value.includes(text) || element.defaultValue.includes(text),
+      ),
+    { polling: 100 },
+    value,
+  );
+  assert.equal(
+    await old.evaluate(
+      (element) => element.value === "" && element.defaultValue === "",
+    ),
+    true,
+  );
+  await old.dispose();
+  counters[kind + "Hidden"]++;
+  await state.page.bringToFront();
+  await cover.close();
+  await semantics(state.page);
+}
+
+/** 응답만 유실시키며 실제 서버 변경·원본 요청을 수정하거나 합성하지 않는다. */
+async function dropMutation(state, path, click, status = 200) {
+  phase =
+    path === BASE + "/report" ? "report-drop-write" : "feedback-drop-write";
+  await state.client.send("Fetch.enable", {
+    patterns: [{ urlPattern: fixture.origin + path, requestStage: "Response" }],
+  });
+  const dropped = new Promise((resolve, reject) => {
+    const intercept = (event) => {
+      void (async () => {
+        const method = path === BASE + "/report" ? "PATCH" : "POST";
+        if (event.request.method !== method) {
+          await state.client.send("Fetch.continueRequest", {
+            requestId: event.requestId,
+          });
+          return;
+        }
+        counters.mutationDropStatus = event.responseStatusCode;
+        counters.mutationDropPaused++;
+        assert.equal(event.responseStatusCode, status);
+        await state.client.send("Fetch.failRequest", {
+          requestId: event.requestId,
+          errorReason: "Failed",
+        });
+        await state.client.send("Fetch.disable");
+        state.client.off("Fetch.requestPaused", intercept);
+        resolve();
+      })().catch(() => reject(new Error("Report response drop failed")));
+    };
+    state.client.on("Fetch.requestPaused", intercept);
+  });
+  await Promise.all([dropped, click()]);
+  phase =
+    path === BASE + "/report"
+      ? "report-unknown-control"
+      : "feedback-unknown-control";
+  await reveal(state.page, 'aria/원본 요청 다시 보내기[role="button"]');
+}
+
+/** 명시적 상태 재조회는 변경을 재전송하지 않으며 원본 의도를 지우지도 않는다. */
+async function unknownRead(state, path, expectedCount) {
+  phase =
+    path === BASE + "/report" ? "report-recovery-get" : "feedback-recovery-get";
+  const before = state.detailCount;
+  await button(state.page, "서버 상태 다시 조회");
+  await signalState(() => state.detailCount > before);
+  phase =
+    path === BASE + "/report"
+      ? "report-recovery-observers"
+      : "feedback-recovery-observers";
+  await signalState(() => pending.size === 0);
+  assert.equal(
+    state.requests.filter((request) => request.path === path).length,
+    expectedCount,
+  );
+  phase =
+    path === BASE + "/report"
+      ? "report-recovery-original-control"
+      : "feedback-recovery-original-control";
+  await reveal(state.page, 'aria/원본 요청 다시 보내기[role="button"]');
+}
+
+/** 원본 바이트·동사·키를 명시 재전송한 영수증만 replay로 인정한다. */
+async function replayMutation(state, original, counter) {
+  const before = state.receipts.length;
+  await actionResponse(
+    state.page,
+    original.path,
+    () => button(state.page, "원본 요청 다시 보내기"),
+    200,
+    original.method,
+  );
+  const sent = state.requests
+    .filter((request) => request.path === original.path)
+    .at(-1);
+  assert.equal(sent.method, original.method);
+  assert.equal(sent.url, original.url);
+  assert.equal(sent.body, original.body);
+  await signalState(() => state.receipts.length > before);
+  const receipt = state.receipts.at(-1).value;
+  assert.equal(receipt.replayed, true);
+  assert.equal(receipt.changed, false);
+  counters[counter]++;
+}
+
+/** 현재 DOM과 분리된 편집기에서 민감 문구가 남지 않았음을 읽기만 해서 확인한다. */
+async function absentPrivate(state, values) {
+  await state.page.waitForFunction(
+    (texts) => {
+      const content =
+        document.body.textContent +
+        Array.from(document.querySelectorAll("[aria-label]"), (element) =>
+          element.getAttribute("aria-label"),
+        ).join("\n");
+      return (
+        texts.every((text) => !content.includes(text)) &&
+        !Array.from(document.querySelectorAll("input,textarea")).some(
+          (element) =>
+            texts.some(
+              (text) =>
+                element.value.includes(text) ||
+                element.defaultValue.includes(text),
+            ),
+        )
+      );
+    },
+    {},
+    values,
+  );
+}
+
+/** 보호된 서버 투영뿐 아니라 실제 화면에서도 점수와 공개 행동이 없어야 한다. */
+async function protectedScreen(state) {
+  protectedResult(state.result);
+  await absentPrivate(state, Object.values(fixture.report));
+  await state.page.waitForFunction(
+    () =>
+      !document.body.textContent.includes("최종 점수:") &&
+      !document.body.textContent.includes("기본 점수") &&
+      !document.body.textContent.includes("제출본과 해설 열기"),
+  );
+  assert.equal(
+    await state.page.$('aria/제출본과 해설 열기[role="button"]'),
+    null,
+  );
+}
+
+/** 종료 결과는 반드시 새 GET으로 얻고 캐시된 원문/점수를 기대값으로 대체하지 않는다. */
+async function refreshResult(state) {
+  const before = state.resultCount;
+  await actionResponse(state.page, BASE + "/result", () =>
+    button(state.page, "서버 상태 다시 조회"),
+  );
+  await signalState(() => state.resultCount > before);
+  const server = await probe(BASE + "/result", "GET", bearerHeaders(state));
+  assert.equal(server.status, 200);
+  resultView(server.value);
+  const withoutTrace = ({ requestId, ...value }) => value;
+  assert.deepEqual(withoutTrace(state.result), withoutTrace(server.value));
+  return state.result;
+}
+
+/** 피드백 네 필드는 실제 편집기에 입력하며 보낸 원문은 프로세스 밖에 기록하지 않는다. */
+async function feedbackInput(state, marker) {
+  const feedback = {
+    blockedAt: "합성 막힌 지점 " + marker,
+    roleContribution: "합성 역할 기여 " + marker,
+    fairness: "합성 공정성 " + marker,
+    gradingConcern: "합성 채점 우려 " + marker,
+  };
+  for (const [field, label] of [
+    ["blockedAt", "막힌 지점"],
+    ["roleContribution", "역할 기여"],
+    ["fairness", "공정성"],
+    ["gradingConcern", "채점 우려 (선택)"],
+  ])
+    await input(state.page, label, feedback[field]);
+  return feedback;
+}
+
+/** 같은 문서에서 계정을 바꾼 뒤 현재 인증으로 결과를 새로 조회한다. */
+async function accountResult(state, account, secrets) {
+  state.access = null;
+  state.detail = null;
+  state.notice = null;
+  state.report = null;
+  state.result = null;
+  const before = state.resultCount;
+  // 인증 뒤 복귀 대상은 실제 라우터가 결정한다. 아래에서 같은 문서의 종료 방을 새로 조회한다.
+  await login(state, account, null);
+  const documentOrigin = await state.page.evaluate(
+    () => performance.timeOrigin,
+  );
+  await state.page.goto(
+    origin.origin + "/player/#/investigation/" + fixture.testKey,
+  );
+  assert.equal(
+    await state.page.evaluate(() => performance.timeOrigin),
+    documentOrigin,
+  );
+  await route(state.page, "investigation/" + fixture.testKey);
+  await signalState(() => state.resultCount > before);
+  assert.equal(state.result.resultPhase, "AVAILABLE");
+  await absentPrivate(state, secrets);
+  assert.equal(
+    await state.page.$('aria/원본 요청 다시 보내기[role="button"]'),
+    null,
+  );
+  await refreshResult(state);
+  counters.freshResult++;
+}
+
+/** 조사에서 공동 고정본 접수·실제 worker 결과·본인 피드백·회수까지 이어지는 별도 모드다. */
+async function reportLifecycle(a, b) {
+  phase = "report-native-edit";
+  await a.page.bringToFront();
+  reportData(fixture.report);
+  phase = "report-observed-projection";
+  assert.ok(a.report !== null);
+  assert.equal(a.report.draftRev, a.detail.draftRev);
+  assert.equal(a.report.submissionState, a.detail.submissionState);
+  assert.equal(a.material.persons[0].code, fixture.report.culpritCode);
+  const picker = '[flt-semantics-identifier^="sicha-report-culprit-"]';
+  await reveal(a.page, picker);
+  phase = "report-select-culprit";
+  const pickerBounds = await a.page.$eval(picker, (element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+    };
+  });
+  const pointerX = pickerBounds.x + pickerBounds.width / 2;
+  const pointerY = pickerBounds.y + pickerBounds.height / 2;
+  assert.ok(pickerBounds.width > 0 && pickerBounds.height > 0);
+  assert.ok(pointerX >= 0 && pointerX < a.page.viewport().width);
+  assert.ok(pointerY >= 0 && pointerY < a.page.viewport().height);
+  await a.page.mouse.click(pointerX, pointerY);
+  phase = "report-menu-open";
+  await a.page.waitForSelector('[role="menu"]');
+  phase = "report-menu-option";
+  const person = a.material.persons[0];
+  await a.page.locator(`aria/${person.name} (${person.code})`).click();
+  await a.page.waitForSelector('[role="menu"]', { hidden: true });
+  for (const [field, label] of [
+    ["method", "방법"],
+    ["time", "시간"],
+    ["motive", "동기"],
+    ["evidence", "근거"],
+  ]) {
+    phase = "report-input-" + field;
+    await input(a.page, label, fixture.report[field]);
+  }
+  phase = "report-hide-editor";
+  await hideEditor(a, "근거", fixture.report.evidence, "report");
+  await reveal(a.page, 'textarea[aria-label*="근거"]');
+  await a.page.locator('textarea[aria-label*="근거"]').click();
+  await a.page.waitForFunction(
+    (text) =>
+      Array.from(
+        document.querySelectorAll('textarea[aria-label*="근거"]'),
+      ).some((element) => element.value === text),
+    {},
+    fixture.report.evidence,
+  );
+  assert.equal(counters.reportEdit, 0);
+  await storage(a, Object.values(fixture.report));
+  const oldReport = await a.page.waitForSelector(
+    'textarea[aria-label*="근거"]',
+  );
+  await dropMutation(a, BASE + "/report", () =>
+    button(a.page, "공동 초안 저장"),
+  );
+  phase = "report-original-body";
+  const edit = a.requests.find((request) => request.method === "PATCH");
+  assert.deepEqual(edit.value.report, fixture.report);
+  assert.equal(
+    await oldReport.evaluate(
+      (element) => element.value === "" && element.defaultValue === "",
+    ),
+    true,
+  );
+  await oldReport.dispose();
+  phase = "report-unknown-read";
+  await unknownRead(a, edit.path, 1);
+  phase = "report-original-replay";
+  await replayMutation(a, edit, "reportReplay");
+  await signalState(() => a.report?.draftRev !== edit.value.expectedDraftRev);
+  assert.deepEqual(a.report.report, fixture.report);
+
+  phase = "report-fixed-proposal";
+  await actionResponse(
+    a.page,
+    BASE + "/report/proposals",
+    () => button(a.page, "현재 초안 제안"),
+    201,
+  );
+  await signalState(() => a.report?.proposal?.state === "PROPOSED");
+  const proposal = structuredClone(a.report.proposal);
+  assert.equal(proposal.canAccept, false);
+  assert.equal(proposal.proposerSlot, a.detail.self.slot);
+  assert.equal(proposal.sourceRev, a.report.draftRev);
+  phase = "report-partner-current-proposal";
+  await b.page.bringToFront();
+  await actionResponse(b.page, BASE + "/report", () =>
+    button(b.page, "서버 상태 다시 조회"),
+  );
+  await signalState(() => b.report?.proposal?.reportKey === proposal.reportKey);
+  assert.deepEqual(b.report.report, fixture.report);
+  assert.equal(b.report.draftRev, proposal.sourceRev);
+  assert.equal(b.report.proposal.canAccept, true);
+  const respond = BASE + "/report/proposals/" + proposal.reportKey + "/respond";
+  phase = "report-explicit-partner-consent";
+  await actionResponse(b.page, respond, () =>
+    button(b.page, "제안 수락 및 판정 접수"),
+  );
+  await signalState(() => b.receipts.some((item) => item.path === respond));
+  const accepted = b.receipts.find((item) => item.path === respond).value;
+  assert.equal(accepted.action, "REPORT_ACCEPT");
+  assert.equal(accepted.original.reportKey, proposal.reportKey);
+  assert.equal(accepted.original.submitNo, "1");
+  assert.match(accepted.original.jobKey, UUID4);
+  assert.equal(
+    Date.parse(accepted.original.gradeDeadline) -
+      Date.parse(accepted.original.acceptedAt),
+    120000,
+  );
+  assert.equal(
+    b.requests.find((item) => item.path === respond).value.decision,
+    "ACCEPT",
+  );
+
+  phase = "report-worker-result-protected";
+  // 마지막 자료 관측을 끝낸 실제 숨김 탭에서만 소비를 시작해 종료와 자료 조회의 경합을 분리한다.
+  const covers = [];
+  for (const state of [a, b]) {
+    const cover = await state.context.newPage();
+    await cover.goto("about:blank");
+    await cover.bringToFront();
+    await state.page.waitForFunction(() => document.hidden, { polling: 100 });
+    covers.push(cover);
+  }
+  await signalState(
+    () => pending.size === 0 && a.network.size === 0 && b.network.size === 0,
+  );
+  process.stdout.write('{"checkpoint":"grade"}\n');
+  const gradingUntil = Date.now() + 60000;
+  let graded;
+  do {
+    graded = await probe(BASE + "/result", "GET", bearerHeaders(b));
+    if (graded.status === 200) break;
+    assert.equal(graded.status, 409);
+    assert.equal(graded.value.code, "RESULT_NOT_READY");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < gradingUntil);
+  assert.equal(graded.status, 200);
+  protectedResult(graded.value);
+  for (const [index, state] of [a, b].entries()) {
+    await state.page.bringToFront();
+    await covers[index].close();
+  }
+  await signalState(() => a.result !== null && b.result !== null);
+  protectedResult(await refreshResult(a));
+  protectedResult(await refreshResult(b));
+  for (const state of [a, b]) await protectedScreen(state);
+
+  phase = "report-feedback-hide";
+  const erased = await feedbackInput(a, "숨김 " + randomUUID());
+  await hideEditor(a, "채점 우려 (선택)", erased.gradingConcern, "feedback");
+  await refreshResult(a);
+  await absentPrivate(a, Object.values(erased));
+  const feedbackA = await feedbackInput(a, "A " + randomUUID());
+  const oldFeedback = await a.page.waitForSelector(
+    'textarea[aria-label*="채점 우려 (선택)"]',
+  );
+  await storage(a, Object.values(feedbackA));
+  await dropMutation(a, BASE + "/feedback", () =>
+    button(a.page, "본인 피드백 제출"),
+  );
+  const originalA = a.requests.find((item) => item.path === BASE + "/feedback");
+  assert.deepEqual(originalA.value.feedback, feedbackA);
+  await unknownRead(a, originalA.path, 1);
+  assert.equal(
+    await oldFeedback.evaluate(
+      (element) => element.value === "" && element.defaultValue === "",
+    ),
+    true,
+  );
+  await oldFeedback.dispose();
+  await replayMutation(a, originalA, "feedbackReplay");
+  const own = await refreshResult(a);
+  assert.equal(own.resultPhase, "AVAILABLE");
+  assert.equal(own.reports[0].reportKey, proposal.reportKey);
+  protectedResult(await refreshResult(b));
+  await protectedScreen(b);
+  await absentPrivate(b, [
+    ...Object.values(fixture.report),
+    ...Object.values(feedbackA),
+  ]);
+  counters.ownFeedbackIsolation++;
+  await button(a.page, "제출본과 해설 열기");
+  await reveal(a.page, "text/" + own.revealText);
+  await a.page.waitForFunction(
+    (text) =>
+      document.body.textContent.includes(text) ||
+      [...document.querySelectorAll("[aria-label]")].some((element) =>
+        element.getAttribute("aria-label").includes(text),
+      ),
+    {},
+    own.revealText,
+  );
+
+  phase = "report-feedback-owner-unknown";
+  const feedbackB = await feedbackInput(b, "B " + randomUUID());
+  await dropMutation(b, BASE + "/feedback", () =>
+    button(b.page, "본인 피드백 제출"),
+  );
+  const originalB = b.requests.find((item) => item.path === BASE + "/feedback");
+  assert.deepEqual(originalB.value.feedback, feedbackB);
+  await unknownRead(b, originalB.path, 1);
+  const oldAccess = b.access;
+  await logout(b);
+  await absentPrivate(b, [...Object.values(feedbackB), own.revealText]);
+  const loggedOut = await probe(
+    BASE + "/result",
+    "GET",
+    bearerHeaders({ access: oldAccess }),
+  );
+  assert.equal(loggedOut.status, 401);
+  const loggedOutMutation = await probe(
+    originalB.path,
+    originalB.method,
+    bearerHeaders({ access: oldAccess }),
+    originalB.body,
+  );
+  assert.equal(loggedOutMutation.status, 401);
+
+  phase = "report-account-other-owner";
+  await accountResult(b, fixture.accounts[0], [
+    ...Object.values(feedbackB),
+    own.revealText,
+  ]);
+  const conflict = await probe(
+    originalB.path,
+    originalB.method,
+    bearerHeaders(b),
+    originalB.body,
+  );
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.value.code, "REQUEST_KEY_CONFLICT");
+  assert.equal(counters.feedback, 3);
+  counters.oldOwnerDenied++;
+  await logout(b);
+  phase = "report-account-original-owner";
+  await accountResult(b, fixture.accounts[1], [
+    ...Object.values(feedbackB),
+    own.revealText,
+  ]);
+  assert.equal(counters.feedback, 3);
+  counters.accountPurged = 1;
+  await button(b.page, "제출본과 해설 열기");
+  await reveal(b.page, "text/" + own.revealText);
+
+  phase = "report-revoke-current-access";
+  await signalState(() => pending.size === 0);
+  // 원문·식별자 없는 제어 영수증으로 Java의 실제 관리자 회수를 요청한다.
+  process.stdout.write('{"checkpoint":"revoke"}\n');
+  const until = Date.now() + 12000;
+  let revoked;
+  do {
+    revoked = await probe(BASE + "/result", "GET", bearerHeaders(b));
+    if (revoked.status !== 200) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < until);
+  assert.equal(revoked.status, 409);
+  assert.equal(revoked.value.code, "INVITATION_INVALIDATED");
+  assert.deepEqual(Object.keys(revoked.value).sort(), [
+    "code",
+    "message",
+    "requestId",
+  ]);
+  counters.revokedResult++;
+  const denied = await probe(
+    originalB.path,
+    originalB.method,
+    bearerHeaders(b),
+    originalB.body,
+  );
+  assert.equal(denied.status, 409);
+  assert.equal(denied.value.code, "INVITATION_INVALIDATED");
+  counters.revokedMutation++;
+  for (const state of [a, b]) {
+    await actionResponse(
+      state.page,
+      BASE,
+      () => button(state.page, "서버 상태 다시 조회"),
+      409,
+    );
+    await absentPrivate(state, [
+      own.revealText,
+      ...Object.values(fixture.report),
+    ]);
+    await logout(state);
+  }
 }
 
 try {
@@ -1057,12 +2005,12 @@ try {
   phase = "separate-https-negative-boundaries";
   const headers = bearerHeaders(a);
   for (const [path, method, additions, expected] of [
-    [BASE + "/report", "GET", {}, 403],
-    [BASE + "/result", "GET", {}, 403],
-    [BASE + "/forfeit", "POST", {}, 403],
-    [BASE + "/feedback", "POST", {}, 403],
-    [BASE + "/report", "PATCH", {}, 403],
-    [BASE + "/report/proposals", "POST", {}, 403],
+    [BASE + "/report", "POST", {}, 403],
+    [BASE + "/result", "PATCH", {}, 403],
+    [BASE + "/forfeit", "GET", {}, 403],
+    [BASE + "/feedback", "GET", {}, 403],
+    [BASE + "/report", "DELETE", {}, 403],
+    [BASE + "/report/proposals", "GET", {}, 403],
     [BASE + "/hints/4/open", "POST", {}, 403],
     [BASE + "/materials", "POST", {}, 403],
     ["/api/playtests/" + fixture.testKey.toUpperCase(), "GET", {}, 403],
@@ -1105,60 +2053,64 @@ try {
     assert.deepEqual(result.value.items, []);
   }
 
-  phase = "logout-account-change-purge";
-  const oldClueTitles = a.material.clues.map((clue) => clue.title);
-  await logout(a);
-  await a.page.waitForFunction(
-    (titles) =>
-      titles.every((title) => !document.body.textContent.includes(title)),
-    {},
-    oldClueTitles,
-  );
-  await a.page.waitForFunction(
-    (notes) =>
-      !Array.from(document.querySelectorAll("input,textarea")).some((element) =>
-        notes.some((note) => element.value.includes(note)),
-      ),
-    {},
-    [noteA, noteB],
-  );
-  // 다른 실제 계정으로 같은 페이지를 재인증한 뒤 기존 역할 메모가 되살아나지 않는지 확인한다.
-  a.access = null;
-  a.detail = null;
-  a.notice = null;
-  a.material = null;
-  // 조사 화면 로그아웃은 초대 목록으로 복귀하며 이미 동의한 회원의 실제 이동만 수행한다.
-  await login(a, fixture.accounts[1], "invitations");
-  // RUNNING 목록 제외를 우회해 동의를 만들지 않는다. 실제 내부 deep-link를 같은 문서에서 연다.
-  const documentOrigin = await a.page.evaluate(() => performance.timeOrigin);
-  await a.page.goto(
-    origin.origin + "/player/#/investigation/" + fixture.testKey,
-  );
-  assert.equal(
-    await a.page.evaluate(() => performance.timeOrigin),
-    documentOrigin,
-  );
-  await route(a.page, "investigation/" + fixture.testKey);
-  await materials(a);
-  assert.equal(a.material.role.code, b.material.role.code);
-  await a.page.waitForFunction(
-    (titles) =>
-      titles.every((title) => !document.body.textContent.includes(title)),
-    {},
-    oldClueTitles,
-  );
-  await reveal(a.page, 'textarea[aria-label*="개인 조사 기록"]');
-  const freshNotes = await a.page.waitForSelector(
-    'textarea[aria-label*="개인 조사 기록"]',
-  );
-  await a.page.waitForFunction(
-    (element) => element.value === "",
-    {},
-    freshNotes,
-  );
-  counters.accountPurged = 1;
-  await logout(a);
-  await logout(b);
+  if (reportMode) {
+    await reportLifecycle(a, b);
+  } else {
+    phase = "logout-account-change-purge";
+    const oldClueTitles = a.material.clues.map((clue) => clue.title);
+    await logout(a);
+    await a.page.waitForFunction(
+      (titles) =>
+        titles.every((title) => !document.body.textContent.includes(title)),
+      {},
+      oldClueTitles,
+    );
+    await a.page.waitForFunction(
+      (notes) =>
+        !Array.from(document.querySelectorAll("input,textarea")).some(
+          (element) => notes.some((note) => element.value.includes(note)),
+        ),
+      {},
+      [noteA, noteB],
+    );
+    // 다른 실제 계정으로 같은 페이지를 재인증한 뒤 기존 역할 메모가 되살아나지 않는지 확인한다.
+    a.access = null;
+    a.detail = null;
+    a.notice = null;
+    a.material = null;
+    // 조사 화면 로그아웃은 초대 목록으로 복귀하며 이미 동의한 회원의 실제 이동만 수행한다.
+    await login(a, fixture.accounts[1], "invitations");
+    // RUNNING 목록 제외를 우회해 동의를 만들지 않는다. 실제 내부 deep-link를 같은 문서에서 연다.
+    const documentOrigin = await a.page.evaluate(() => performance.timeOrigin);
+    await a.page.goto(
+      origin.origin + "/player/#/investigation/" + fixture.testKey,
+    );
+    assert.equal(
+      await a.page.evaluate(() => performance.timeOrigin),
+      documentOrigin,
+    );
+    await route(a.page, "investigation/" + fixture.testKey);
+    await materials(a);
+    assert.equal(a.material.role.code, b.material.role.code);
+    await a.page.waitForFunction(
+      (titles) =>
+        titles.every((title) => !document.body.textContent.includes(title)),
+      {},
+      oldClueTitles,
+    );
+    await reveal(a.page, 'textarea[aria-label*="개인 조사 기록"]');
+    const freshNotes = await a.page.waitForSelector(
+      'textarea[aria-label*="개인 조사 기록"]',
+    );
+    await a.page.waitForFunction(
+      (element) => element.value === "",
+      {},
+      freshNotes,
+    );
+    counters.accountPurged = 1;
+    await logout(a);
+    await logout(b);
+  }
   for (const state of states) {
     const cookies = await state.context.cookies();
     assert.equal(
@@ -1197,7 +2149,7 @@ try {
         };
       return state.page
         .evaluate(
-          ({ role, clues }) => {
+          ({ role, clues, person }) => {
             const text = document.body.textContent;
             const names = Array.from(document.querySelectorAll("[aria-label]"))
               .map((element) => element.getAttribute("aria-label"))
@@ -1224,6 +2176,83 @@ try {
               ),
               runningRendered: text.includes("진행 상태: RUNNING"),
               notesLabelRendered: text.includes("개인 조사 기록 (임시 메모)"),
+              investigationRoute: location.hash.startsWith("#/investigation/"),
+              invitationsRoute: location.hash === "#/invitations",
+              loginRoute: location.hash === "#/login",
+              reportFormatError:
+                text.includes("보고서 형식이 올바르지 않습니다"),
+              reportVisible: text.includes("공동 보고서"),
+              ownerIdentifierCount: document.querySelectorAll(
+                '[flt-semantics-identifier^="sicha-private-report-"]',
+              ).length,
+              methodControlCount:
+                document.querySelectorAll('[aria-label*="방법"]').length,
+              menuCount: document.querySelectorAll('[role="menu"]').length,
+              documentFocused: document.hasFocus(),
+              recoveryControls: Array.from(
+                document.querySelectorAll('[role="button"][aria-label]'),
+              )
+                .filter((element) =>
+                  [
+                    "서버 상태 다시 조회",
+                    "원본 요청 다시 보내기",
+                    "현재 초안 제안",
+                    "제안 수락 및 판정 접수",
+                  ].includes(element.getAttribute("aria-label").trim()),
+                )
+                .map((element) => {
+                  const bounds = element.getBoundingClientRect();
+                  const hit = document.elementFromPoint(
+                    bounds.x + bounds.width / 2,
+                    bounds.y + bounds.height / 2,
+                  );
+                  return {
+                    original:
+                      element.getAttribute("aria-label").trim() ===
+                      "원본 요청 다시 보내기",
+                    disabled: element.getAttribute("aria-disabled"),
+                    width: bounds.width,
+                    height: bounds.height,
+                    y: bounds.y,
+                    ownHit: hit !== null && element.contains(hit),
+                    hitTag: hit?.tagName ?? null,
+                    hitRole: hit?.getAttribute("role") ?? null,
+                  };
+                }),
+              menuGeometry: Array.from(
+                document.querySelectorAll('[role="menu"]'),
+              ).map((element) => {
+                const bounds = element.getBoundingClientRect();
+                return {
+                  tag: element.tagName,
+                  width: bounds.width,
+                  height: bounds.height,
+                  x: bounds.x,
+                  y: bounds.y,
+                  children: element.children.length,
+                  owned: (element.getAttribute("aria-owns") ?? "")
+                    .split(" ")
+                    .filter(Boolean).length,
+                };
+              }),
+              menuStructure: Array.from(
+                document.querySelectorAll(
+                  '[role="menuitem"], [role="menu"] [aria-label]',
+                ),
+              )
+                .slice(0, 8)
+                .map((element) => ({
+                  tag: element.tagName,
+                  role: element.getAttribute("role"),
+                  codeInLabel: (
+                    element.getAttribute("aria-label") ?? ""
+                  ).includes(person.code),
+                  nameInLabel: (
+                    element.getAttribute("aria-label") ?? ""
+                  ).includes(person.name),
+                  codeInText: (element.textContent ?? "").includes(person.code),
+                  nameInText: (element.textContent ?? "").includes(person.name),
+                })),
               privateIdentifierCount: document.querySelectorAll(
                 '[flt-semantics-identifier^="sicha-private-note-"]',
               ).length,
@@ -1259,7 +2288,11 @@ try {
                 document.querySelectorAll("[aria-label]").length,
             };
           },
-          { role: state.material.role, clues: state.material.clues },
+          {
+            role: state.material.role,
+            clues: state.material.clues,
+            person: state.material.persons[0],
+          },
         )
         .catch(() => ({ unavailable: true }));
     }),

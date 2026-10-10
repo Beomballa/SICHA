@@ -100,7 +100,7 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
         return body(result);
     }
 
-    /** 웹 허용 목록·raw 커서·중복 헤더는 실제 PG 회원 자격을 사용해 검사한다. */
+    /** 웹 조사·보고서 허용 목록과 raw 커서·중복 헤더를 실제 PG 회원 자격으로 검사한다. */
     @Test
     void browserBearerAllowlistAndRawCursorBoundary() throws Exception {
         playtestPolicy();
@@ -154,17 +154,61 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                     .andExpect(status().isBadRequest());
         }
         String key = UUID.randomUUID().toString();
-        for (String suffix : List.of("", "/policy-notice", "/materials")) {
+        for (String suffix : List.of("", "/policy-notice", "/materials", "/report", "/result")) {
             mvc.perform(protectedWeb("GET", "/api/playtests/" + key + suffix, access))
                     .andExpect(status().isNotFound());
         }
+        String base = "/api/playtests/" + key;
+        String proposalKey = UUID.randomUUID().toString();
         for (String path :
                 List.of(
-                        "/api/playtests/" + key + "/report",
-                        "/api/playtests/" + key + "/result",
-                        "/api/playtests/" + key + "/forfeit",
-                        "/api/playtests/" + key + "/feedback",
-                        "/api/playtests/" + key + "/report/proposals",
+                        base + "/report",
+                        base + "/report/proposals",
+                        base + "/report/proposals/" + proposalKey + "/respond",
+                        base + "/forfeit",
+                        base + "/feedback")) {
+            String method = path.equals(base + "/report") ? "PATCH" : "POST";
+            mvc.perform(
+                            protectedWeb(method, path, access)
+                                    .contentType("application/json")
+                                    .content(""))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(protectedWeb(method, path + "?unexpected=1", access))
+                    .andExpect(status().isBadRequest());
+            for (String wrong : List.of("PUT", "DELETE", "HEAD", "OPTIONS")) {
+                mvc.perform(protectedWeb(wrong, path, access)).andExpect(status().isForbidden());
+            }
+            mvc.perform(protectedWeb(method, path + "/", access)).andExpect(status().isForbidden());
+        }
+        for (String path : List.of(base + "/report", base + "/result")) {
+            mvc.perform(protectedWeb("GET", path + "?unexpected=1", access))
+                    .andExpect(status().isBadRequest());
+        }
+        for (String path :
+                List.of(
+                        base + "/report/proposals",
+                        base + "/report/proposals/" + proposalKey + "/respond",
+                        base + "/forfeit",
+                        base + "/feedback")) {
+            mvc.perform(protectedWeb("GET", path, access)).andExpect(status().isForbidden());
+        }
+        mvc.perform(protectedWeb("POST", base + "/report", access))
+                .andExpect(status().isForbidden());
+        mvc.perform(protectedWeb("PATCH", base + "/result", access))
+                .andExpect(status().isForbidden());
+        for (String path :
+                List.of(
+                        base + "/report/proposals/not-a-uuid/respond",
+                        base + "/report/proposals/" + proposalKey.toUpperCase() + "/respond",
+                        base + "/report/proposals/11111111-1111-1111-8111-111111111111/respond",
+                        base + "/report/proposals/" + proposalKey + "/respond/",
+                        base + "/report/",
+                        base + "/result/",
+                        base + "/forfeit/",
+                        base + "/feedback/",
+                        "/api/playtests/" + key.toUpperCase() + "/report",
+                        "/api/playtests/11111111-1111-1111-8111-111111111111/report",
+                        "/api/playtests/not-a-uuid/result",
                         "/api/playtests/" + key + "/hints/4/open",
                         "/api/playtests/" + key.toUpperCase(),
                         "/api/playtests/11111111-1111-1111-8111-111111111111",
@@ -213,6 +257,8 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
         }
         mvc.perform(protectedWeb("GET", "/api/playtests/identity?cursor=1", access))
                 .andExpect(status().isBadRequest());
+        mvc.perform(protectedWeb("GET", base + "/report", access).header("Cookie", "probe=1"))
+                .andExpect(status().isForbidden());
         mvc.perform(me(access).header("Cookie", "nonsecret=probe"))
                 .andExpect(status().isForbidden());
         mvc.perform(me(access).header("Origin", "https://foreign.example.invalid"))

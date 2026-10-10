@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../core/player_api.dart';
 import '../core/player_theme.dart';
+import 'private_note_renderer_native.dart'
+    if (dart.library.js_interop) 'private_note_renderer_web.dart';
 
 /// 공동 초안의 다섯 필드를 편집하되 저장·동의는 현재 서버 조회본으로만 허용한다.
 class ReportSheet extends StatefulWidget {
@@ -37,26 +40,86 @@ class ReportSheet extends StatefulWidget {
   State<ReportSheet> createState() => _ReportSheetState();
 }
 
-class _ReportSheetState extends State<ReportSheet> {
+class _ReportSheetState extends State<ReportSheet> with WidgetsBindingObserver {
   late Map<String, dynamic> _report;
+  final _editors = <String, TextEditingController>{};
+  final _identifiers = <String, String>{};
+  final _culpritIdentifier = 'sicha-report-culprit-${requestKey()}';
+  bool _retired = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _report = Map<String, dynamic>.from(widget.report);
+    for (final field in const ['method', 'time', 'motive', 'evidence']) {
+      _editors[field] = TextEditingController(text: _report[field] as String);
+      _identifiers[field] = 'sicha-private-report-${requestKey()}';
+    }
   }
 
   /// 서버 갱신은 편집 중인 입력을 덮지 않고, 편집 전 조회본만 따라간다.
   @override
   void didUpdateWidget(covariant ReportSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled &&
+        oldWidget.submissionState != 'PENDING' &&
+        (!widget.enabled || widget.submissionState == 'PENDING')) {
+      _eraseRenderers();
+    }
     if (!widget.edited && !identical(oldWidget.report, widget.report)) {
       _report = Map<String, dynamic>.from(widget.report);
+      for (final field in _editors.keys) {
+        final text = _report[field] as String;
+        if (_editors[field]!.text != text) _editors[field]!.text = text;
+      }
     }
+  }
+
+  /// 입력 비활성화 전에 옛 DOM만 지우며 서버 조회본과 편집 초안은 메모리에 보존한다.
+  void _eraseRenderers() {
+    for (final identifier in _identifiers.values) {
+      privateEditorEraser?.call(identifier);
+    }
+  }
+
+  /// 비활성화·폐기 시 이 시트가 소유한 텍스트와 semantic textarea만 지운다.
+  void _eraseEditors() {
+    _retired = true;
+    _eraseRenderers();
+    for (final entry in _editors.entries) {
+      entry.value.clear();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _eraseEditors();
+  }
+
+  /// 자식 연결 해제 전 DOM만 지운다. 컨트롤러 알림은 자식 제거 뒤 dispose에서 처리한다.
+  @override
+  void deactivate() {
+    _retired = true;
+    _eraseRenderers();
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    _eraseEditors();
+    WidgetsBinding.instance.removeObserver(this);
+    for (final controller in _editors.values) {
+      controller.dispose();
+    }
+    super.dispose();
   }
 
   /// 입력 변경은 화면 소유자에게 복사해 조회 실패와 재조회 사이에도 보존한다.
   void _change(String field, String? value) {
+    if (!mounted || _retired || !widget.enabled) {
+      return;
+    }
     _report = {..._report, field: value};
     widget.onChanged(Map<String, dynamic>.from(_report));
   }
@@ -79,20 +142,25 @@ class _ReportSheetState extends State<ReportSheet> {
         ),
       if (!_valid)
         const PlayerNotice('현재 초안의 지목 인물이 배정된 인물 목록에 없습니다. 인물을 다시 선택해 주세요.'),
-      DropdownButtonFormField<String>(
-        initialValue: _valid ? _report['culpritCode'] as String? : null,
-        decoration: const InputDecoration(labelText: '지목 인물'),
-        items: [
-          const DropdownMenuItem<String>(value: null, child: Text('미선택')),
-          for (final person in widget.persons)
-            DropdownMenuItem<String>(
-              value: person['code'] as String,
-              child: Text('${person['name']} (${person['code']})'),
-            ),
-        ],
-        onChanged: widget.enabled && widget.submissionState != 'PENDING'
-            ? (value) => _change('culpritCode', value)
-            : null,
+      Semantics(
+        identifier: _culpritIdentifier,
+        container: true,
+        explicitChildNodes: true,
+        child: DropdownButtonFormField<String>(
+          initialValue: _valid ? _report['culpritCode'] as String? : null,
+          decoration: const InputDecoration(labelText: '지목 인물'),
+          items: [
+            const DropdownMenuItem<String>(value: null, child: Text('미선택')),
+            for (final person in widget.persons)
+              DropdownMenuItem<String>(
+                value: person['code'] as String,
+                child: Text('${person['name']} (${person['code']})'),
+              ),
+          ],
+          onChanged: widget.enabled && widget.submissionState != 'PENDING'
+              ? (value) => _change('culpritCode', value)
+              : null,
+        ),
       ),
       for (final field in const {
         'method': '방법',
@@ -104,13 +172,17 @@ class _ReportSheetState extends State<ReportSheet> {
           color: PlayerTheme.surface,
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: TextFormField(
-              key: ValueKey('${field.key}:${widget.report[field.key]}'),
-              initialValue: _report[field.key] as String,
-              maxLines: 3,
-              enabled: widget.enabled && widget.submissionState != 'PENDING',
-              decoration: InputDecoration(labelText: field.value),
-              onChanged: (value) => _change(field.key, value),
+            child: Semantics(
+              identifier: _identifiers[field.key],
+              container: true,
+              explicitChildNodes: true,
+              child: TextFormField(
+                controller: _editors[field.key],
+                maxLines: 3,
+                enabled: widget.enabled && widget.submissionState != 'PENDING',
+                decoration: InputDecoration(labelText: field.value),
+                onChanged: (value) => _change(field.key, value),
+              ),
             ),
           ),
         ),

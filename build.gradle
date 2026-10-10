@@ -109,7 +109,7 @@ tasks.named('check') {
 }
 
 tasks.register('playerWebBrowserTest', Test) {
-    description = '명시한 Flutter 웹 산출물과 폐기 HTTPS/PG에서 회원 인증·복구를 검증한다.'
+    description = '명시한 Flutter 웹 산출물과 폐기 HTTPS/PG에서 회원 인증·조사·공동 보고서와 보호 결과를 검증한다.'
     group = 'verification'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
@@ -117,6 +117,7 @@ tasks.register('playerWebBrowserTest', Test) {
     filter {
         includeTestsMatching 'com.reasoning.common.member.MemberWebBrowserIT.webAuthenticationLifecycle'
         includeTestsMatching 'com.reasoning.common.member.MemberWebBrowserIT.webInvestigationLifecycle'
+        includeTestsMatching 'com.reasoning.common.member.MemberWebBrowserIT.webReportLifecycle'
     }
     useJUnitPlatform()
     inputs.property('playerWebOrigin', providers.environmentVariable('PLAYER_WEB_TEST_ORIGIN').orElse(''))

@@ -755,7 +755,14 @@ public final class PlaytestInvitationService {
                   t.result_until,t.attempt_count,
                   (snap.payload->'policy'->>'attemptLimit')::int,
                   (snap.payload->'policy'->>'hintsPerPerson')::int,
-                  (SELECT count(*) FROM test_hint h WHERE h.test_id=t.id AND h.member_id=m.member_id)
+                  (SELECT count(*) FROM test_hint h WHERE h.test_id=t.id AND h.member_id=m.member_id),
+                  CASE
+                    WHEN EXISTS (SELECT 1 FROM test_report r WHERE r.test_id=t.id AND r.state='ACCEPTED')
+                      THEN 'PENDING'
+                    WHEN EXISTS (SELECT 1 FROM test_report r WHERE r.test_id=t.id AND r.state='PROPOSED')
+                      THEN 'PROPOSED'
+                    ELSE 'NONE'
+                  END
                 FROM play_test t JOIN review_snapshot snap ON snap.id=t.snapshot_id
                 JOIN grade_runtime r ON r.id=t.runtime_id
                 JOIN test_member m ON m.test_id=t.id AND m.member_id=?
@@ -793,7 +800,7 @@ public final class PlaytestInvitationService {
                                         ? null
                                         : rs.getTimestamp(22).toInstant(),
                                 rs.getTimestamp(23).toInstant(),
-                                "NONE",
+                                rs.getString(29),
                                 "RUNNING".equals(rs.getString(4))
                                         ? Math.max(0, rs.getInt(26) - rs.getInt(25))
                                         : null,
