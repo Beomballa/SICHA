@@ -33,8 +33,8 @@ public class PublicPageController {
         return "player/account";
     }
 
-    /** 사건 자료·자격을 서버 HTML에 포함하지 않고 회원용 단독 조사 문서만 제공한다. */
-    @GetMapping("/play")
+    /** 사건 자료·자격을 HTML에 포함하지 않고 동일 문서의 SOLO/COOP·초대 흐름을 제공한다. */
+    @GetMapping({"/play", "/coop-invite"})
     public String play() {
         return "player/play";
     }

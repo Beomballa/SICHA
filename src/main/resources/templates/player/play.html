@@ -4,9 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
-    <title>시차 · 단독 사건 조사</title>
+    <title>시차 · 사건 조사</title>
+    <script src="/player-common/invite-bootstrap.js"></script>
     <link rel="stylesheet" href="/player-public.css" />
-    <script type="module" src="/player-common/solo-page.mjs"></script>
+    <script type="module" src="/player-common/play-page.mjs"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">본문으로 바로 이동</a>
@@ -16,7 +17,7 @@
       </div>
     </header>
     <main id="main" class="shell" tabindex="-1">
-      <h1>단독 사건 조사</h1>
+      <h1>단독·협동 사건 조사</h1>
       <p>
         공개 가능한 사건만 서버에서 조회합니다. 실제 공개·수집 준비가 없으면
         게임을 시작할 수 없습니다.
@@ -25,6 +26,54 @@
         회원 상태를 확인하는 중입니다.
       </p>
       <p id="error" role="alert" hidden></p>
+      <section id="invite-login" class="panel" hidden>
+        <h2>초대를 받은 계정으로 로그인</h2>
+        <p>
+          초대 비밀은 이 문서에만 있습니다. 새로고침·다른 화면 이동·배경 전환
+          후에는 새 초대 링크가 필요합니다.
+        </p>
+        <form id="invite-login-form">
+          <label
+            >이메일<input
+              id="invite-email"
+              type="email"
+              autocomplete="username"
+              required
+          /></label>
+          <label
+            >비밀번호<input
+              id="invite-password"
+              type="password"
+              autocomplete="current-password"
+              required
+          /></label>
+          <div class="actions">
+            <button
+              id="invite-login-button"
+              class="primary-action"
+              type="submit"
+            >
+              이 문서에서 로그인
+            </button>
+          </div>
+        </form>
+      </section>
+      <section id="invite-preview" class="section" hidden>
+        <h2>협동 초대 확인</h2>
+        <p id="invite-description"></p>
+        <p id="invite-notice" class="notice-body"></p>
+        <label class="check-label"
+          ><input id="join-consent" type="checkbox" />현재 고지를 확인하고 이
+          방의 협동 게임 참가에 동의합니다.</label
+        >
+        <div class="actions">
+          <button id="inspect-invite" class="secondary-action" type="button">
+            초대와 고지 직접 확인</button
+          ><button id="join" class="primary-action" type="button">
+            동의한 초대 참가
+          </button>
+        </div>
+      </section>
       <div class="actions">
         <button id="connect" class="secondary-action" type="button">
           회원 연결 복구</button
@@ -59,13 +108,19 @@
         <p id="story-intro" class="notice-body"></p>
         <p id="story-setting" class="notice-body"></p>
         <p id="story-details"></p>
+        <label
+          >조사 방식<select id="mode">
+            <option value="SOLO">혼자 두 역할 조사</option>
+            <option value="COOP">서로 다른 두 계정 협동</option>
+          </select></label
+        >
         <h3>현재 게임 수집 고지</h3>
         <p id="notice-version"></p>
         <p id="notice-body" class="notice-body"></p>
         <p id="notice-contact"></p>
         <label class="check-label"
           ><input id="create-consent" type="checkbox" />현재 고지를 읽고 이
-          사건의 단독 게임 참여에 동의합니다.</label
+          사건의 선택한 방식 게임 참여에 동의합니다.</label
         >
         <div class="actions">
           <button id="create" class="primary-action" type="button">
@@ -96,7 +151,7 @@
         <h2 id="investigation-title">조사 자료</h2>
         <p id="basic-intro" class="notice-body"></p>
         <p id="basic-setting" class="notice-body"></p>
-        <h3>고정된 두 역할</h3>
+        <h3 id="roles-title">고정된 두 역할</h3>
         <div id="roles" class="guide"></div>
         <h3>인물</h3>
         <div id="persons" class="guide"></div>
@@ -164,6 +219,80 @@
         <div class="actions">
           <button id="submit" class="primary-action" type="button">
             동의한 서버 저장본 제출
+          </button>
+        </div>
+      </section>
+      <section id="lobby" class="section" hidden>
+        <h2>협동 대기실</h2>
+        <p id="participants"></p>
+        <p>
+          각자 자신의 화면을 사용하고 대면이나 외부 통화로 자료를 비교하세요.
+          내장 채팅·음성은 제공하지 않습니다.
+        </p>
+        <label class="check-label"
+          ><input id="ready-consent" type="checkbox" />현재 사건 선택과 고지를
+          확인했습니다. 준비 상태를 변경합니다.</label
+        >
+        <label class="check-label"
+          ><input id="leave-consent" type="checkbox" />대기실을 나갑니다. 방장이
+          나가면 방이 취소됩니다.</label
+        >
+        <div class="actions">
+          <button id="issue-invite" class="secondary-action" type="button">
+            새 초대 발급</button
+          ><button id="ready" class="primary-action" type="button">
+            명시 준비</button
+          ><button id="unready" class="secondary-action" type="button">
+            준비 취소</button
+          ><button
+            id="selection-refresh"
+            class="secondary-action"
+            type="button"
+          >
+            최신 사건 선택 직접 갱신</button
+          ><button id="leave" class="secondary-action" type="button">
+            동의한 대기실 나가기
+          </button>
+        </div>
+        <div id="issued" hidden>
+          <label
+            >한 번만 발급된 초대 링크<textarea
+              id="issued-link"
+              readonly
+              rows="3"
+            ></textarea>
+          </label>
+          <p id="invite-expiry"></p>
+          <div class="actions">
+            <button id="copy-invite" class="secondary-action" type="button">
+              초대 링크 복사
+            </button>
+          </div>
+        </div>
+        <p id="reissue-notice" hidden>
+          재전송 영수증에는 초대 비밀이 없습니다. 새 초대 발급을 직접 실행해야
+          합니다.
+        </p>
+      </section>
+      <section id="proposal-section" class="section" hidden>
+        <h2>고정된 공동 보고서 제안</h2>
+        <p id="proposal-revision"></p>
+        <div id="proposal-report" class="panel notice-body"></div>
+        <label class="check-label"
+          ><input id="proposal-consent" type="checkbox" />이 고정 제출본과 현재
+          수정번호를 확인했습니다. 선택한 수락·거절·철회만 실행합니다.</label
+        >
+        <div class="actions">
+          <button id="accept-proposal" class="primary-action" type="button">
+            이 고정본 명시 수락</button
+          ><button id="reject-proposal" class="secondary-action" type="button">
+            이 제안 거절</button
+          ><button
+            id="withdraw-proposal"
+            class="secondary-action"
+            type="button"
+          >
+            내 제안 철회
           </button>
         </div>
       </section>

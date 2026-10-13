@@ -1,35 +1,37 @@
 import { WebApiError } from "./web-api.mjs";
 import { WebSessionBlocked } from "./web-session.mjs";
-import { parseReceipt } from "./solo-model.mjs";
+import { parseReceipt } from "./game-model.mjs";
 
 /**
  * 한 문서·인증 세대의 단일 원본 명령을 소유한다. 조회나 수정번호 변화로 성공을 추정하지 않는다.
  * @param {object} session 기존 회원 인증 조정자.
  * @param {function} purge 권한/문서 경계에서 원문 UI를 동기 폐기하는 함수.
  * @param {function} uuid 실제 브라우저 UUID 생성 함수. 테스트에서만 합성 경계를 주입한다.
+ * @param {function} mode 서버 확인된 방 또는 명시 생성 선택의 SOLO/COOP 모드를 반환한다. 명령 생성 때 고정한다.
  */
-export function createSoloClient(
+export function createGameClient(
   session,
   purge,
   uuid = () => crypto.randomUUID(),
+  mode = () => "SOLO",
 ) {
   let generation = 0;
   let intent = null;
   let disposed = false;
 
   /** 화면/계정 교체는 메모리 명령과 늦은 응답의 소유권을 함께 폐기한다. */
-  function clear() {
+  function clear(reason = "SCREEN_CHANGED") {
     generation += 1;
     intent = null;
-    purge();
+    purge(reason);
   }
   const unsubscribe = session.onClear(clear);
 
   /** 거절된 소유 방은 이전 자료로 표시하지 않으며 조회 오류는 정상 빈 결과가 아니다. */
-  async function read(path, parser) {
+  async function query(method, path, body, parser) {
     const fence = generation;
     try {
-      const value = await session.authorizedRequest("GET", path);
+      const value = await session.authorizedRequest(method, path, body);
       if (disposed || fence !== generation || !session.current())
         throw new WebSessionBlocked();
       return parser(value);
@@ -68,7 +70,12 @@ export function createSoloClient(
         !session.current()
       )
         throw new WebSessionBlocked();
-      const receipt = parseReceipt(value, command.action, command.gameKey);
+      const receipt = parseReceipt(
+        value,
+        command.action,
+        command.gameKey,
+        command.mode,
+      );
       intent = null;
       return receipt;
     } catch (failure) {
@@ -91,7 +98,12 @@ export function createSoloClient(
   }
 
   return Object.freeze({
-    read,
+    read(path, parser) {
+      return query("GET", path, undefined, parser);
+    },
+    inspect(path, body, parser) {
+      return query("POST", path, body, parser);
+    },
     clear,
     /** 성공 여부가 불확실한 원본의 비밀 없는 상태만 반환한다. */
     pending() {
@@ -108,6 +120,7 @@ export function createSoloClient(
         path,
         action,
         gameKey,
+        mode: mode(),
         generation,
         uncertain: false,
         bodyText: JSON.stringify({ ...body, requestKey: uuid() }),

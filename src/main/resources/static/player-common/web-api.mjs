@@ -21,7 +21,7 @@ const SECURITY_POSTS = new Set([
   "/api/member/auth/logout-all",
 ]);
 
-/** SOLO 단계의 고정 경로만 열고 query는 사건 목록의 단일 cursor/size에만 허용한다. */
+/** 기존 SOLO/COOP 고정 경로만 열고 query는 사건 목록의 단일 cursor/size에만 허용한다. */
 function gameRoute(method, raw) {
   const key =
     "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -73,10 +73,14 @@ function gameRoute(method, raw) {
   return (
     method === "POST" &&
     (path === "/api/games" ||
+      path === "/api/games/invitations/inspect" ||
+      path === "/api/games/invitations/join" ||
       new RegExp(
         "^/api/games/" +
           key +
-          "/(?:start|heartbeat|forfeit|report/submit|hints/[1-3]/open|clues/[A-Z0-9_]{1,32}/read)$",
+          "/(?:start|heartbeat|forfeit|report/submit|hints/[1-3]/open|clues/[A-Z0-9_]{1,32}/read|invitations|leave|ready|selection/refresh|report/proposals(?:/" +
+          key +
+          "/respond)?)$",
       ).test(path))
   );
 }
@@ -232,7 +236,10 @@ export function createWebApi(browser = globalThis.window) {
       if (
         response.status !==
         (path === BASE + "/email/signup/complete" ||
-        (method === "POST" && path === "/api/games")
+        (method === "POST" &&
+          (path === "/api/games" ||
+            path.endsWith("/invitations") ||
+            path.endsWith("/report/proposals")))
           ? 201
           : PUBLIC_POSTS.has(path) &&
               ["/email/signup", "/password/reset"].some((suffix) =>

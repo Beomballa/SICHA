@@ -144,7 +144,7 @@ export function createWebSession(browser = globalThis.window) {
   const read = () => browser.localStorage.getItem(KEY);
 
   /** 계정 변경·배경 전환 시 원문 소비자에게 동기 폐기를 통지한다. */
-  function clear() {
+  function clear(reason = "AUTH_CHANGED") {
     clearTimeout(expiryTimer);
     expiryTimer = null;
     access = null;
@@ -154,7 +154,7 @@ export function createWebSession(browser = globalThis.window) {
     generation += 1;
     for (const listener of listeners) {
       try {
-        listener();
+        listener(reason);
       } catch (_) {
         browser.reportError?.(
           new Error("회원 자료 폐기 처리 중 오류가 발생했습니다."),
@@ -190,7 +190,7 @@ export function createWebSession(browser = globalThis.window) {
 
   /** 불확실 명령은 반복하지 않으며 해당 명령 소유 표지만 차단 상태로 바꾼다. */
   async function command(epoch, operation, path, body) {
-    clear();
+    clear(operation === "refresh" ? "REFRESH" : "LOGIN");
     const fence = generation;
     const marker = { format: 1, epoch, operation, attempt: uuid() };
     let pending;
@@ -212,7 +212,7 @@ export function createWebSession(browser = globalThis.window) {
       access = credentials;
       if (credentials) {
         expiryTimer = setTimeout(
-          clear,
+          () => clear("EXPIRED"),
           Math.min(credentials.expires - Date.now(), 2147483647),
         );
       }
@@ -262,7 +262,7 @@ export function createWebSession(browser = globalThis.window) {
 
   /** 명시 로그인만 손상·불확실 표지를 기존 쿠키 회수 후 회복할 수 있다. */
   async function revoke(epoch, recovery = false) {
-    clear();
+    clear("LOGOUT");
     const fence = generation;
     const marker = { format: 1, epoch, operation: "logout", attempt: uuid() };
     const pending = write(marker);
@@ -306,13 +306,14 @@ export function createWebSession(browser = globalThis.window) {
       event.storageArea === browser.localStorage &&
       !current()
     )
-      clear();
+      clear("ACCOUNT_CHANGED");
   };
   const visibility = () => {
-    if (browser.document.visibilityState === "hidden") clear();
+    if (browser.document.visibilityState === "hidden") clear("BACKGROUND");
   };
+  const pagehide = () => clear("PAGE_HIDDEN");
   browser.addEventListener("storage", storage);
-  browser.addEventListener("pagehide", clear);
+  browser.addEventListener("pagehide", pagehide);
   browser.document.addEventListener("visibilitychange", visibility);
 
   /** 현재 문서 자격으로만 업무를 전송하고 계정·배경 전환 뒤 응답은 폐기한다. 자동 재전송하지 않는다. */
@@ -619,7 +620,7 @@ export function createWebSession(browser = globalThis.window) {
       disposed = true;
       clear();
       browser.removeEventListener("storage", storage);
-      browser.removeEventListener("pagehide", clear);
+      browser.removeEventListener("pagehide", pagehide);
       browser.document.removeEventListener("visibilitychange", visibility);
       listeners.clear();
     },

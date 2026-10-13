@@ -1,5 +1,5 @@
 import { createWebSession, WebSessionBlocked } from "./web-session.mjs";
-import { createSoloClient } from "./solo-client.mjs";
+import { createGameClient } from "./game-client.mjs";
 import { UUID4, WebApiError } from "./web-api.mjs";
 import {
   parseCatalog,
@@ -10,8 +10,10 @@ import {
   parseReport,
   parseReportBody,
   parseResult,
+  parseCoopReport,
+  parseInvitePreview,
   SoloFormatError,
-} from "./solo-model.mjs";
+} from "./game-model.mjs";
 
 const element = (id) => document.getElementById(id);
 const labels = {
@@ -21,6 +23,21 @@ const labels = {
   evidence: "근거",
 };
 let session, client;
+let invitation = null,
+  bootstrapFailed = false;
+try {
+  invitation = window.takeCoopInvitation?.() ?? null;
+} catch (_) {
+  bootstrapFailed = true;
+}
+let gameMode = invitation ? "COOP" : "SOLO";
+let invitePreview = null,
+  inviteNotice = null,
+  issuedLink = null,
+  issuedUntil = null;
+let proposalIdentity = null,
+  authHandoff = null;
+let inviteTimer = null;
 let busy = false,
   state = null,
   story = null,
@@ -38,7 +55,19 @@ let heartbeatTimer = null,
 let heartbeatBusy = false;
 
 /** 원문·DOM 입력·기본값·동의·타이머를 함께 폐기한다. 서버 상태를 추정하지 않는다. */
-function purge() {
+function purge(reason = "SCREEN_CHANGED") {
+  const handoff =
+    (authHandoff === "RESTORE" && reason === "REFRESH") ||
+    (authHandoff === "LOGIN" && ["LOGOUT", "LOGIN"].includes(reason));
+  if (!handoff) invitation = null;
+  invitePreview =
+    inviteNotice =
+    issuedLink =
+    issuedUntil =
+    proposalIdentity =
+      null;
+  clearTimeout(inviteTimer);
+  inviteTimer = null;
   clearInterval(heartbeatTimer);
   clearTimeout(pollTimer);
   clearTimeout(deadlineTimer);
@@ -72,6 +101,12 @@ function purge() {
     "basic-setting",
     "result-summary",
     "saved-revision",
+    "participants",
+    "proposal-revision",
+    "proposal-report",
+    "invite-description",
+    "invite-notice",
+    "invite-expiry",
   ])
     element(id).replaceChildren();
   for (const input of document.querySelectorAll("input, textarea")) {
@@ -124,8 +159,9 @@ function sameSaved() {
     saved &&
     state.rev === saved.rev &&
     state.draftRev === saved.draftRev &&
-    saved.submissionState === "NONE" &&
-    state.submissionState === "NONE"
+    saved.submissionState === state.submissionState &&
+    (state.submissionState === "NONE" ||
+      (gameMode === "COOP" && state.submissionState === "PROPOSED"))
   );
 }
 
@@ -134,6 +170,16 @@ function render() {
   const authenticated = !!session?.current();
   const pending = client?.pending();
   const running = state?.state === "RUNNING";
+  const coop = gameMode === "COOP";
+  element("mode").value = gameMode;
+  element("mode").disabled = busy || !!state || !!pending;
+  element("create").textContent = "동의한 " + gameMode + " 방 만들기";
+  element("start").textContent = coop
+    ? "두 계정 협동 조사 시작"
+    : "단독 조사 시작";
+  element("roles-title").textContent = coop
+    ? "내 고정 역할 자료"
+    : "고정된 두 역할";
   for (const button of document.querySelectorAll("button"))
     button.disabled =
       busy || !authenticated || !!pending || button.dataset.denied === "true";
@@ -153,7 +199,10 @@ function render() {
     !story || !notice || !element("create-consent").checked;
   element("investigation").hidden = !running || !materials;
   element("report-section").hidden =
-    !running || !saved || !materials || state.submissionState !== "NONE";
+    !running ||
+    !saved ||
+    !materials ||
+    !["NONE", "PROPOSED"].includes(state.submissionState);
   element("forfeit-section").hidden =
     !running || state.submissionState !== "NONE";
   element("forfeit").disabled ||= !element("forfeit-consent").checked;
@@ -165,11 +214,15 @@ function render() {
     saved &&
     Object.keys(labels).every((key) => saved.report[key].trim());
   element("submit").disabled ||=
+    !(!coop || state?.submissionState === "NONE") ||
     dirty ||
     stale ||
     !complete ||
     !sameSaved() ||
     !element("submit-consent").checked;
+  element("submit").textContent = coop
+    ? "동의한 저장본 고정 제안"
+    : "동의한 서버 저장본 제출";
   for (const input of document.querySelectorAll(
     "#report-form textarea, #report-form select",
   ))
@@ -183,6 +236,7 @@ function render() {
   element("result").hidden = result === null;
   element("uncertain").hidden = !pending?.uncertain;
   element("intent-name").textContent = pending?.action ?? "";
+  renderCoop(authenticated, pending);
   if (state) {
     element("game-title").textContent = state.title;
     element("game-state").textContent =
@@ -193,6 +247,85 @@ function render() {
       ? "서버 마감 시각: " + state.playDeadline
       : "대기실 서버 만료: " + state.lobbyExpiresAt;
   }
+}
+
+/** 협동 권한은 서버의 고정 역할/제안 권한만 따르고 초대 비밀을 조회로 복원하지 않는다. */
+function renderCoop(authenticated, pending) {
+  const waiting = state?.mode === "COOP" && state.state === "WAITING";
+  const proposal = saved?.proposal;
+  element("lobby").hidden = !waiting;
+  element("invite-login").hidden =
+    !invitation || invitation.invalid || authenticated;
+  element("invite-preview").hidden =
+    !invitation || invitation.invalid || !authenticated;
+  element("invite-login-button").disabled =
+    busy || !invitation || invitation.invalid;
+  element("invite-email").disabled = element("invite-password").disabled = busy;
+  element("join").disabled ||=
+    !invitePreview || !inviteNotice || !element("join-consent").checked;
+  element("join-consent").disabled =
+    busy || !!pending || !invitePreview || !inviteNotice;
+  element("issue-invite").disabled ||=
+    !waiting || !state.host || state.partner.joined || state.needsRefresh;
+  element("ready").disabled ||=
+    !waiting || !state.canReady || !element("ready-consent").checked;
+  element("unready").disabled ||= !waiting || !state.self.ready;
+  element("leave").disabled ||= !waiting || !element("leave-consent").checked;
+  element("selection-refresh").disabled ||=
+    !waiting || !state.host || !state.needsRefresh;
+  element("issued").hidden = !issuedLink;
+  element("copy-invite").disabled ||= !issuedLink;
+  element("issued-link").value = issuedLink ?? "";
+  element("invite-expiry").textContent = issuedUntil
+    ? "초대 만료: " + issuedUntil
+    : "";
+  if (waiting)
+    element("participants").textContent =
+      `내 자리 ${state.self.slot} · 방장 ${state.host} · 내 준비 ${state.self.effectiveReady} · 상대 참가 ${state.partner.joined} · 상대 준비 ${state.partner.effectiveReady} · 상대 접속 ${state.partner.online}`;
+  element("proposal-section").hidden = !proposal || state?.mode !== "COOP";
+  if (proposal) {
+    element("proposal-revision").textContent =
+      `고정 제안 ${proposal.reportKey} · 원본 초안 ${proposal.sourceRev} · 방 ${state.rev}`;
+    element("proposal-report").textContent =
+      "지목 인물: " +
+      proposal.report.culpritCode +
+      "\n" +
+      Object.entries(labels)
+        .map(([key, label]) => label + ": " + proposal.report[key])
+        .join("\n");
+  } else {
+    element("proposal-report").replaceChildren();
+    element("proposal-revision").replaceChildren();
+  }
+  const agreed = element("proposal-consent").checked && !dirty && !stale;
+  element("proposal-consent").disabled =
+    busy || !!pending || !proposal || dirty || stale;
+  element("accept-proposal").disabled ||= !proposal?.canAccept || !agreed;
+  element("reject-proposal").disabled ||= !proposal?.canReject || !agreed;
+  element("withdraw-proposal").disabled ||= !proposal?.canWithdraw || !agreed;
+}
+
+/** 초대와 별도 현행 고지를 같은 문서·자격에서 읽고 일치하는 경우에만 동의한다. */
+async function inspectInvitation() {
+  if (!invitation || invitation.invalid) throw new SoloFormatError();
+  const candidate = invitation;
+  const preview = await client.inspect(
+    "/api/games/invitations/inspect",
+    candidate,
+    (value) => parseInvitePreview(value, candidate.inviteKey),
+  );
+  const policy = await client.read(
+    "/api/member/privacy/policies/friendly",
+    (value) => parseNotice(value, preview),
+  );
+  if (invitation !== candidate) throw new WebSessionBlocked();
+  invitePreview = preview;
+  inviteNotice = policy;
+  element("join-consent").checked = false;
+  element("invite-description").textContent =
+    `${preview.title} · 난이도 ${preview.difficulty} · 초대 만료 ${preview.expiresAt}`;
+  element("invite-notice").textContent =
+    policy.body + "\n문의: " + policy.contact;
 }
 
 /** 독립 사용자 동작을 한 번 실행하며 실패해도 같은 명령을 자동 반복하지 않는다. */
@@ -429,39 +562,81 @@ async function loadGame() {
   if (!gameKey) throw new SoloFormatError();
   const key = gameKey;
   const next = await client.read("/api/games/" + key, (value) =>
-    parseState(value, key),
+    parseState(value, key, value.mode),
   );
+  gameMode = next.mode;
   let nextMaterials = null,
     nextReport = null,
     nextResult = null;
-  if (next.state === "RUNNING" && next.submissionState === "NONE") {
+  if (next.state === "RUNNING" && next.submissionState !== "PENDING") {
     nextMaterials = await client.read(
       "/api/games/" + key + "/materials",
-      (value) => parseMaterials(value, key),
+      (value) => parseMaterials(value, key, next.mode, next.self.roleCode),
     );
-    nextReport = await client.read("/api/games/" + key + "/report", (value) =>
-      parseReport(value, key),
-    );
+    nextReport = await client.read("/api/games/" + key + "/report", (value) => {
+      if (
+        next.mode === "COOP" &&
+        value?.gameKey === key &&
+        ((typeof value.draftRev === "string" &&
+          /^(0|[1-9][0-9]{0,18})$/.test(value.draftRev) &&
+          value.draftRev !== next.draftRev) ||
+          (["NONE", "PROPOSED", "PENDING"].includes(value.submissionState) &&
+            value.submissionState !== next.submissionState))
+      )
+        throw new WebApiError(409, "EDIT_CONFLICT");
+      return next.mode === "SOLO"
+        ? parseReport(value, key)
+        : { ...parseCoopReport(value, next), rev: next.rev };
+    });
     if (
       nextMaterials.rev !== next.rev ||
       nextReport.rev !== next.rev ||
       nextReport.draftRev !== next.draftRev
     )
-      throw new SoloFormatError();
+      throw new WebApiError(409, "EDIT_CONFLICT");
+    if (next.mode === "COOP") {
+      const confirmed = await client.read("/api/games/" + key, (value) =>
+        parseState(value, key, "COOP"),
+      );
+      if (confirmed.rev !== next.rev || confirmed.draftRev !== next.draftRev)
+        throw new WebApiError(409, "EDIT_CONFLICT");
+    }
   } else if (next.state === "ENDED")
     nextResult = await client.read("/api/games/" + key + "/result", (value) =>
-      parseResult(value, key),
+      parseResult(value, key, next.mode),
     );
   if (gameKey !== key || !session.current()) throw new WebSessionBlocked();
   if (!state || state.rev !== next.rev || state.draftRev !== next.draftRev) {
     element("submit-consent").checked = false;
     element("forfeit-consent").checked = false;
+    element("ready-consent").checked = element("leave-consent").checked = false;
   }
+  const fingerprint = nextReport?.proposal
+    ? JSON.stringify([
+        key,
+        next.rev,
+        nextReport.draftRev,
+        next.self.slot,
+        nextReport.proposal,
+      ])
+    : null;
+  if (fingerprint !== proposalIdentity)
+    element("proposal-consent").checked = false;
+  proposalIdentity = fingerprint;
   const previous = saved;
   state = next;
   materials = nextMaterials;
   saved = nextReport;
   result = nextResult;
+  if (
+    issuedLink &&
+    (state.state !== "WAITING" ||
+      state.partner.joined ||
+      Date.parse(issuedUntil) <= Date.now())
+  ) {
+    issuedLink = issuedUntil = null;
+    element("issued-link").value = "";
+  }
   if (materials) {
     paintMaterials();
     if (saved) paintReport(previous);
@@ -517,13 +692,21 @@ function schedule() {
       }
     }, 15000);
   }
-  if (state?.submissionState === "PENDING")
-    pollTimer = setTimeout(() => {
-      if (!busy && session.current()) void run(loadGame);
-    }, 5000);
+  if (
+    state?.submissionState === "PENDING" ||
+    (gameMode === "COOP" && ["WAITING", "RUNNING"].includes(state?.state))
+  )
+    pollTimer = setTimeout(
+      () => {
+        if (!busy && session.current()) void run(loadGame);
+      },
+      gameMode === "COOP" ? 3000 : 5000,
+    );
   if (materials && state?.submissionState !== "PENDING") {
-    const remaining =
-      Date.parse(materials.playDeadline) - Date.parse(state.serverTime);
+    const remaining = Math.min(
+      Date.parse(materials.playDeadline) - Date.parse(state.serverTime),
+      Date.parse(materials.playDeadline) - Date.now(),
+    );
     deadlineTimer = setTimeout(
       () => {
         materials = saved = null;
@@ -562,8 +745,37 @@ async function mutate(method, path, actionName, body) {
     body,
     path === "/api/games" ? undefined : gameKey,
   );
+  await adoptReceipt(receipt);
+}
+
+/** 확정/재전송 영수증을 동일하게 채택하며 leave의 null과 비밀 없는 초대 replay를 처리한다. */
+async function adoptReceipt(receipt) {
+  const actionName = receipt.action;
   state = receipt.current;
+  if (state === null) {
+    client.clear();
+    gameKey = null;
+    gameMode = "SOLO";
+    history.replaceState(null, "", "/play");
+    await loadCatalog();
+    return;
+  }
   gameKey = state.gameKey;
+  gameMode = state.mode;
+  if (actionName === "PUBLIC_JOIN")
+    invitation = invitePreview = inviteNotice = null;
+  if (actionName === "PUBLIC_INVITE") {
+    issuedLink = receipt.inviteSecret
+      ? location.origin +
+        "/coop-invite#inviteKey=" +
+        receipt.inviteKey +
+        "&inviteSecret=" +
+        receipt.inviteSecret
+      : null;
+    issuedUntil = receipt.expiresAt ?? null;
+    element("issued-link").value = issuedLink ?? "";
+    element("reissue-notice").hidden = !receipt.requiresReissue;
+  }
   story = notice = null;
   element("create-consent").checked = false;
   history.replaceState(null, "", "/play#" + gameKey);
@@ -577,12 +789,22 @@ async function mutate(method, path, actionName, body) {
 
 /** 연결 복구는 쿠키 회전만 하고 게임 명령은 자동 재전송하지 않는다. */
 async function connect() {
-  if (!(await session.restore())) {
+  authHandoff = "RESTORE";
+  let restored;
+  try {
+    restored = await session.restore();
+  } finally {
+    authHandoff = null;
+  }
+  if (!restored) {
     element("status").textContent =
       "로그인이 필요합니다. 회원 계정 화면에서 로그인해 주세요.";
     return;
   }
-  if (gameKey) await loadGame();
+  if (invitation) {
+    if (invitation.invalid) throw new SoloFormatError();
+    await inspectInvitation();
+  } else if (gameKey) await loadGame();
   else await loadCatalog();
 }
 
@@ -602,13 +824,16 @@ for (const [id, handler] of [
           !Object.hasOwn(value, "game")
         )
           throw new SoloFormatError();
-        return value.game === null ? null : parseState(value.game);
+        return value.game === null
+          ? null
+          : parseState(value.game, undefined, value.game.mode);
       });
       if (!current) {
         element("status").textContent = "점유 중인 단독 방이 없습니다.";
         return;
       }
       gameKey = current.gameKey;
+      gameMode = current.mode;
       history.replaceState(null, "", "/play#" + gameKey);
       await loadGame();
     },
@@ -635,7 +860,7 @@ for (const [id, handler] of [
       if (!story || !notice || !element("create-consent").checked)
         throw new SoloFormatError();
       return mutate("POST", "/api/games", "PUBLIC_CREATE", {
-        mode: "SOLO",
+        mode: gameMode,
         storyCode: story.storyCode,
         expectedPublishedVersionNo: story.publishedVersionNo,
         expectedPlayRev: story.playRev,
@@ -651,8 +876,10 @@ for (const [id, handler] of [
         throw new SoloFormatError();
       return mutate(
         "POST",
-        "/api/games/" + gameKey + "/report/submit",
-        "PUBLIC_REPORT_SUBMIT",
+        "/api/games/" +
+          gameKey +
+          (gameMode === "COOP" ? "/report/proposals" : "/report/submit"),
+        gameMode === "COOP" ? "PUBLIC_REPORT_PROPOSE" : "PUBLIC_REPORT_SUBMIT",
         { expectedRev: saved.rev, expectedDraftRev: saved.draftRev },
       );
     },
@@ -696,23 +923,185 @@ for (const [id, handler] of [
     "replay",
     async () => {
       const receipt = await client.replay();
-      state = receipt.current;
-      gameKey = state.gameKey;
-      dirty = stale = false;
-      history.replaceState(null, "", "/play#" + gameKey);
-      await loadGame();
+      await adoptReceipt(receipt);
     },
   ],
 ])
   element(id).addEventListener("click", () => void run(handler));
 for (const id of ["create-consent", "submit-consent", "forfeit-consent"])
   element(id).addEventListener("change", render);
+for (const id of [
+  "join-consent",
+  "ready-consent",
+  "leave-consent",
+  "proposal-consent",
+])
+  element(id).addEventListener("change", render);
+element("mode").addEventListener("change", () => {
+  gameMode = element("mode").value;
+  element("create-consent").checked = false;
+  render();
+});
+for (const [id, handler] of [
+  ["inspect-invite", inspectInvitation],
+  [
+    "join",
+    async () => {
+      if (
+        !invitation ||
+        !invitePreview ||
+        !inviteNotice ||
+        !element("join-consent").checked
+      )
+        throw new SoloFormatError();
+      const receipt = await client.send(
+        "POST",
+        "/api/games/invitations/join",
+        "PUBLIC_JOIN",
+        {
+          ...invitation,
+          policyCode: invitePreview.policyCode,
+          noticeHash: invitePreview.noticeHash,
+        },
+      );
+      await adoptReceipt(receipt);
+    },
+  ],
+  [
+    "issue-invite",
+    async () => {
+      issuedLink = issuedUntil = null;
+      element("issued-link").value = "";
+      clearTimeout(inviteTimer);
+      await mutate(
+        "POST",
+        "/api/games/" + gameKey + "/invitations",
+        "PUBLIC_INVITE",
+        { expectedRev: state.rev },
+      );
+      clearTimeout(inviteTimer);
+      if (issuedUntil)
+        inviteTimer = setTimeout(
+          () => {
+            issuedLink = issuedUntil = null;
+            element("issued-link").value = "";
+            render();
+          },
+          Math.max(0, Date.parse(issuedUntil) - Date.now()),
+        );
+    },
+  ],
+  [
+    "copy-invite",
+    async () => {
+      if (!issuedLink || !navigator.clipboard?.writeText)
+        throw new WebSessionBlocked();
+      await navigator.clipboard.writeText(issuedLink);
+    },
+  ],
+  [
+    "ready",
+    () => {
+      if (!state?.canReady || !element("ready-consent").checked)
+        throw new SoloFormatError();
+      return mutate(
+        "POST",
+        "/api/games/" + gameKey + "/ready",
+        "PUBLIC_READY",
+        {
+          expectedRev: state.rev,
+          expectedPublishedVersionNo: state.publishedVersionNo,
+          expectedPlayRev: state.playRev,
+          ready: true,
+        },
+      );
+    },
+  ],
+  [
+    "unready",
+    () =>
+      mutate("POST", "/api/games/" + gameKey + "/ready", "PUBLIC_READY", {
+        expectedRev: state.rev,
+        expectedPublishedVersionNo: state.publishedVersionNo,
+        expectedPlayRev: state.playRev,
+        ready: false,
+      }),
+  ],
+  [
+    "selection-refresh",
+    () =>
+      mutate(
+        "POST",
+        "/api/games/" + gameKey + "/selection/refresh",
+        "PUBLIC_SELECTION_REFRESH",
+        { expectedRev: state.rev },
+      ),
+  ],
+  [
+    "leave",
+    () => {
+      if (!element("leave-consent").checked) throw new SoloFormatError();
+      return mutate(
+        "POST",
+        "/api/games/" + gameKey + "/leave",
+        "PUBLIC_LEAVE",
+        { expectedRev: state.rev },
+      );
+    },
+  ],
+  ...[
+    ["accept-proposal", "ACCEPT", "canAccept"],
+    ["reject-proposal", "REJECT", "canReject"],
+    ["withdraw-proposal", "WITHDRAW", "canWithdraw"],
+  ].map(([id, decision, permission]) => [
+    id,
+    () => {
+      const proposal = saved?.proposal;
+      if (
+        !proposal?.[permission] ||
+        !element("proposal-consent").checked ||
+        dirty ||
+        stale
+      )
+        throw new SoloFormatError();
+      return mutate(
+        "POST",
+        "/api/games/" +
+          gameKey +
+          "/report/proposals/" +
+          proposal.reportKey +
+          "/respond",
+        "PUBLIC_REPORT_" + decision,
+        { expectedRev: state.rev, decision },
+      );
+    },
+  ]),
+])
+  element(id).addEventListener("click", () => void run(handler));
+element("invite-login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void run(async () => {
+    if (!invitation || invitation.invalid) throw new SoloFormatError();
+    const email = element("invite-email").value,
+      password = element("invite-password").value;
+    element("invite-password").value = "";
+    authHandoff = "LOGIN";
+    try {
+      await session.login(email, password);
+    } finally {
+      authHandoff = null;
+    }
+    if (!invitation) throw new WebSessionBlocked();
+    await inspectInvitation();
+  });
+});
 for (const input of document.querySelectorAll(
   "#report-form textarea, #report-form select",
 ))
   input.addEventListener("input", () => {
     dirty = true;
     element("submit-consent").checked = false;
+    element("proposal-consent").checked = false;
     render();
   });
 element("report-form").addEventListener("submit", (event) => {
@@ -745,8 +1134,14 @@ window.addEventListener("hashchange", () => {
   if (!busy && session.current()) void run(loadGame);
 });
 try {
+  if (bootstrapFailed) throw new WebSessionBlocked();
   session = createWebSession();
-  client = createSoloClient(session, purge);
+  client = createGameClient(
+    session,
+    purge,
+    () => crypto.randomUUID(),
+    () => gameMode,
+  );
   await run(connect);
 } catch (failure) {
   purge();

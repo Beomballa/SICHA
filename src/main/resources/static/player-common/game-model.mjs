@@ -183,18 +183,21 @@ const STATE = [
   "requestId",
 ];
 
-/** SOLO 서버 모드·소유 방·제출 상태를 확인하고 COOP를 SOLO로 강등하지 않는다. */
-export function parseState(value, expectedKey) {
+/** 서버 모드·고정 참가자·제출 상태를 확인하고 다른 모드로 강등하지 않는다. */
+export function parseState(value, expectedKey, mode = "SOLO") {
   shape(value, STATE);
   request(value);
   id(value.gameKey);
   if (
     (expectedKey !== undefined && value.gameKey !== expectedKey) ||
-    value.mode !== "SOLO" ||
+    !["SOLO", "COOP"].includes(mode) ||
+    value.mode !== mode ||
     !["WAITING", "RUNNING", "ENDED", "CANCELLED", "EXPIRED"].includes(
       value.state,
     ) ||
-    !["NONE", "PENDING"].includes(value.submissionState)
+    !(
+      mode === "COOP" ? ["NONE", "PROPOSED", "PENDING"] : ["NONE", "PENDING"]
+    ).includes(value.submissionState)
   )
     throw new SoloFormatError();
   text(value.title);
@@ -205,20 +208,53 @@ export function parseState(value, expectedKey) {
   for (const field of ["host", "needsRefresh", "canReady", "canStart"])
     boolean(value[field]);
   if (
-    !value.host ||
-    value.canReady ||
+    (mode === "SOLO" && (!value.host || value.canReady)) ||
     (value.canStart && (value.state !== "WAITING" || value.needsRefresh))
   )
     throw new SoloFormatError();
   shape(value.self, ["slot", "ready", "effectiveReady", "roleCode"]);
   shape(value.partner, ["joined", "ready", "effectiveReady", "online"]);
   if (
-    value.self.slot !== 1 ||
-    value.self.ready !== false ||
-    value.self.effectiveReady !== false ||
-    Object.values(value.partner).some((flag) => flag !== false)
+    mode === "SOLO" &&
+    (value.self.slot !== 1 ||
+      value.self.ready !== false ||
+      value.self.effectiveReady !== false ||
+      Object.values(value.partner).some((flag) => flag !== false))
   )
     throw new SoloFormatError();
+  if (mode === "COOP") {
+    if (
+      ![1, 2].includes(value.self.slot) ||
+      value.host !== (value.self.slot === 1)
+    )
+      throw new SoloFormatError();
+    boolean(value.self.ready);
+    boolean(value.self.effectiveReady);
+    Object.values(value.partner).forEach(boolean);
+    if (
+      (value.self.effectiveReady && !value.self.ready) ||
+      (value.partner.effectiveReady && !value.partner.ready) ||
+      (!value.partner.joined &&
+        (value.partner.ready ||
+          value.partner.effectiveReady ||
+          value.partner.online)) ||
+      (value.state === "WAITING" &&
+        (value.self.roleCode !== null ||
+          value.submissionState !== "NONE" ||
+          value.startedAt !== null ||
+          value.playDeadline !== null ||
+          value.attemptsRemaining !== null ||
+          value.hintsRemaining !== null)) ||
+      (value.state === "RUNNING" &&
+        (value.self.roleCode === null || !value.partner.joined)) ||
+      (value.canStart &&
+        (!value.host ||
+          !value.self.effectiveReady ||
+          !value.partner.effectiveReady ||
+          !value.partner.online))
+    )
+      throw new SoloFormatError();
+  }
   if (value.self.roleCode !== null) code(value.self.roleCode);
   for (const field of ["lobbyExpiresAt", "serverTime"]) timestamp(value[field]);
   for (const field of ["startedAt", "playDeadline"])
@@ -271,8 +307,123 @@ export function parseReport(value, expectedKey) {
   return value;
 }
 
-/** 고정 두 역할과 현재 방 자료의 폐쇄 투영만 반환한다. */
-export function parseMaterials(value, expectedKey) {
+/** 활성 제안은 고정 원문·초안 수정번호·현재 역할 권한을 함께 검증한다. */
+export function parseCoopReport(value, state) {
+  shape(value, [
+    "gameKey",
+    "draftRev",
+    "report",
+    "proposal",
+    "pending",
+    "submissionState",
+    "requestId",
+  ]);
+  request(value);
+  id(value.gameKey);
+  revision(value.draftRev);
+  parseReportBody(value.report);
+  if (
+    value.gameKey !== state.gameKey ||
+    value.draftRev !== state.draftRev ||
+    value.submissionState !== state.submissionState ||
+    state.mode !== "COOP"
+  )
+    throw new SoloFormatError();
+  if (value.proposal !== null) {
+    const item = shape(value.proposal, [
+      "reportKey",
+      "sourceRev",
+      "report",
+      "proposerSlot",
+      "state",
+      "canAccept",
+      "canReject",
+      "canWithdraw",
+    ]);
+    id(item.reportKey);
+    revision(item.sourceRev);
+    parseReportBody(item.report);
+    integer(item.proposerSlot, 1, 2);
+    for (const key of ["canAccept", "canReject", "canWithdraw"])
+      boolean(item[key]);
+    const self = item.proposerSlot === state.self.slot;
+    if (
+      item.state !== "PROPOSED" ||
+      item.sourceRev !== value.draftRev ||
+      item.canWithdraw !== self ||
+      item.canAccept === self ||
+      item.canReject !== item.canAccept ||
+      !["culpritCode", "method", "time", "motive", "evidence"].every(
+        (key) => item.report[key] === value.report[key],
+      )
+    )
+      throw new SoloFormatError();
+  }
+  if (value.pending !== null) {
+    const item = shape(value.pending, [
+      "reportKey",
+      "submitNo",
+      "report",
+      "acceptedAt",
+      "gradeDeadline",
+    ]);
+    id(item.reportKey);
+    integer(item.submitNo, 1);
+    parseReportBody(item.report);
+    timestamp(item.acceptedAt);
+    timestamp(item.gradeDeadline);
+  }
+  if (
+    (value.proposal !== null && value.pending !== null) ||
+    value.submissionState !==
+      (value.proposal ? "PROPOSED" : value.pending ? "PENDING" : "NONE")
+  )
+    throw new SoloFormatError();
+  return value;
+}
+
+/** 초대 조회는 고지·현재 수명만 반환하며 참가나 준비 상태로 해석하지 않는다. */
+export function parseInvitePreview(value, inviteKey) {
+  shape(value, [
+    "inviteKey",
+    "title",
+    "difficulty",
+    "limitSec",
+    "playerCount",
+    "expiresAt",
+    "lobbyExpiresAt",
+    "policyCode",
+    "noticeHash",
+    "noticeSummary",
+    "requestId",
+  ]);
+  request(value);
+  id(value.inviteKey);
+  text(value.title);
+  integer(value.difficulty, 1, 5);
+  integer(value.limitSec, 1);
+  timestamp(value.expiresAt);
+  timestamp(value.lobbyExpiresAt);
+  text(value.policyCode);
+  text(value.noticeSummary);
+  if (
+    value.inviteKey !== inviteKey ||
+    value.playerCount !== 2 ||
+    !HASH.test(text(value.noticeHash)) ||
+    Date.parse(value.expiresAt) <= Date.now() ||
+    Date.parse(value.lobbyExpiresAt) < Date.parse(value.expiresAt)
+  )
+    throw new SoloFormatError();
+  return value;
+}
+
+/** SOLO는 고정 두 역할, COOP는 현재 참가자의 단일 고정 역할만 표시한다. */
+export function parseMaterials(
+  value,
+  expectedKey,
+  mode = "SOLO",
+  roleCode = null,
+) {
   shape(value, [
     "gameKey",
     "state",
@@ -339,7 +490,14 @@ export function parseMaterials(value, expectedKey) {
       }
     }
   }
-  if (value.roles.length !== 2) throw new SoloFormatError();
+  if (
+    mode === "SOLO"
+      ? value.roles.length !== 2
+      : mode !== "COOP" ||
+        value.roles.length !== 1 ||
+        value.roles[0].code !== roleCode
+  )
+    throw new SoloFormatError();
   if (
     !Array.isArray(value.openedHints) ||
     !Array.isArray(value.requiredNotices)
@@ -363,7 +521,9 @@ export function parseMaterials(value, expectedKey) {
 }
 
 /** 명령 영수증의 실제 action·원본 방·현재 방을 모두 결속한다. */
-export function parseReceipt(value, action, expectedKey) {
+export function parseReceipt(value, action, expectedKey, mode = "SOLO") {
+  const invite = action === "PUBLIC_INVITE";
+  const secret = Object.hasOwn(value, "inviteSecret");
   shape(value, [
     "action",
     "replayed",
@@ -371,6 +531,13 @@ export function parseReceipt(value, action, expectedKey) {
     "original",
     "current",
     "requestId",
+    ...(invite
+      ? [
+          "requiresReissue",
+          "blockedReason",
+          ...(secret ? ["inviteKey", "inviteSecret", "expiresAt"] : []),
+        ]
+      : []),
   ]);
   request(value);
   if (value.action !== action) throw new SoloFormatError();
@@ -389,6 +556,7 @@ export function parseReceipt(value, action, expectedKey) {
     "acceptedAt",
     "gradeDeadline",
     "lobbyExpiresAt",
+    "inviteKey",
   ];
   if (
     !original ||
@@ -398,12 +566,38 @@ export function parseReceipt(value, action, expectedKey) {
   )
     throw new SoloFormatError();
   id(original.gameKey);
-  text(original.state);
+  if (mode === "SOLO" || original.state !== undefined) text(original.state);
   revision(original.rev);
   if (original.draftRev !== undefined) revision(original.draftRev);
-  const state = parseState(value.current, expectedKey);
-  if (state.gameKey !== original.gameKey) throw new SoloFormatError();
-  if (action === "PUBLIC_REPORT_SUBMIT" && !value.replayed) {
+  if (expectedKey !== undefined && original.gameKey !== expectedKey)
+    throw new SoloFormatError();
+  if (action === "PUBLIC_LEAVE") {
+    if (value.current !== null) throw new SoloFormatError();
+  } else {
+    const state = parseState(value.current, expectedKey, mode);
+    if (state.gameKey !== original.gameKey) throw new SoloFormatError();
+  }
+  if (invite) {
+    boolean(value.requiresReissue);
+    if (value.blockedReason !== null) text(value.blockedReason);
+    if (secret) {
+      id(value.inviteKey);
+      timestamp(value.expiresAt);
+      if (
+        value.replayed ||
+        value.requiresReissue ||
+        original.inviteKey !== value.inviteKey ||
+        typeof value.inviteSecret !== "string" ||
+        !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(value.inviteSecret) ||
+        Date.parse(value.expiresAt) <= Date.now()
+      )
+        throw new SoloFormatError();
+    } else if (!value.replayed) throw new SoloFormatError();
+  }
+  if (
+    ["PUBLIC_REPORT_SUBMIT", "PUBLIC_REPORT_ACCEPT"].includes(action) &&
+    !value.replayed
+  ) {
     id(original.reportKey);
     id(original.jobKey);
     integer(original.ordinal, 1);
@@ -414,7 +608,7 @@ export function parseReceipt(value, action, expectedKey) {
 }
 
 /** 정식 개인 기록 상세만 결과로 채택하고 파기·미측정 값을 복구하지 않는다. */
-export function parseResult(value, expectedKey) {
+export function parseResult(value, expectedKey, mode = "SOLO") {
   shape(value, [
     "recordKey",
     "rawState",
@@ -443,7 +637,8 @@ export function parseResult(value, expectedKey) {
   id(value.gameKey);
   if (
     value.gameKey !== expectedKey ||
-    value.mode !== "SOLO" ||
+    !["SOLO", "COOP"].includes(mode) ||
+    value.mode !== mode ||
     value.rawState !== "NORMAL" ||
     value.rawDeletedReason !== null
   )

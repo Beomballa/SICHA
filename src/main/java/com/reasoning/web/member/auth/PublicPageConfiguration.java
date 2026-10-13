@@ -32,6 +32,7 @@ public class PublicPageConfiguration {
                                         || request.getRequestURI().equals("/privacy")
                                         || request.getRequestURI().equals("/account")
                                         || request.getRequestURI().equals("/play")
+                                        || request.getRequestURI().equals("/coop-invite")
                                         || request.getRequestURI().equals("/player-public.css")
                                         || request.getRequestURI()
                                                 .equals("/player-common/web-api.mjs")
@@ -40,11 +41,13 @@ public class PublicPageConfiguration {
                                         || request.getRequestURI()
                                                 .equals("/player-common/account.mjs")
                                         || request.getRequestURI()
-                                                .equals("/player-common/solo-model.mjs")
+                                                .equals("/player-common/game-model.mjs")
                                         || request.getRequestURI()
-                                                .equals("/player-common/solo-client.mjs")
+                                                .equals("/player-common/game-client.mjs")
                                         || request.getRequestURI()
-                                                .equals("/player-common/solo-page.mjs"))
+                                                .equals("/player-common/play-page.mjs")
+                                        || request.getRequestURI()
+                                                .equals("/player-common/invite-bootstrap.js"))
                 .securityContext(
                         context ->
                                 context.securityContextRepository(
@@ -95,7 +98,8 @@ public class PublicPageConfiguration {
             response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
             boolean interactive =
                     request.getRequestURI().equals("/account")
-                            || request.getRequestURI().equals("/play");
+                            || request.getRequestURI().equals("/play")
+                            || request.getRequestURI().equals("/coop-invite");
             response.setHeader(
                     "Content-Security-Policy",
                     "default-src 'self'; script-src "

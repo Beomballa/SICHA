@@ -6,7 +6,7 @@ import {
   createWebApi,
   WebApiError,
 } from "../../main/resources/static/player-common/web-api.mjs";
-import { createSoloClient } from "../../main/resources/static/player-common/solo-client.mjs";
+import { createGameClient } from "../../main/resources/static/player-common/game-client.mjs";
 import {
   parseStory,
   parseNotice,
@@ -18,7 +18,7 @@ import {
   parseResult,
   revision,
   SoloFormatError,
-} from "../../main/resources/static/player-common/solo-model.mjs";
+} from "../../main/resources/static/player-common/game-model.mjs";
 
 /** 실제 인터페이스만 구현한 합성 세션이며 제품 자격 대체 경로로 사용하지 않는다. */
 function owner(request) {
@@ -195,7 +195,7 @@ test("unknown committed save retains exact body/key through reads and manual rep
     }
     return response.value;
   });
-  const client = createSoloClient(session, () => {});
+  const client = createGameClient(session, () => {});
   const report = {
     culpritCode: "P1",
     method: "원본",
@@ -237,7 +237,7 @@ test("unknown committed save retains exact body/key through reads and manual rep
 
 test("later rejection cannot discard an already unknown intent", async () => {
   let count = 0;
-  const client = createSoloClient(
+  const client = createGameClient(
     owner(async () => {
       count += 1;
       throw new WebApiError(count === 1 ? 503 : 409);
@@ -264,7 +264,7 @@ test("account revocation rejects a late receipt and purges intent without restor
         finish = resolve;
       }),
   );
-  const client = createSoloClient(session, () => {
+  const client = createGameClient(session, () => {
     purges += 1;
   });
   const pending = client.send("POST", "/api/games", "PUBLIC_CREATE", {});
@@ -394,7 +394,7 @@ test("completed HTTP-error JSON remains an error without aborting its consumed s
 
 test("private read dependency failure purges displayed data but does not discard an unknown command", async () => {
   let purges = 0;
-  const client = createSoloClient(
+  const client = createGameClient(
     owner(async () => {
       throw new WebApiError(503);
     }),

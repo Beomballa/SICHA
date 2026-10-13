@@ -65,7 +65,7 @@ test(
           }
           if (
             request.url === "/player-public.css" ||
-            /^\/player-common\/(?:web-api|web-session|solo-model|solo-client|solo-page)\.mjs$/.test(
+            /^\/player-common\/(?:web-api|web-session|game-model|game-client|play-page|invite-bootstrap)\.(?:mjs|js)$/.test(
               request.url,
             )
           ) {
