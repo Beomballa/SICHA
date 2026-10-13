@@ -36,6 +36,7 @@ public final class PlaytestAccess {
     private final MemberPolicyGate memberPolicy;
     private final PlaytestPolicyGate policy;
     private final GradeRuntimeRepository runtimes;
+    private final BlindEligibilityService eligibility;
     private final Map<String, InstalledRuntimeManifestVerifier> installations;
     private final TransactionTemplate tx;
 
@@ -46,6 +47,7 @@ public final class PlaytestAccess {
             MemberPolicyGate memberPolicy,
             PlaytestPolicyGate policy,
             GradeRuntimeRepository runtimes,
+            BlindEligibilityService eligibility,
             @Qualifier("gradeInstallations")
                     Map<String, InstalledRuntimeManifestVerifier> installations) {
         this.db = db;
@@ -54,6 +56,7 @@ public final class PlaytestAccess {
         this.memberPolicy = memberPolicy;
         this.policy = policy;
         this.runtimes = runtimes;
+        this.eligibility = eligibility;
         this.installations = Map.copyOf(installations);
         tx =
                 new TransactionTemplate(
@@ -73,7 +76,9 @@ public final class PlaytestAccess {
             String role,
             Instant seen,
             long policyId,
-            String noticeHash) {}
+            String noticeHash,
+            boolean blindDeclared,
+            Long assessmentId) {}
 
     public record Context(
             long id,
@@ -339,7 +344,8 @@ public final class PlaytestAccess {
                             db.query(
                                     """
                                     SELECT m.member_id,a.member_key,m.slot,m.invite_gen,m.invite_state,m.ready_yn,m.role_code,
-                                    m.last_seen_at,m.accepted_policy_id,m.accepted_notice_hash
+                                    m.last_seen_at,m.accepted_policy_id,m.accepted_notice_hash,
+                                    m.blind_declared,m.assessment_id
                                     FROM test_member m JOIN member_account a ON a.id=m.member_id WHERE m.test_id=? ORDER BY m.member_id FOR UPDATE OF m
                                     """,
                                     (rs, n) ->
@@ -353,7 +359,9 @@ public final class PlaytestAccess {
                                                     rs.getString(7),
                                                     time(rs.getTimestamp(8)),
                                                     rs.getLong(9),
-                                                    rs.getString(10)),
+                                                    rs.getString(10),
+                                                    rs.getBoolean(11),
+                                                    (Long) rs.getObject(12)),
                                     first[0]);
                     if (members.size() != 2
                             || members.get(0).id() != ids.get(0)[5]
@@ -439,6 +447,26 @@ public final class PlaytestAccess {
                         throw AuthException.conflict("POLICY_CHANGED");
                     return result;
                 });
+    }
+
+    /** 회원 쌍을 이미 잠근 상태에서만 양쪽 선언과 정확한 평가 pin을 확인한다. */
+    public void requireBlindAdmission(Context c) {
+        if (!"BLIND".equals(c.mode())) return;
+        for (Participant member : new Participant[] {c.self(), c.partner()}) {
+            if (!member.blindDeclared() || member.assessmentId() == null)
+                throw AuthException.conflict("BLIND_INELIGIBLE");
+            eligibility.requirePinnedTestAdmission(
+                    member.assessmentId(), c.storyId(), c.snapshotId(), member.id(), c.id());
+        }
+    }
+
+    /** 최초 본문 제공과 자기 출처 재조회는 서로 다른 평가 수명 조건을 따른다. */
+    public void requireBlindExposure(Context c) {
+        if (!"BLIND".equals(c.mode())) return;
+        if (!c.self().blindDeclared() || c.self().assessmentId() == null)
+            throw AuthException.conflict("BLIND_INELIGIBLE");
+        eligibility.requirePinnedTestExposure(
+                c.self().assessmentId(), c.storyId(), c.snapshotId(), c.self().id(), c.id());
     }
 
     private static Instant time(Timestamp value) {

@@ -321,7 +321,7 @@ final class GradeRemoteReplyDecoder {
                     "runtime",
                     "modelInput",
                     "fault");
-        } else if (sourceKind.equals("TEST")) {
+        } else if (sourceKind.equals("TEST") || sourceKind.equals("GAME")) {
             keys(
                     node,
                     "formatNo",
@@ -342,7 +342,7 @@ final class GradeRemoteReplyDecoder {
         } else throw failure();
         Identity identity = identity(node);
         String variant = text(node, "variant");
-        if (sourceKind.equals("TEST") && !variant.equals("MODEL")) throw failure();
+        if (!sourceKind.equals("BATCH") && !variant.equals("MODEL")) throw failure();
         ModelBytes model = null;
         Fault fault = null;
         if (variant.equals("MODEL")) {
@@ -382,7 +382,7 @@ final class GradeRemoteReplyDecoder {
                 hash(node, "payloadHash"),
                 hash(node, "rubricHash"),
                 sourceKind.equals("BATCH") ? hash(node, "datasetHash") : null,
-                sourceKind.equals("TEST") ? hash(node, "reportHash") : null,
+                sourceKind.equals("BATCH") ? null : hash(node, "reportHash"),
                 hash(node, "originalAttemptHash"),
                 runtime(node.get("runtime")),
                 model,

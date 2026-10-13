@@ -84,8 +84,7 @@ class GradeBatchAggregationIT {
                         jdbc.queryForObject(
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
-                                Integer.class))
-                .isEqualTo(23);
+                                Integer.class)).isEqualTo(42);
         var dictionary =
                 new GradeDictionary(CODE, List.of(new GradeDictionary.Term("ONE", "개념", "합성")));
         var settings =

@@ -44,6 +44,7 @@ public final class PlaytestInvitationService {
     private final MemberPolicyGate memberPolicy;
     private final MemberAuthService auth;
     private final CryptoService crypto;
+    private final BlindEligibilityService eligibility;
     private final Map<String, InstalledRuntimeManifestVerifier> installations;
     private final TransactionTemplate tx;
 
@@ -56,6 +57,7 @@ public final class PlaytestInvitationService {
             MemberPolicyGate memberPolicy,
             MemberAuthService auth,
             CryptoService crypto,
+            BlindEligibilityService eligibility,
             @Qualifier("gradeInstallations")
                     Map<String, InstalledRuntimeManifestVerifier> installations) {
         this.stories = stories;
@@ -65,6 +67,7 @@ public final class PlaytestInvitationService {
         this.memberPolicy = memberPolicy;
         this.auth = auth;
         this.crypto = crypto;
+        this.eligibility = eligibility;
         this.installations = Map.copyOf(installations);
         this.tx =
                 new TransactionTemplate(
@@ -84,6 +87,7 @@ public final class PlaytestInvitationService {
         this.memberPolicy = null;
         this.auth = null;
         this.crypto = null;
+        this.eligibility = null;
         this.tx = null;
         this.installations = Map.of();
     }
@@ -409,6 +413,7 @@ public final class PlaytestInvitationService {
      * @param testKey 대상 초대의 UUID
      * @param generation 양의 초대 세대
      * @param expectedRevision 음수가 아닌 현재 수정번호
+     * @param blindDeclared 본인의 별도 BLIND 비노출 선언
      * @param policyCode 고지의 정책 코드
      * @param noticeHash 고지 내용의 해시
      * @param requestKey 전역 요청 UUID
@@ -421,6 +426,7 @@ public final class PlaytestInvitationService {
             UUID testKey,
             int generation,
             long expectedRevision,
+            boolean blindDeclared,
             String policyCode,
             String noticeHash,
             UUID requestKey,
@@ -458,7 +464,9 @@ public final class PlaytestInvitationService {
                                                         + ":"
                                                         + policyCode
                                                         + ":"
-                                                        + noticeHash);
+                                                        + noticeHash
+                                                        + ":"
+                                                        + blindDeclared);
                                 Receipt prior = receipt(requestKey);
                                 requireReview(target);
                                 if (prior != null) {
@@ -467,6 +475,7 @@ public final class PlaytestInvitationService {
                                             target.id(),
                                             principal.memberId(),
                                             generation,
+                                            blindDeclared,
                                             notice,
                                             policyCode,
                                             noticeHash);
@@ -544,6 +553,8 @@ public final class PlaytestInvitationService {
                                 var row = rows.getFirst();
                                 if ((int) row[0] != generation || !"SENT".equals(row[1]))
                                     throw AuthException.conflict("STATE_CONFLICT");
+                                requireBlindAdmission(
+                                        target.id(), principal.memberId(), blindDeclared, false);
                                 Long pinned =
                                         db.query(
                                                 "SELECT policy_id FROM test_retention WHERE"
@@ -555,11 +566,12 @@ public final class PlaytestInvitationService {
                                 if (db.update(
                                                 """
                                                 UPDATE test_member SET invite_state='ACCEPTED',accepted_at=clock_timestamp(),
-                                                accepted_policy_id=?,accepted_notice_hash=?,updated_at=clock_timestamp()
+                                                accepted_policy_id=?,accepted_notice_hash=?,blind_declared=?,updated_at=clock_timestamp()
                                                 WHERE test_id=? AND member_id=? AND invite_gen=? AND invite_state='SENT'
                                                 """,
                                                 notice.policyId(),
                                                 notice.hash(),
+                                                blindDeclared,
                                                 target.id(),
                                                 principal.memberId(),
                                                 generation)
@@ -648,7 +660,9 @@ public final class PlaytestInvitationService {
                                                         + ":"
                                                         + policyCode
                                                         + ":"
-                                                        + noticeHash);
+                                                        + noticeHash
+                                                        + ":"
+                                                        + blindDeclared);
                                 Receipt prior = receipt(requestKey);
                                 if (prior == null) throw unavailable();
                                 checkMemberReceipt(
@@ -657,6 +671,7 @@ public final class PlaytestInvitationService {
                                         target.id(),
                                         principal.memberId(),
                                         generation,
+                                        blindDeclared,
                                         notice,
                                         policyCode,
                                         noticeHash);
@@ -697,6 +712,7 @@ public final class PlaytestInvitationService {
             long id,
             long memberId,
             int generation,
+            boolean blindDeclared,
             PlaytestPolicyGate.Notice notice,
             String policyCode,
             String noticeHash) {
@@ -710,15 +726,57 @@ public final class PlaytestInvitationService {
                             + " ('WAITING','RUNNING','ENDED','EXPIRED') AND"
                             + " m.invite_state='ACCEPTED' AND m.invite_gen=? AND"
                             + " m.accepted_policy_id=? AND r.policy_id=? AND"
-                            + " m.accepted_notice_hash=?)",
+                            + " m.accepted_notice_hash=? AND m.blind_declared=?)",
                         Boolean.class,
                         id,
                         memberId,
                         generation,
                         notice.policyId(),
                         notice.policyId(),
-                        notice.hash());
+                        notice.hash(),
+                        blindDeclared);
         if (!Boolean.TRUE.equals(valid)) throw AuthException.conflict("INVITATION_INVALIDATED");
+        requireBlindAdmission(id, memberId, blindDeclared, true);
+    }
+
+    private void requireBlindAdmission(
+            long testId, long memberId, boolean declared, boolean replay) {
+        var pin =
+                db.query(
+                        """
+                        SELECT t.mode,v.story_id,t.snapshot_id,m.assessment_id FROM play_test t
+                        JOIN story_version v ON v.id=t.version_id JOIN test_member m ON m.test_id=t.id
+                        WHERE t.id=? AND m.member_id=?
+                        """,
+                        rs ->
+                                rs.next()
+                                        ? new Object[] {
+                                            rs.getString(1),
+                                            rs.getLong(2),
+                                            rs.getLong(3),
+                                            (Long) rs.getObject(4)
+                                        }
+                                        : null,
+                        testId,
+                        memberId);
+        if (pin == null) throw missing();
+        if ("BLIND".equals(pin[0])) {
+            if (!declared || pin[3] == null) throw AuthException.conflict("BLIND_INELIGIBLE");
+            Boolean ownExposure =
+                    db.queryForObject(
+                            "SELECT EXISTS(SELECT 1 FROM test_exposure WHERE story_id=? AND"
+                                + " member_id=? AND first_test_id=?)",
+                            Boolean.class,
+                            pin[1],
+                            memberId,
+                            testId);
+            if (replay && Boolean.TRUE.equals(ownExposure))
+                eligibility.requirePinnedTestExposure(
+                        (long) pin[3], (long) pin[1], (long) pin[2], memberId, testId);
+            else
+                eligibility.requirePinnedTestAdmission(
+                        (long) pin[3], (long) pin[1], (long) pin[2], memberId, testId);
+        }
     }
 
     private static boolean requestKeyCollision(DataAccessException failure) {
@@ -1070,8 +1128,6 @@ public final class PlaytestInvitationService {
                 || !roleA.matches("[A-Z0-9_]{1,32}")
                 || !roleB.matches("[A-Z0-9_]{1,32}")
                 || roleA.compareTo(roleB) >= 0) throw AuthException.badRequest("INVALID_REQUEST");
-        // 기존 노출 및 제작 참여를 완전하게 입증할 수 없으면 BLIND 자격을 주장하지 않는다.
-        if ("BLIND".equals(mode)) throw AuthException.conflict("BLIND_INELIGIBLE");
         Long runtimeId =
                 db.query(
                         "SELECT id FROM grade_runtime WHERE code=?",
@@ -1144,6 +1200,13 @@ public final class PlaytestInvitationService {
                         List<Member> members = members(sorted);
                         if (members.size() != 2)
                             throw AuthException.unprocessable("PARTICIPANT_UNAVAILABLE");
+                        List<Long> assessments = new java.util.ArrayList<>();
+                        for (Member member : members)
+                            assessments.add(
+                                    "BLIND".equals(mode)
+                                            ? eligibility.requireCurrentForAdmission(
+                                                    scope.storyId(), snapshotId, member.id())
+                                            : null);
                         // The database pins the actual runtime hash/epoch again in its INSERT
                         // trigger.
                         UUID testKey = UUID.randomUUID();
@@ -1152,7 +1215,7 @@ public final class PlaytestInvitationService {
                                         """
                                         INSERT INTO play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,
                                           runtime_epoch,role_a,role_b,mode,invite_until,created_by)
-                                        VALUES (?,?,?,?,?,?,?,?,'FUNCTIONAL',now()+interval '7 days',?)
+                                        VALUES (?,?,?,?,?,?,?,?,?,now()+interval '7 days',?)
                                         RETURNING id
                                         """,
                                         Long.class,
@@ -1164,6 +1227,7 @@ public final class PlaytestInvitationService {
                                         runtime.epoch(),
                                         roleA,
                                         roleB,
+                                        mode,
                                         actor.accountId());
                         if (id == null) throw unavailable();
                         if (db.update(
@@ -1174,11 +1238,13 @@ public final class PlaytestInvitationService {
                                 != 1) throw unavailable();
                         for (int slot = 0; slot < members.size(); slot++)
                             if (db.update(
-                                            "INSERT INTO test_member(test_id,member_id,slot) VALUES"
-                                                    + " (?,?,?)",
+                                            "INSERT INTO"
+                                                + " test_member(test_id,member_id,slot,assessment_id)"
+                                                + " VALUES (?,?,?,?)",
                                             id,
                                             members.get(slot).id(),
-                                            slot + 1)
+                                            slot + 1,
+                                            assessments.get(slot))
                                     != 1) throw unavailable();
                         if (db.update(
                                         """

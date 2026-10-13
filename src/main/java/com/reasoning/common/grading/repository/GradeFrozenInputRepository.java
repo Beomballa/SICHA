@@ -7,6 +7,8 @@ import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier.Veri
 import com.reasoning.common.grading.model.GradeModels.Report;
 import com.reasoning.common.grading.model.GradeModels.Snapshot;
 import com.reasoning.common.grading.model.SnapshotJson;
+import com.reasoning.common.grading.repository.GradeSourceRepository.GameRootEvidence;
+import com.reasoning.common.grading.repository.GradeSourceRepository.LockedGameSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedTestSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
@@ -92,7 +94,8 @@ public final class GradeFrozenInputRepository {
      * @param runtime 설치된 런타임 검증 증거
      * @param crypto 서버의 실제 암호화 서비스
      * @return 검증된 실제 전체 사본·그 채점표·보고서를 함께 지닌 타입 입력
-     * @throws IllegalStateException 출처·거래·암호문·해시 불일치 시 TEST_INPUT_NOT_CURRENT
+     * @throws IllegalStateException 출처 회수는 SOURCE_NOT_CURRENT, 원문·해시 불일치는 TEST_INPUT_NOT_CURRENT로
+     *     구분한다
      */
     public TestGradeInput verifiedTestInput(
             LockedTestSource source, VerifiedRuntime runtime, CryptoService crypto) {
@@ -181,6 +184,10 @@ public final class GradeFrozenInputRepository {
                     report);
         } catch (DataAccessException failure) {
             throw new DataAccessResourceFailureException("FROZEN_INPUT_STORAGE_FAILURE");
+        } catch (IllegalStateException failure) {
+            if ("SOURCE_NOT_CURRENT".equals(failure.getMessage())
+                    || "SOURCE_STORAGE_FAILURE".equals(failure.getMessage())) throw failure;
+            throw testRejected();
         } catch (Exception failure) {
             if (failure instanceof DataAccessResourceFailureException storage) throw storage;
             throw testRejected();
@@ -190,6 +197,115 @@ public final class GradeFrozenInputRepository {
     private TestRootEvidence sourceEvidence(LockedTestSource source) {
         // 다른 저장소의 잠금 증명은 공개 숫자/UUID로 다시 생성할 수 없다.
         return source.requireCurrent(jdbc.getDataSource());
+    }
+
+    /** 게임 보고서는 실제 방·보고서·사본·revision을 AAD로 고정하고 출처 회수를 원문 오류와 구분한다. */
+    public GameGradeInput verifiedGameInput(
+            LockedGameSource source, VerifiedRuntime runtime, CryptoService crypto) {
+        if (source == null || runtime == null || crypto == null)
+            throw new IllegalArgumentException("INVALID_GAME_INPUT");
+        try {
+            requireTransaction();
+            GameRootEvidence root = source.requireCurrent(jdbc.getDataSource());
+            SavedDataset saved = loadSavedFacts(root.snapshotId());
+            if (saved.storyId() != root.storyId()
+                    || saved.versionId() != root.versionId()
+                    || saved.sourceRev() != root.snapshotRev()
+                    || saved.formatNo() != root.snapshotFormat()
+                    || !saved.policyCode().equals(root.policyCode())
+                    || !runtime.profile().policyCode().equals(root.policyCode())
+                    || !saved.frozen().rubricHash().equals(root.rubricHash())) throw gameRejected();
+            var rows =
+                    jdbc.queryForList(
+                            "SELECT"
+                                + " payload_cipher,payload_hash,source_rev,room_id,snapshot_id,state,purged_at"
+                                + " FROM public.game_report WHERE id=?",
+                            root.reportId());
+            if (rows.size() != 1) throw gameRejected();
+            var row = rows.getFirst();
+            byte[] cipher = (byte[]) row.get("payload_cipher");
+            if (!"ACCEPTED".equals(row.get("state"))
+                    || row.get("purged_at") != null
+                    || cipher == null
+                    || cipher.length > 524288
+                    || !Objects.equals(row.get("payload_hash"), root.payloadHash())
+                    || ((Number) row.get("source_rev")).longValue() != root.sourceRev()
+                    || ((Number) row.get("room_id")).longValue() != root.roomId()
+                    || ((Number) row.get("snapshot_id")).longValue() != root.snapshotId())
+                throw gameRejected();
+            String envelope =
+                    StandardCharsets.UTF_8
+                            .newDecoder()
+                            .onMalformedInput(CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(CodingErrorAction.REPORT)
+                            .decode(ByteBuffer.wrap(cipher))
+                            .toString();
+            String aad =
+                    "game_report/"
+                            + root.reportId()
+                            + "/room/"
+                            + root.roomId()
+                            + "/snapshot/"
+                            + root.snapshotId()
+                            + "/draft/"
+                            + root.sourceRev()
+                            + "/payload/v1";
+            byte[] plain = crypto.decrypt(envelope, aad).getBytes(StandardCharsets.UTF_8);
+            if (plain.length > 524288) throw gameRejected();
+            JsonNode json = SnapshotJson.parse(plain);
+            Report report =
+                    new GradeResultValidator()
+                            .parseReport(
+                                    new String(SnapshotJson.encode(json), StandardCharsets.UTF_8));
+            if (!report.culpritCode().equals(json.path("culpritCode").textValue())
+                    || !report.method().equals(json.path("method").textValue())
+                    || !report.time().equals(json.path("time").textValue())
+                    || !report.motive().equals(json.path("motive").textValue())
+                    || !report.evidence().equals(json.path("evidence").textValue())
+                    || !saved.frozen().payload().path("resources").path("persons").isArray())
+                throw gameRejected();
+            boolean known = false;
+            for (JsonNode person : saved.frozen().payload().path("resources").path("persons"))
+                if (report.culpritCode().equals(person.path("code").textValue())) known = true;
+            if (!known || !SnapshotJson.hash(json).equals(root.payloadHash())) throw gameRejected();
+            var binding =
+                    JsonNodeFactory.instance
+                            .objectNode()
+                            .put("formatNo", 1)
+                            .put("payloadHash", saved.frozen().payloadHash())
+                            .put("rubricHash", saved.frozen().rubricHash());
+            binding.set("report", json);
+            if (!SnapshotJson.hash(binding).equals(root.reportHash())) throw gameRejected();
+            return new GameGradeInput(
+                    root,
+                    saved.dataset().frozenSnapshot(),
+                    saved.dataset().gradingSnapshot(),
+                    report);
+        } catch (DataAccessException failure) {
+            throw new DataAccessResourceFailureException("FROZEN_INPUT_STORAGE_FAILURE");
+        } catch (IllegalStateException failure) {
+            if ("SOURCE_NOT_CURRENT".equals(failure.getMessage())
+                    || "SOURCE_STORAGE_FAILURE".equals(failure.getMessage())) throw failure;
+            throw gameRejected();
+        } catch (Exception failure) {
+            if (failure instanceof DataAccessResourceFailureException storage) throw storage;
+            throw gameRejected();
+        }
+    }
+
+    public record GameGradeInput(
+            GameRootEvidence root,
+            FrozenSnapshot frozenSnapshot,
+            Snapshot snapshot,
+            Report report) {
+        @Override
+        public String toString() {
+            return "GameGradeInput[reportId=" + root.reportId() + "]";
+        }
+    }
+
+    private static IllegalStateException gameRejected() {
+        return new IllegalStateException("GAME_INPUT_NOT_CURRENT");
     }
 
     /** 검증된 TEST 전체 사본과 단일 보고서이며 fixture 집합과 혼용하지 않는다. */

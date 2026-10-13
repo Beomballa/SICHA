@@ -30,7 +30,7 @@ public class GradeLeaseRepository {
     private static final int EXPIRED_LIMIT = 100;
     private static final String SELECT_JOB =
             """
-            SELECT j.id,j.snapshot_id,j.batch_id,j.runtime_id,j.job_key,j.worker_key,
+            SELECT j.id,j.snapshot_id,j.batch_id,j.report_id,j.game_report_id,j.runtime_id,j.job_key,j.worker_key,
                 r.code AS runtime_code,j.lease_gen,j.lease_until,j.deadline_at,
                 j.state,j.call_count,j.next_run_at
             FROM public.grade_job j JOIN public.grade_runtime r ON r.id=j.runtime_id
@@ -51,7 +51,9 @@ public class GradeLeaseRepository {
                                     row.getObject("deadline_at", OffsetDateTime.class)),
                             row.getString("state"),
                             row.getInt("call_count"),
-                            row.getObject("next_run_at", OffsetDateTime.class));
+                            row.getObject("next_run_at", OffsetDateTime.class),
+                            row.getObject("report_id", Long.class),
+                            row.getObject("game_report_id", Long.class));
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final TransactionTemplate readTransaction;
@@ -78,7 +80,7 @@ public class GradeLeaseRepository {
      * @throws IllegalStateException 호출자가 이미 트랜잭션을 보유한 경우
      */
     public Optional<Lease> claim(String workerKey, String runtimeCode) {
-        return claimSource(workerKey, runtimeCode, false);
+        return claimSource(workerKey, runtimeCode, Source.BATCH);
     }
 
     /**
@@ -92,11 +94,28 @@ public class GradeLeaseRepository {
      * @throws IllegalStateException 호출자가 이미 트랜잭션을 보유한 경우
      */
     public Optional<Lease> claimTest(String workerKey, String runtimeCode) {
-        return claimSource(workerKey, runtimeCode, true);
+        return claimSource(workerKey, runtimeCode, Source.TEST);
     }
 
-    /** 두 출처가 동일한 worker advisory 잠금과 짧은 거래를 공유하되 서로의 임대는 반환하지 않는다. */
-    private Optional<Lease> claimSource(String workerKey, String runtimeCode, boolean test) {
+    /** GAME 보고서는 독립 출처로만 claim한다. 이후 START가 방 목적과 참가자 정책을 잠금 후 검증한다. */
+    public Optional<Lease> claimGame(String workerKey, String runtimeCode) {
+        return claimSource(workerKey, runtimeCode, Source.GAME);
+    }
+
+    /** 로컬 GAME 진입 전에 배타적인 영속 출처를 확인한다. 실행 권위는 START 잠금 재검사에 있다. */
+    public boolean isGameJob(UUID jobKey) {
+        if (jobKey == null || jobKey.equals(new UUID(0, 0)))
+            throw new IllegalArgumentException("INVALID_LEASE_INPUT");
+        return shortTransaction(readTransaction, () -> Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM public.grade_job WHERE job_key=?"
+                        + " AND game_report_id IS NOT NULL AND report_id IS NULL AND batch_id IS NULL)",
+                Boolean.class, jobKey)));
+    }
+
+    private enum Source { BATCH, TEST, GAME }
+
+    /** 세 출처가 동일한 worker advisory 잠금과 짧은 거래를 공유하되 서로의 임대는 반환하지 않는다. */
+    private Optional<Lease> claimSource(String workerKey, String runtimeCode, Source source) {
         key(workerKey);
         key(runtimeCode);
         return shortTransaction(
@@ -114,11 +133,14 @@ public class GradeLeaseRepository {
                                     ROW,
                                     workerKey);
                     if (!existing.isEmpty()) {
-                        Lease lease = existing.getFirst().lease();
+                        Job owned = existing.getFirst();
+                        Lease lease = owned.lease();
                         OffsetDateTime now = dbNow();
-                        return !test
+                        return source == Source.BATCH
                                         && lease.runtimeCode().equals(runtimeCode)
-                                        && (test == (lease.batchId() == null))
+                                        && lease.batchId() != null
+                                        && owned.reportId() == null
+                                        && owned.gameReportId() == null
                                         && valid(lease, now)
                                 ? Optional.of(lease)
                                 : Optional.empty();
@@ -130,14 +152,28 @@ public class GradeLeaseRepository {
                                              WHERE r.code=? AND j.state='QUEUED' AND j.next_run_at<=clock_timestamp()
                                                  AND
                                             """
-                                            + (test
-                                                    ? " j.report_id IS NOT NULL AND j.report_hash"
+                                            + (source == Source.TEST
+                                                    ? " j.report_id IS NOT NULL AND j.game_report_id IS NULL AND j.report_hash"
                                                           + " IS NOT NULL AND j.batch_id IS NULL"
                                                           + " AND j.sample_code IS NULL AND"
                                                           + " j.repeat_no IS NULL AND j.input_hash"
                                                           + " IS NULL"
-                                                    : " j.batch_id IS NOT NULL AND j.report_id IS"
-                                                            + " NULL")
+                                                    : source == Source.GAME
+                                                            ? " j.game_report_id IS NOT NULL AND j.batch_id IS NULL"
+                                                                    + " AND j.report_id IS NULL AND j.report_hash IS NOT NULL"
+                                                                    + " AND j.sample_code IS NULL AND j.repeat_no IS NULL"
+                                                                    + " AND j.input_hash IS NULL AND EXISTS (SELECT 1"
+                                                                    + " FROM public.game_report g JOIN public.game_room room"
+                                                                    + " ON room.id=g.room_id WHERE g.id=j.game_report_id"
+                                                                    + " AND g.state='ACCEPTED' AND g.purged_at IS NULL"
+                                                                    + " AND room.state='RUNNING' AND room.purpose IN"
+                                                                    + " ('PUBLIC','REVIEW_SOLO_QUALIFICATION')"
+                                                                    + " AND room.snapshot_id=j.snapshot_id"
+                                                                    + " AND room.runtime_id=j.runtime_id"
+                                                                    + " AND g.snapshot_id=j.snapshot_id"
+                                                                    + " AND g.grade_deadline_at=j.deadline_at)"
+                                                            : " j.batch_id IS NOT NULL AND j.report_id IS NULL"
+                                                                    + " AND j.game_report_id IS NULL")
                                             + """
                                                  AND j.deadline_at>clock_timestamp() AND j.call_count<3
                                              ORDER BY j.next_run_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED
@@ -280,6 +316,15 @@ public class GradeLeaseRepository {
 
     /** 인증된 polling runtime의 TEST 후보만 읽는다. 다른 runtime의 복구 권한을 위임하지 않는다. */
     public List<UUID> getExpiredTestRuntimeList(String runtimeCode, int limit) {
+        return getExpiredRuntimeList(runtimeCode, limit, Source.TEST);
+    }
+
+    /** 인증된 runtime에 속하는 실제 GAME 만료 작업만 복구 후보로 반환한다. */
+    public List<UUID> getExpiredGameRuntimeList(String runtimeCode, int limit) {
+        return getExpiredRuntimeList(runtimeCode, limit, Source.GAME);
+    }
+
+    private List<UUID> getExpiredRuntimeList(String runtimeCode, int limit, Source source) {
         key(runtimeCode);
         if (limit < 1 || limit > EXPIRED_LIMIT)
             throw new IllegalArgumentException("INVALID_LEASE_LIMIT");
@@ -290,7 +335,11 @@ public class GradeLeaseRepository {
                                 jdbc.queryForList(
                                         "SELECT j.job_key FROM public.grade_job j JOIN"
                                             + " public.grade_runtime r ON r.id=j.runtime_id WHERE"
-                                            + " r.code=? AND j.report_id IS NOT NULL AND"
+                                            + " r.code=? AND "
+                                            + (source == Source.GAME
+                                                    ? "j.game_report_id IS NOT NULL"
+                                                    : "j.report_id IS NOT NULL")
+                                            + " AND"
                                             + " ((j.state='QUEUED' AND"
                                             + " j.deadline_at<=clock_timestamp()) OR"
                                             + " (j.state='RUNNING' AND"
@@ -363,7 +412,8 @@ public class GradeLeaseRepository {
     }
 
     /** 잠금 조회의 내부 상태이며 실행 입력이나 결과를 포함하지 않는다. */
-    private record Job(Lease lease, String state, int callCount, OffsetDateTime nextRunAt) {}
+    private record Job(Lease lease, String state, int callCount, OffsetDateTime nextRunAt,
+                       Long reportId, Long gameReportId) {}
 
     /** 후속 서비스 관계 재검사용 불변 임대 사본. 보고서·정답·실행 구성 원문은 포함하지 않는다. */
     public record Lease(

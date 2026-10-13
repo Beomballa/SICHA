@@ -11,6 +11,9 @@ import com.reasoning.common.grading.repository.GradeLeaseRepository;
 import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.SourceKind;
+import com.reasoning.common.grading.repository.GradeSourceRepository.GamePreparation;
+import com.reasoning.common.grading.repository.GradeSourceRepository.GameRootEvidence;
 import com.reasoning.common.grading.repository.GradeSourceRepository.TestPreparation;
 import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
 import com.reasoning.common.grading.security.GradeWorkerCredentials;
@@ -51,6 +54,7 @@ public final class GradeStartService {
     private final GradeLeaseRepository leases;
     private final boolean remoteAssembly;
     private final PlaytestPolicyGate testPolicy;
+    private final PlaytestPolicyGate friendlyPolicy;
     private final CryptoService crypto;
 
     /**
@@ -82,10 +86,24 @@ public final class GradeStartService {
             PlaytestPolicyGate testPolicy,
             MemberPolicyGate memberPolicy,
             CryptoService crypto) {
+        this(jdbc, manager, credentials, installations, testPolicy, null, memberPolicy, crypto);
+    }
+
+    /** GAME PUBLIC은 별도 FRIENDLY 근거만 받고 검수 방은 PLAYTEST 근거만 사용한다. */
+    public GradeStartService(
+            JdbcTemplate jdbc,
+            PlatformTransactionManager manager,
+            GradeWorkerCredentials credentials,
+            Map<String, InstalledRuntimeManifestVerifier> installations,
+            PlaytestPolicyGate testPolicy,
+            PlaytestPolicyGate friendlyPolicy,
+            MemberPolicyGate memberPolicy,
+            CryptoService crypto) {
         if ((testPolicy == null) != (crypto == null)
                 || (testPolicy == null) != (memberPolicy == null))
             throw new IllegalArgumentException("INVALID_TEST_START_ASSEMBLY");
         this.testPolicy = testPolicy;
+        this.friendlyPolicy = friendlyPolicy;
         this.crypto = crypto;
         this.jdbc = Objects.requireNonNull(jdbc);
         this.manager = Objects.requireNonNull(manager);
@@ -326,7 +344,9 @@ public final class GradeStartService {
     public GradeRemoteExecutionProtocol.StartReply startApproved(
             VerifiedWorker worker, UUID jobKey, long leaseGen) {
         remoteEntry(worker, jobKey, leaseGen);
-        if (testJob(jobKey)) return testStartApproved(worker, jobKey, leaseGen);
+        SourceKind kind = remoteCall(() -> sources.sourceKind(jobKey));
+        if (kind == SourceKind.TEST) return testStartApproved(worker, jobKey, leaseGen);
+        if (kind == SourceKind.GAME) return gameStartApproved(worker, jobKey, leaseGen);
         return remoteCall(
                 () -> {
                     discoverPermission(worker, jobKey, Action.START);
@@ -371,7 +391,9 @@ public final class GradeStartService {
             UUID jobKey,
             GradeRemoteExecutionProtocol.AttemptRequest expected) {
         remoteRequest(worker, jobKey, expected);
-        if (testJob(jobKey)) return testFence(worker, jobKey, expected);
+        SourceKind kind = remoteCall(() -> sources.sourceKind(jobKey));
+        if (kind == SourceKind.TEST) return testFence(worker, jobKey, expected);
+        if (kind == SourceKind.GAME) return gameFence(worker, jobKey, expected);
         return remoteCall(
                 () -> {
                     discoverPermission(worker, jobKey, Action.START);
@@ -400,7 +422,9 @@ public final class GradeStartService {
             UUID jobKey,
             GradeRemoteExecutionProtocol.AttemptRequest expected) {
         remoteRequest(worker, jobKey, expected);
-        if (testJob(jobKey)) return testRenew(worker, jobKey, expected);
+        SourceKind kind = remoteCall(() -> sources.sourceKind(jobKey));
+        if (kind == SourceKind.TEST) return testRenew(worker, jobKey, expected);
+        if (kind == SourceKind.GAME) return gameRenew(worker, jobKey, expected);
         return remoteCall(
                 () -> {
                     discoverPermission(worker, jobKey, Action.RENEW);
@@ -423,23 +447,217 @@ public final class GradeStartService {
                 });
     }
 
-    /** 출처 종류만 발견한다. 이 조회는 잠금·인가가 아니며 두 경로 모두 잠근 부모를 다시 검사한다. */
-    private boolean testJob(UUID key) {
-        return remoteCall(
-                () -> {
-                    var kinds =
-                            jdbc.queryForList(
-                                    "SELECT report_id FROM public.grade_job WHERE job_key=?",
-                                    Long.class,
-                                    key);
-                    if (kinds.size() != 1) throw rejected();
-                    return kinds.getFirst() != null;
-                });
-    }
-
     private TestPreparation testPreparation() {
         if (testPolicy == null || crypto == null) throw rejected();
         return sources.prepareTest(testPolicy);
+    }
+
+
+    private PlaytestPolicyGate gamePolicy(UUID key) {
+        PlaytestPolicyGate gate = switch (sources.gamePurpose(key)) {
+            case "PUBLIC" -> friendlyPolicy;
+            case "REVIEW_SOLO_QUALIFICATION" -> testPolicy;
+            default -> throw rejected();
+        };
+        if (gate == null || crypto == null) throw rejected();
+        return gate;
+    }
+
+    /** GAME의 독립 입력을 예약한 동일 임대와 서버 관측 시계로 반환한다. */
+    private GradeRemoteExecutionProtocol.StartReply gameStartApproved(
+            VerifiedWorker worker, UUID key, long generation) {
+        return remoteCall(() -> {
+            PlaytestPolicyGate gate = gamePolicy(key);
+            GamePreparation prepared = sources.prepareQualificationGame(gate);
+            discoverPermission(worker, key, Action.START);
+            var reservation = transaction.execute(status -> reserveGame(worker, key, generation, gate, prepared));
+            if (reservation == null) throw rejected();
+            if (reservation.replay())
+                return GradeRemoteExecutionProtocol.start(key, generation, reservation.attempt(), null, null);
+            return GradeRemoteExecutionProtocol.start(key, generation, reservation.attempt(),
+                    reservation.input(), reservation.observation().export());
+        });
+    }
+
+    private GradeRemoteExecutionProtocol.FenceReply gameFence(
+            VerifiedWorker worker, UUID key, GradeRemoteExecutionProtocol.AttemptRequest expected) {
+        return remoteCall(() -> {
+            PlaytestPolicyGate gate = gamePolicy(key);
+            GamePreparation prepared = sources.prepareQualificationGame(gate);
+            discoverPermission(worker, key, Action.START);
+            var observation = transaction.execute(status -> observeGame(
+                    worker, key, expected, Action.START, gate, prepared, null));
+            if (observation == null) throw rejected();
+            return GradeRemoteExecutionProtocol.fence(key, expected, observation.export());
+        });
+    }
+
+    private GradeRemoteExecutionProtocol.RenewReply gameRenew(
+            VerifiedWorker worker, UUID key, GradeRemoteExecutionProtocol.AttemptRequest expected) {
+        return remoteCall(() -> {
+            PlaytestPolicyGate gate = gamePolicy(key);
+            GamePreparation prepared = sources.prepareQualificationGame(gate);
+            discoverPermission(worker, key, Action.RENEW);
+            transaction.executeWithoutResult(status -> renewalPreflight());
+            var renewed = leases.renew(key, worker.workerKey(), expected.leaseGen())
+                    .orElseThrow(GradeStartService::rejected);
+            var observation = transaction.execute(status -> observeGame(
+                    worker, key, expected, Action.RENEW, gate, prepared, renewed));
+            if (observation == null) throw rejected();
+            return GradeRemoteExecutionProtocol.renew(key, expected, observation.export());
+        });
+    }
+
+    private record GameMaterial(GameRootEvidence root, VerifiedRuntime runtime, byte[] bytes,
+                                String snapshotHash, GradeSourceRepository.LockedGameSource locked) {}
+
+    private record GameReservation(int attempt, boolean replay,
+                                   GradeRemoteExecutionProtocol.ApprovedExecutionInput input,
+                                   Observation observation) {}
+
+    /** 고정 보고서·설치·투영을 실제 잠금 거래에서 검증한다. */
+    private GameMaterial gameMaterial(UUID key, PlaytestPolicyGate gate, GamePreparation prepared,
+                                      VerifiedWorker worker, Action action) {
+        var locked = sources.lockGameRoots(key, gate, prepared);
+        var root = locked.requireCurrent(jdbc.getDataSource());
+        credentials.requirePermission(worker, action, root.runtimeCode());
+        var installed = installations.get(root.runtimeCode());
+        if (installed == null) throw rejected();
+        var runtime = installed.verify(runtimes.getRuntimeDetail(root.runtimeId())
+                .orElseThrow(GradeStartService::rejected));
+        var input = frozenInputs.verifiedGameInput(locked, runtime, crypto);
+        if (root.jobId() != input.root().jobId()
+                || root.reportId() != input.root().reportId()
+                || root.roomId() != input.root().roomId()
+                || !root.reportHash().equals(input.root().reportHash())
+                || !root.payloadHash().equals(input.root().payloadHash())) throw rejected();
+        var semantic = FrozenModelProjection.projectTest(input.frozenSnapshot(), input.report());
+        if (!semantic.report().equals(input.report())) throw rejected();
+        return new GameMaterial(root, runtime, semantic.payloadBytes(),
+                input.frozenSnapshot().payloadHash(), locked);
+    }
+
+    private GradeRemoteExecutionProtocol.ApprovedExecutionInput approvedGame(
+            GameMaterial material, Job current, String owner, long generation, int attempt) {
+        var root = material.root();
+        var installed = installations.get(root.runtimeCode());
+        if (installed == null || current.deadlineAt() == null) throw rejected();
+        var wireRuntime = GradeRemoteExecutionProtocol.runtime(installed.registrationManifest(),
+                material.runtime().configHash(), root.runtimeEpoch());
+        var model = GradeRemoteExecutionProtocol.model(material.bytes());
+        String hash = GradeRemoteExecutionProtocol.gameOriginalHash(root, owner, generation, attempt,
+                current.deadlineAt().toInstant(), wireRuntime, model);
+        return GradeRemoteExecutionProtocol.gameInput(root.jobKey(), generation, attempt,
+                current.deadlineAt().toInstant(), root.snapshotId(), material.snapshotHash(),
+                root.rubricHash(), root.reportHash(), wireRuntime, model, hash);
+    }
+
+    private Observation gameClock(GameRootEvidence root, Job current) {
+        var accepted = jdbc.queryForObject("SELECT accepted_at FROM public.game_report WHERE id=?",
+                OffsetDateTime.class, root.reportId());
+        if (accepted == null || current.acceptedAt() == null || current.deadlineAt() == null
+                || !accepted.toInstant().equals(current.acceptedAt().toInstant())
+                || !current.deadlineAt().toInstant().equals(accepted.plusSeconds(120).toInstant()))
+            throw rejected();
+        long nano = System.nanoTime();
+        var now = jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
+        var observation = new Observation(now == null ? null : now.toInstant(),
+                current.deadlineAt().toInstant(),
+                current.leaseUntil() == null ? null : current.leaseUntil().toInstant(),
+                current.deadlineAt().toInstant(), nano);
+        observation.export();
+        return observation;
+    }
+
+    private GameReservation reserveGame(VerifiedWorker worker, UUID key, long generation,
+                                        PlaytestPolicyGate gate, GamePreparation prepared) {
+        var material = gameMaterial(key, gate, prepared, worker, Action.START);
+        var root = material.root();
+        Job current = job(root.jobId());
+        requireOwner(current, worker, generation);
+        gameClock(root, current);
+        var attempts = jdbc.query("SELECT attempt_no,lease_gen,worker_key,state FROM public.grade_attempt"
+                        + " WHERE job_id=? ORDER BY attempt_no FOR UPDATE",
+                (row, i) -> new Attempt(row.getInt(1), row.getLong(2), row.getString(3),
+                        row.getString(4)), root.jobId());
+        OffsetDateTime now = jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
+        if (now == null || current.leaseUntil() == null || !now.isBefore(current.leaseUntil())
+                || !now.isBefore(current.deadlineAt()) || current.callCount() < 0
+                || current.callCount() > 3)
+            throw GradeRemoteExecutionProtocol.failure(
+                    GradeRemoteExecutionProtocol.FailureCode.REMOTE_EXECUTION_EXPIRED);
+        for (Attempt attempt : attempts) {
+            if (attempt.generation() == generation) {
+                if (!worker.workerKey().equals(attempt.worker()) || !"RUNNING".equals(attempt.state())
+                        || attempt.number() != current.callCount()) throw rejected();
+                return new GameReservation(attempt.number(), true, null, null);
+            }
+        }
+        if (attempts.size() != current.callCount()
+                || attempts.stream().anyMatch(attempt -> "RUNNING".equals(attempt.state()))
+                || current.callCount() >= 3) throw rejected();
+        int number = current.callCount() + 1;
+        var approved = approvedGame(material, current, worker.workerKey(), generation, number);
+        if (jdbc.update("INSERT INTO public.grade_attempt(job_id,attempt_no,lease_gen,worker_key,started_at,state)"
+                        + " SELECT id,?,lease_gen,worker_key,?,'RUNNING' FROM public.grade_job"
+                        + " WHERE id=? AND game_report_id=? AND batch_id IS NULL AND report_id IS NULL"
+                        + " AND state='RUNNING' AND worker_key=? AND lease_gen=? AND call_count=?"
+                        + " AND clock_timestamp()<lease_until AND clock_timestamp()<deadline_at",
+                number, now, root.jobId(), root.reportId(), worker.workerKey(), generation,
+                current.callCount()) != 1) throw rejected();
+        var updated = jdbc.query("UPDATE public.grade_job SET call_count=call_count+1,updated_at=?"
+                        + " WHERE id=? AND game_report_id=? AND batch_id IS NULL AND report_id IS NULL"
+                        + " AND state='RUNNING' AND worker_key=? AND lease_gen=? AND call_count=?"
+                        + " AND clock_timestamp()<lease_until AND clock_timestamp()<deadline_at RETURNING call_count",
+                (row, i) -> row.getInt(1), now, root.jobId(), root.reportId(),
+                worker.workerKey(), generation, current.callCount());
+        if (updated.size() != 1 || updated.getFirst() != number) throw rejected();
+        material.locked().requireCurrent(jdbc.getDataSource());
+        var reread = job(root.jobId());
+        requireOwner(reread, worker, generation);
+        gameClock(root, reread);
+        if (reread.callCount() != number || !current.deadlineAt().equals(reread.deadlineAt())
+                || !current.leaseUntil().equals(reread.leaseUntil())) throw rejected();
+        var rows = jdbc.query("SELECT lease_gen,worker_key,state,completion_data,started_at"
+                        + " FROM public.grade_attempt WHERE job_id=? AND attempt_no=?",
+                (row, i) -> new Readback(row.getString("worker_key"), row.getLong("lease_gen"),
+                        number, row.getString("state"), row.getObject("completion_data") != null,
+                        row.getObject("started_at", OffsetDateTime.class)), root.jobId(), number);
+        if (rows.size() != 1 || !"RUNNING".equals(rows.getFirst().state())
+                || rows.getFirst().receipt() || !worker.workerKey().equals(rows.getFirst().worker())
+                || rows.getFirst().generation() != generation || !now.equals(rows.getFirst().started()))
+            throw rejected();
+        return new GameReservation(number, false, approved, gameClock(root, reread));
+    }
+
+    private Observation observeGame(VerifiedWorker worker, UUID key,
+                                    GradeRemoteExecutionProtocol.AttemptRequest expected,
+                                    Action action, PlaytestPolicyGate gate, GamePreparation prepared,
+                                    GradeLeaseRepository.Lease renewed) {
+        var material = gameMaterial(key, gate, prepared, worker, action);
+        var root = material.root();
+        var rows = jdbc.queryForList("SELECT worker_key,lease_gen,state,completion_data"
+                        + " FROM public.grade_attempt WHERE job_id=? AND attempt_no=? FOR UPDATE",
+                root.jobId(), expected.attemptNo());
+        if (rows.size() != 1) throw rejected();
+        Job current = job(root.jobId());
+        requireOwner(current, worker, expected.leaseGen());
+        gameClock(root, current);
+        var attempt = rows.getFirst();
+        if (!"RUNNING".equals(attempt.get("state")) || attempt.get("completion_data") != null
+                || !worker.workerKey().equals(attempt.get("worker_key"))
+                || ((Number) attempt.get("lease_gen")).longValue() != expected.leaseGen()
+                || current.callCount() != expected.attemptNo()) throw rejected();
+        var approved = approvedGame(material, current, worker.workerKey(),
+                expected.leaseGen(), expected.attemptNo());
+        if (!expected.originalAttemptHash().equals(approved.originalAttemptHash())) throw rejected();
+        if (renewed != null && (renewed.jobId() != root.jobId() || !key.equals(renewed.jobKey())
+                || !worker.workerKey().equals(renewed.workerKey())
+                || renewed.leaseGen() != expected.leaseGen()
+                || !renewed.deadlineAt().equals(current.deadlineAt())
+                || !renewed.leaseUntil().equals(current.leaseUntil()))) throw rejected();
+        material.locked().requireCurrent(jdbc.getDataSource());
+        return gameClock(root, current);
     }
 
     private GradeRemoteExecutionProtocol.StartReply testStartApproved(

@@ -42,14 +42,14 @@ class LocalMemberSchemaIT {
     private static CryptoService crypto;
     private static String password;
 
-    /** 기존 원본과 같은 독립 이미지에서 V23까지 적용하며 키와 암호는 합성 값만 생성한다. */
+    /** 기존 원본과 같은 독립 이미지에서 V25까지 적용하며 키와 암호는 합성 값만 생성한다. */
     @BeforeAll
     static void open() {
         postgres = database();
         postgres.start();
         jdbc = jdbc(postgres);
         var migration = flyway(postgres, null);
-        assertThat(migration.migrate().migrationsExecuted).isEqualTo(23);
+        assertThat(migration.migrate().migrationsExecuted).isEqualTo(42);
         assertThat(migration.migrate().migrationsExecuted).isZero();
         migration.validate();
         var properties = new AuthProperties();
@@ -212,7 +212,7 @@ class LocalMemberSchemaIT {
                 "ck_mf_clock");
         rejected(
                 "UPDATE public.member_flow SET purpose='RESET' WHERE id=" + flow,
-                "member_flow stable");
+                "member_flow immutable binding");
         rejected("UPDATE public.member_flow SET attempt_count=5 WHERE id=" + flow, "ck_mf_shape");
         rejected(
                 "UPDATE public.member_flow SET state='VERIFIED',code_hash=NULL WHERE id=" + flow,
@@ -382,7 +382,7 @@ class LocalMemberSchemaIT {
         jdbc.update("UPDATE public.member_flow SET attempt_count=1 WHERE id=?", flow);
         rejected(
                 "UPDATE public.member_flow SET attempt_count=0 WHERE id=" + flow,
-                "member_flow stable");
+                "member_flow immutable binding");
         jdbc.update(
                 "UPDATE public.member_flow SET state='VERIFIED',verified_at="
                         + CLOCK
@@ -390,10 +390,10 @@ class LocalMemberSchemaIT {
                 flow);
         rejected(
                 "UPDATE public.member_flow SET state='PENDING' WHERE id=" + flow,
-                "member_flow stable");
+                "member_flow immutable binding");
         rejected(
                 "UPDATE public.member_flow SET verified_at=NULL WHERE id=" + flow,
-                "member_flow stable");
+                "member_flow immutable binding");
         jdbc.update(
                 "UPDATE public.member_flow SET state='CONSUMED',consumed_at="
                         + CLOCK
@@ -401,7 +401,7 @@ class LocalMemberSchemaIT {
                 flow);
         rejected(
                 "UPDATE public.member_flow SET state='VERIFIED',consumed_at=NULL WHERE id=" + flow,
-                "member_flow stable");
+                "member_flow immutable binding");
         long failed = flow();
         jdbc.update(
                 "UPDATE public.member_flow SET"
@@ -410,7 +410,7 @@ class LocalMemberSchemaIT {
                 failed);
         rejected(
                 "UPDATE public.member_flow SET attempt_count=4 WHERE id=" + failed,
-                "member_flow stable");
+                "member_flow immutable binding");
         long audit =
                 id(
                         "INSERT INTO"
@@ -425,7 +425,7 @@ class LocalMemberSchemaIT {
                 "member_auth_audit append only");
         rejected(
                 "DELETE FROM public.member_auth_audit WHERE id=" + audit,
-                "member_auth_audit append only");
+                "primary deletion unauthorized");
         rejected("TRUNCATE public.member_auth_audit", "member_auth_audit append only");
     }
 
@@ -1039,6 +1039,45 @@ class LocalMemberSchemaIT {
                 .isZero();
     }
 
+    /** V24의 실제 복합 부모·전체 NULL 모양·단회 불변 바인딩을 DB가 강제한다. */
+    @Test
+    void resetFlowCannotBorrowAnIdentityOrChangeItsBinding() throws Exception {
+        var first = fixture();
+        var other = fixture();
+        long seed = flow();
+        String insert =
+                "INSERT INTO"
+                    + " member_flow(flow_key,binder_hash,purpose,state,provider,lookup_hash,code_hash,proof_cipher,created_at,expires_at,member_id,identity_id,auth_rev)"
+                    + " SELECT"
+                    + " gen_random_uuid(),replace(gen_random_uuid()::text,'-','')||replace(gen_random_uuid()::text,'-',''),'RESET',state,provider,lookup_hash,code_hash,proof_cipher,created_at,expires_at,%s,%s,%s"
+                    + " FROM member_flow WHERE id="
+                        + seed;
+        rejected(insert.formatted(first.member(), other.identity(), 0), "fk_mf_identity");
+        rejected(insert.formatted(first.member(), "NULL", 0), "ck_mf_binding");
+        rejected(insert.formatted("NULL", first.identity(), 0), "ck_mf_binding");
+        rejected(insert.formatted(first.member(), first.identity(), -1), "ck_mf_binding");
+        long reset = id(insert.formatted(first.member(), first.identity(), 0) + " RETURNING id");
+        rejected(
+                "UPDATE member_flow SET member_id="
+                        + other.member()
+                        + ",identity_id="
+                        + other.identity()
+                        + " WHERE id="
+                        + reset,
+                "member_flow immutable binding");
+        rejected(
+                "UPDATE member_flow SET auth_rev=1 WHERE id=" + reset,
+                "member_flow immutable binding");
+        rejected(
+                "UPDATE member_flow SET purpose='SIGNUP' WHERE id=" + reset,
+                "member_flow immutable binding");
+        rejected(
+                "UPDATE member_flow SET expires_at=expires_at+interval '1 second' WHERE id="
+                        + reset,
+                "member_flow immutable binding");
+        assertThat(jdbc.update(insert.formatted("NULL", "NULL", "NULL"))).isEqualTo(1);
+    }
+
     /** 실제 소유자와 암호화한 행만 만들고 미구현 부모 테이블을 만들지 않는다. */
     private static Fixture fixture() throws Exception {
         long actor =
@@ -1296,7 +1335,7 @@ class LocalMemberSchemaIT {
     }
 
     private static void rejected(String sql, String reason) {
-        assertThatThrownBy(() -> jdbc.execute(sql)).hasMessageContaining(reason);
+        assertThatThrownBy(() -> jdbc.execute(sql)).hasStackTraceContaining(reason);
     }
 
     private static PostgreSQLContainer<?> database() {

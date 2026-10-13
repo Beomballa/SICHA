@@ -75,7 +75,7 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
                     "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/grade-samples(?:/([A-Z0-9_]{1,32})(?:/(deactivate|reactivate))?)?");
     private static final Pattern STORY_REVIEW_COMMAND =
             Pattern.compile(
-                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/(review-precheck|review-requests|return-to-draft|preview|grade-samples/check|evidence)");
+                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/(review-precheck|review-requests|return-to-draft|preview|grade-samples/check|evidence|solo-qualifications)");
     private static final Pattern STORY_REVIEW_SNAPSHOT =
             Pattern.compile(
                     "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/review-snapshots(?:/([0-9]+)(/records)?)?");
@@ -85,6 +85,9 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
     private static final Pattern STORY_EXECUTION_ISSUES =
             Pattern.compile(
                     "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/execution-issues(?:/([A-Za-z0-9_-]+)/resolve)?");
+    private static final Pattern STORY_BLIND_ASSESSMENT =
+            Pattern.compile(
+                    "/admin/api/stories/[A-Za-z0-9_-]+/versions/[0-9]+/blind-assessments(?:/([A-Za-z0-9_-]+)(/revoke)?)?");
     private final JdbcTemplate db;
     private final RequestAuditKernel kernel;
 
@@ -236,6 +239,11 @@ public final class AccessHistoryFilter extends OncePerRequestFilter {
         Matcher review = STORY_REVIEW_COMMAND.matcher(path);
         if (review.matches())
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/" + review.group(1);
+        Matcher assessment = STORY_BLIND_ASSESSMENT.matcher(path);
+        if (assessment.matches())
+            return "/admin/api/stories/{storyCode}/versions/{versionNo}/blind-assessments"
+                    + (assessment.group(1) == null ? "" : "/{assessmentKey}")
+                    + (assessment.group(2) == null ? "" : "/revoke");
         Matcher snapshot = STORY_REVIEW_SNAPSHOT.matcher(path);
         if (snapshot.matches())
             return "/admin/api/stories/{storyCode}/versions/{versionNo}/review-snapshots"

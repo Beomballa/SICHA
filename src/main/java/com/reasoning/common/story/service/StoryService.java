@@ -1546,7 +1546,7 @@ public class StoryService {
      * @return 커밋된 작업 결과
      * @throws AuthException 현재 인증·REVIEW·활성 부모 또는 거래 경계가 잘못된 경우
      */
-    <R, T> T withBatchAction(
+    public <R, T> T withBatchAction(
             String sid,
             AdminActor actor,
             String code,
@@ -1557,7 +1557,7 @@ public class StoryService {
     }
 
     /** 추가 관리자 계정을 행위자와 함께 ID순으로 잠그고 현재 인가 뒤에 작업을 실행한다. */
-    <R, T> T withBatchAction(
+    public <R, T> T withBatchAction(
             String sid,
             AdminActor actor,
             String code,
@@ -1674,6 +1674,59 @@ public class StoryService {
                     return result.response();
                 });
     }
+
+    /** 현재 세션과 전역·사건 REVIEW/PUBLISH를 독립적으로 확인한 뒤 실행 설정→사건→버전을 잠근다. */
+    <R, T> T withReleaseAction(String sid, AdminActor actor, String code, int number,
+            String permission, java.util.function.Supplier<R> runtimeLock,
+            java.util.function.BiFunction<ReleaseScope, R, T> work) {
+        path(code, number);
+        if (!Set.of("READ", "REVIEW", "PUBLISH").contains(permission))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw AuthException.unavailable("STORY_UNAVAILABLE");
+        precheck(sid, actor);
+        return batchTx.execute(status -> {
+            db.execute("SET LOCAL lock_timeout = '5s'");
+            lockAccounts(List.of(actor.accountId()));
+            Account account = authorizeLocked(sid, actor);
+            if ("REVIEW".equals(permission) && !account.review
+                    || "PUBLISH".equals(permission) && !account.publish)
+                throw AuthException.forbidden("FORBIDDEN");
+            R runtime = runtimeLock.get();
+            StoryRow parent = story(code);
+            permit(parent, account, actor, false);
+            VersionRow version = version(parent.id, number);
+            if (!parent.active || !version.active) throw missing();
+            if (!"READ".equals(permission)) {
+                if (!("REVIEW".equals(permission) ? account.review : account.publish)
+                        || activeStoryPermissionCount(parent.id, actor.accountId(), permission) != 1)
+                    throw AuthException.forbidden("FORBIDDEN");
+                if ("PUBLISH".equals(permission)) recentReauth(actor);
+            }
+            boolean visible = Boolean.TRUE.equals(db.queryForObject("SELECT view_yn FROM story WHERE id=?", Boolean.class, parent.id));
+            long playRev = db.queryForObject("SELECT play_rev FROM story WHERE id=?", Long.class, parent.id);
+            Long releaseId = version.snapshot == null ? null : db.query("SELECT id FROM story_release WHERE snapshot_id=?",
+                    rs -> rs.next() ? rs.getLong(1) : null, version.snapshot);
+            Integer publishedNo = parent.published == null ? null : db.queryForObject(
+                    "SELECT version_no FROM story_version WHERE id=?", Integer.class, parent.published);
+            ReleaseScope scope = new ReleaseScope(parent.id, version.id, parent.rev, playRev, version.rev,
+                    version.status, version.snapshot, version.policy, publishedNo, parent.published,
+                    visible, releaseId, account.review && activeStoryPermissionCount(parent.id,actor.accountId(),"REVIEW")==1,
+                    account.publish && activeStoryPermissionCount(parent.id,actor.accountId(),"PUBLISH")==1);
+            T result = work.apply(scope, runtime);
+            Account current = authorizeLocked(sid, actor);
+            if (!"READ".equals(permission) && (!("REVIEW".equals(permission) ? current.review : current.publish)
+                    || activeStoryPermissionCount(parent.id, actor.accountId(), permission) != 1))
+                throw AuthException.forbidden("FORBIDDEN");
+            if ("PUBLISH".equals(permission)) recentReauth(actor);
+            return result;
+        });
+    }
+
+    /** 공개 작업에 허용된 최소 잠금 상태이며 인가 증표로 거래 밖에 보존하지 않는다. */
+    record ReleaseScope(long storyId, long versionId, long storyRev, long playRev, long editRev,
+            String status, Long snapshotId, String policyCode, Integer publishedVersionNo,
+            Long publishedId, boolean viewYn, Long releaseId, boolean canReview, boolean canPublish) {}
 
     /** 제외할 한 행은 실제 현재 사본·생성자·명령 영수증·봉인된 GRADE 집합과 독립 대조한다. */
     private void requireGradeAppend(ReviewScope scope, AdminActor actor, long id, UUID requestKey) {
@@ -2569,7 +2622,7 @@ public class StoryService {
                 com.reasoning.common.grading.model.SnapshotJson.encode(expected));
     }
 
-    record ReviewScope(
+    public record ReviewScope(
             long storyId,
             long versionId,
             long rev,

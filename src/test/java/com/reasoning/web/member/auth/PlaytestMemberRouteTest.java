@@ -28,10 +28,80 @@ class PlaytestMemberRouteTest {
                     service,
                     mock(com.reasoning.common.story.service.PlaytestInvestigationService.class),
                     mock(com.reasoning.common.story.service.PlaytestReportService.class),
+                    mock(com.reasoning.common.game.service.GameQualificationService.class),
                     new ObjectMapper());
 
     @ParameterizedTest
     @CsvSource({
+        "GET, /api/stories, true",
+        "GET, /api/stories/CASE_01, true",
+        "POST, /api/stories, false",
+        "GET, /api/member/privacy/policies/friendly, true",
+        "POST, /api/member/privacy/policies/friendly, false",
+        "GET, /api/games/current, true",
+        "POST, /api/games/current, false",
+        "POST, /api/games/invitations/inspect, true",
+        "POST, /api/games/invitations/join, true",
+        "GET, /api/games/invitations/inspect, false",
+        "GET, /api/games/invitations/join, false",
+        "POST, /api/games/invitations/join/, false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/report/proposals, true",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/report/proposals, false",
+        "POST,"
+            + " /api/games/11111111-1111-4111-8111-111111111111/report/proposals/22222222-2222-4222-8222-222222222222/respond,"
+            + " true",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/report/proposals/22222222-2222-4222-8222-222222222222/respond,"
+            + " false",
+        "POST,"
+            + " /api/games/11111111-1111-4111-8111-111111111111/report/proposals/22222222-2222-1222-8222-222222222222/respond,"
+            + " false",
+        "POST,"
+            + " /api/games/11111111-1111-4111-8111-111111111111/report/proposals/22222222-2222-4222-8222-222222222222/respond/,"
+            + " false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/report/proposals/respond, false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/invitations, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/leave, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/ready, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/selection/refresh, true",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/invitations, false",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/ready, false",
+        "POST, /api/games/11111111-1111-1111-8111-111111111111/ready, false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/heartbeat, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/forfeit, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/hints/1/open, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/hints/3/open, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/hints/4/open, false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/hints/01/open, false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/clues/CLUE_1/read, true",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/clues/CLUE_1/read, false",
+        "GET, /api/member/records, true",
+        "POST, /api/member/records, false",
+        "GET, /api/member/records/11111111-1111-4111-8111-111111111111, true",
+        "GET, /api/member/records/11111111-1111-4111-8111-111111111111/reports/22222222-2222-4222-8222-222222222222,"
+            + " true",
+        "POST, /api/member/records/11111111-1111-4111-8111-111111111111, false",
+        "GET, /api/member/records/11111111-1111-1111-8111-111111111111, false",
+        "GET, /api/member/records/11111111-1111-4111-8111-111111111111/reports, false",
+        "POST, /api/games, true",
+        "GET, /api/games, false",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111, true",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/materials, true",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/start, true",
+        "GET, /api/games/11111111-1111-4111-8111-111111111111/start, false",
+        "POST, /api/games/11111111-1111-1111-8111-111111111111/start, false",
+        "POST, /api/games/11111111-1111-4111-8111-111111111111/start/, false",
+        "GET, /api/qualifications/11111111-1111-4111-8111-111111111111/notice, true",
+        "POST, /api/qualifications/11111111-1111-4111-8111-111111111111/accept, true",
+        "GET, /api/qualifications/11111111-1111-4111-8111-111111111111/report, true",
+        "PATCH, /api/qualifications/11111111-1111-4111-8111-111111111111/report, true",
+        "POST, /api/qualifications/11111111-1111-4111-8111-111111111111/report/submit, true",
+        "POST, /api/qualifications/11111111-1111-4111-8111-111111111111/feedback, true",
+        "GET, /api/qualifications/11111111-1111-4111-8111-111111111111/result, true",
+        "GET, /api/qualifications/11111111-1111-4111-8111-111111111111/feedback, false",
+        "GET, /api/qualifications/11111111-1111-4111-8111-111111111111/accept, false",
+        "POST, /api/qualifications/11111111-1111-4111-8111-111111111111/notice, false",
+        "GET, /api/qualifications/11111111-1111-1111-8111-111111111111/notice, false",
+        "POST, /api/qualifications/11111111-1111-4111-8111-111111111111/accept/, false",
         "GET, /api/playtests/identity, true",
         "GET, /api/playtests/invitations, true",
         "GET, /api/playtests/11111111-1111-4111-8111-111111111111, true",
@@ -126,12 +196,12 @@ class PlaytestMemberRouteTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"true", "1", "null"})
-    void blindOrMistypedDeclarationCannotReachConsent(String declared) {
+    @CsvSource({"1", "null"})
+    void mistypedDeclarationCannotReachConsent(String declared) {
         MockHttpServletRequest request = request("POST", ROOT + "/" + KEY + "/accept", null);
         request.setContentType("application/json");
         request.setContent(
-                ("{\"expectedRev\":0,\"inviteGen\":1,\"blindDeclared\":"
+                ("{\"expectedRev\":\"0\",\"inviteGen\":1,\"blindDeclared\":"
                                 + declared
                                 + ",\"policyCode\":\"P\",\"noticeHash\":\"H\",\"requestKey\":\""
                                 + KEY
@@ -144,18 +214,22 @@ class PlaytestMemberRouteTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.anyInt(),
                         org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyBoolean(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
     }
 
-    @Test
-    void functionalConsentPreservesTypedRevisionAndGeneration() {
+    @ParameterizedTest
+    @CsvSource({"true", "false"})
+    void consentPreservesExplicitDeclarationRevisionAndGeneration(boolean declared) {
         MockHttpServletRequest request = request("POST", ROOT + "/" + KEY + "/accept", null);
         request.setContentType("application/json");
         request.setContent(
-                ("{\"expectedRev\":\"3\",\"inviteGen\":2,\"blindDeclared\":false,"
+                ("{\"expectedRev\":\"3\",\"inviteGen\":2,\"blindDeclared\":"
+                                + declared
+                                + ","
                                 + "\"policyCode\":\"P\",\"noticeHash\":\"H\",\"requestKey\":\""
                                 + KEY
                                 + "\"}")
@@ -167,6 +241,7 @@ class PlaytestMemberRouteTest {
                         org.mockito.ArgumentMatchers.eq(UUID.fromString(KEY)),
                         org.mockito.ArgumentMatchers.eq(2),
                         org.mockito.ArgumentMatchers.eq(3L),
+                        org.mockito.ArgumentMatchers.eq(declared),
                         org.mockito.ArgumentMatchers.eq("P"),
                         org.mockito.ArgumentMatchers.eq("H"),
                         org.mockito.ArgumentMatchers.eq(UUID.fromString(KEY)),
@@ -191,6 +266,7 @@ class PlaytestMemberRouteTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.anyInt(),
                         org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyBoolean(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),

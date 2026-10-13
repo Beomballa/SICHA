@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -24,6 +25,24 @@ public class MemberAuthConfiguration {
         private String evidenceRegistryFile = "";
         private boolean playtestCollectionEnabled;
         private String playtestEvidenceRegistryFile = "";
+        private boolean friendlyCollectionEnabled;
+        private String friendlyEvidenceRegistryFile = "";
+
+        public boolean isFriendlyCollectionEnabled() {
+            return friendlyCollectionEnabled;
+        }
+
+        public void setFriendlyCollectionEnabled(boolean value) {
+            friendlyCollectionEnabled = value;
+        }
+
+        public String getFriendlyEvidenceRegistryFile() {
+            return friendlyEvidenceRegistryFile;
+        }
+
+        public void setFriendlyEvidenceRegistryFile(String value) {
+            friendlyEvidenceRegistryFile = value;
+        }
 
         public boolean isPlaytestCollectionEnabled() {
             return playtestCollectionEnabled;
@@ -93,8 +112,14 @@ public class MemberAuthConfiguration {
     }
 
     @Bean
+    @Primary
     public PlaytestPolicyGate playtestPolicyGate(JdbcTemplate db, Properties properties) {
         return new PlaytestPolicyGate(db, properties);
+    }
+
+    @Bean
+    public PlaytestPolicyGate friendlyPolicyGate(JdbcTemplate db, Properties properties) {
+        return PlaytestPolicyGate.friendly(db, properties);
     }
 
     @Bean

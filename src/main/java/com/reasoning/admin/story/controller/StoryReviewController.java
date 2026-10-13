@@ -8,6 +8,7 @@ import com.reasoning.common.story.service.StoryBatchService;
 import com.reasoning.common.story.service.StoryGradeEvidenceService;
 import com.reasoning.common.story.service.StoryIssueResolutionService;
 import com.reasoning.common.story.service.StoryReviewService;
+import com.reasoning.common.story.service.StoryReleaseService;
 import com.reasoning.common.story.service.StorySampleCheckService;
 
 import jakarta.servlet.ReadListener;
@@ -38,6 +39,7 @@ public final class StoryReviewController {
     private final StoryBatchService batches;
     private final StoryIssueResolutionService resolutions;
     private final StoryGradeEvidenceService evidence;
+    private final StoryReleaseService releases;
 
     /** 구조 검수·사람 확인 업무와 기존 엄격 JSON·현재 세션 경계를 주입한다. */
     public StoryReviewController(
@@ -46,14 +48,118 @@ public final class StoryReviewController {
             StoryHttpSupport http,
             StoryBatchService batches,
             StoryIssueResolutionService resolutions,
-            StoryGradeEvidenceService evidence) {
+            StoryGradeEvidenceService evidence,
+            StoryReleaseService releases) {
         this.samples = samples;
         this.reviews = reviews;
         this.http = http;
         this.batches = batches;
         this.resolutions = resolutions;
         this.evidence = evidence;
+        this.releases = releases;
     }
+
+    /** 현재 제작 조회권으로 고정 설정·사본의 공개 판정 안내만 계산한다. */
+    @GetMapping("/{storyCode}/versions/{versionNo}/release-check")
+    public ResponseEntity<?> releaseCheck(@PathVariable String storyCode,@PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor=http.currentSession(request);
+        query(request,Set.of("runtimeConfigId"));
+        if (request.getParameter("runtimeConfigId")==null) throw AuthException.badRequest("INVALID_REQUEST");
+        return StoryHttpSupport.ok(releases.check(actor.id(),actor.principal(),storyCode,versionNo,
+                request.getParameter("runtimeConfigId")));
+    }
+
+    /** 요청 시점의 전체 출처를 재검사하고 실제 발급 영수증과 READY를 함께 확정한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/ready")
+    public ResponseEntity<?> ready(@PathVariable String storyCode,@PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor=http.currentSession(request);
+        query(request,Set.of());
+        JsonNode body=http.body(request,8192,Set.of("expectedRev","expectedSnapshotId","expectedEvidenceHash","runtimeConfigId","requestKey"));
+        return StoryHttpSupport.ok(releases.ready(actor.id(),actor.principal(),storyCode,versionNo,
+                StoryHttpSupport.text(body,"expectedRev"),StoryHttpSupport.text(body,"expectedSnapshotId"),
+                StoryHttpSupport.text(body,"expectedEvidenceHash"),StoryHttpSupport.text(body,"runtimeConfigId"),
+                StoryHttpSupport.uuid(body,"requestKey",true)));
+    }
+
+    /** 최근 재인증된 PUBLISH만 고정 공개본을 원자 교체한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/publish")
+    public ResponseEntity<?> publish(@PathVariable String storyCode,@PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor=http.currentSession(request);
+        query(request,Set.of());
+        JsonNode body=http.body(request,8192,Set.of("expectedStoryRev","expectedRev","expectedSnapshotId",
+                "releaseId","expectedPublishedVersionNo","allowVisibleSwitch","requestKey"));
+        JsonNode published=body.get("expectedPublishedVersionNo");
+        if (!(published.isNull() || published.isIntegralNumber() && published.canConvertToInt()
+                && published.intValue()>0) || !body.path("allowVisibleSwitch").isBoolean())
+            throw AuthException.badRequest("INVALID_REQUEST");
+        return StoryHttpSupport.ok(releases.publish(actor.id(),actor.principal(),storyCode,versionNo,
+                StoryHttpSupport.text(body,"expectedStoryRev"),StoryHttpSupport.text(body,"expectedRev"),
+                StoryHttpSupport.text(body,"expectedSnapshotId"),StoryHttpSupport.text(body,"releaseId"),
+                published.isNull()?null:published.intValue(),body.get("allowVisibleSwitch").booleanValue(),
+                StoryHttpSupport.uuid(body,"requestKey",true)));
+    }
+
+    /** 현재 공개본의 숨김·재노출·최초 결함 차단을 별도 의도키로 확정한다. */
+    @PostMapping("/{storyCode}/visibility")
+    public ResponseEntity<?> visibility(@PathVariable String storyCode,HttpServletRequest request) {
+        CurrentSession actor=http.currentSession(request);
+        query(request,Set.of());
+        JsonNode body=http.body(request,8192,Set.of("expectedStoryRev","expectedPublishedVersionNo",
+                "releaseId","viewYn","reasonCode","verificationRef","requestKey"));
+        JsonNode number=body.path("expectedPublishedVersionNo");
+        if (!number.isIntegralNumber() || !number.canConvertToInt() || number.intValue()<=0
+                || !body.path("viewYn").isBoolean()) throw AuthException.badRequest("INVALID_REQUEST");
+        return StoryHttpSupport.ok(releases.visibility(actor.id(),actor.principal(),storyCode,
+                StoryHttpSupport.text(body,"expectedStoryRev"),number.intValue(),
+                StoryHttpSupport.text(body,"releaseId"),body.get("viewYn").booleanValue(),
+                StoryHttpSupport.text(body,"reasonCode"),StoryHttpSupport.text(body,"verificationRef"),
+                StoryHttpSupport.uuid(body,"requestKey",true)));
+    }
+
+    /** 현재 REVIEW에서 사람·실행 출처의 실제 수집 결과만 원자 영수증과 함께 봉인한다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/release-evidence")
+    public ResponseEntity<?> collectReleaseEvidence(@PathVariable String storyCode,@PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor=http.currentSession(request);
+        query(request,Set.of());
+        JsonNode body=http.body(request,8192,Set.of("snapshotId","runtimeConfigId","requestKey"));
+        return StoryHttpSupport.ok(releases.collect(actor.id(),actor.principal(),storyCode,versionNo,
+                StoryHttpSupport.text(body,"snapshotId"),StoryHttpSupport.text(body,"runtimeConfigId"),
+                StoryHttpSupport.uuid(body,"requestKey",true)));
+    }
+
+    /** 사람 검토 출처를 정확히 대조한 뒤 원문 없는 요청키 영수증과 필수 감사를 남긴다. */
+    @PostMapping("/{storyCode}/versions/{versionNo}/release-human-reviews")
+    public ResponseEntity<?> reviewReleaseEvidence(@PathVariable String storyCode,@PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor=http.currentSession(request);
+        query(request,Set.of());
+        JsonNode body=http.body(request,8192,Set.of("sourceKind","sourceId","verdict","criticalOpenCount",
+                "detail","verificationRef","supersedesId","findingRef","requestKey"));
+        JsonNode count=body.path("criticalOpenCount");
+        if (!count.isIntegralNumber() || !count.canConvertToInt() || count.intValue()<0)
+            throw AuthException.badRequest("INVALID_REQUEST");
+        long source=positiveId(body.path("sourceId"));
+        Long prior=body.path("supersedesId").isNull()?null:positiveId(body.path("supersedesId"));
+        JsonNode finding=body.path("findingRef");
+        if (!(finding.isNull() || finding.isTextual())) throw AuthException.badRequest("INVALID_REQUEST");
+        return StoryHttpSupport.ok(releases.review(actor.id(),actor.principal(),storyCode,versionNo,
+                StoryHttpSupport.text(body,"sourceKind"),source,StoryHttpSupport.text(body,"verdict"),
+                count.intValue(),StoryHttpSupport.text(body,"detail"),
+                StoryHttpSupport.text(body,"verificationRef"),prior,finding.isNull()?null:finding.textValue(),
+                StoryHttpSupport.uuid(body,"requestKey",true)));
+    }
+
+    private static long positiveId(JsonNode node) {
+        if (!node.isTextual() || !node.textValue().matches("[1-9][0-9]*"))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        try { return Long.parseLong(node.textValue()); }
+        catch (NumberFormatException failure) { throw AuthException.badRequest("INVALID_REQUEST"); }
+    }
+
 
     /** 정확한 여덟 필드의 32KiB 본문에서 실제 GRADE 근거만 확정하며 신규·재생 모두 201이다. */
     @PostMapping("/{storyCode}/versions/{versionNo}/evidence")

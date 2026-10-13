@@ -73,9 +73,15 @@ public abstract class PlaytestReportFixture extends LocalMemberAuthIT {
     @Autowired protected Assembly assembly;
     @Autowired protected GradeWorkerCredentials credentials;
     @Autowired protected StoryReviewService reviews;
+    @Autowired protected BlindEligibilityService blindEligibility;
     @Autowired protected com.reasoning.admin.auth.session.AdminSessionAdapter adminSessions;
     @Autowired protected com.reasoning.common.grading.repository.GradeRuntimeRepository runtimes;
     @Autowired protected InstalledRuntimeManifestVerifier syntheticRuntime;
+
+    /** 개별 시나리오가 정상 제출 한도와 worker 복구 예산을 별도로 검증할 난이도다. */
+    protected int fixtureDifficulty() {
+        return 3;
+    }
 
     @Autowired
     @Qualifier("gradeInstallations")
@@ -84,6 +90,15 @@ public abstract class PlaytestReportFixture extends LocalMemberAuthIT {
     /** SR-02가 실제 원고를 동결하고 mutable editRev만 증가시킨 뒤 초대를 생성한다. */
     @Override
     protected UUID invitation(List<UUID> members) {
+        return invitation(members, false);
+    }
+
+    /** 실제 고정 REVIEW 사본 뒤 두 회원의 독립 평가를 생성하고 BLIND TEST로 초대한다. */
+    protected UUID blindInvitation(List<UUID> members) {
+        return invitation(members, true);
+    }
+
+    private UUID invitation(List<UUID> members, boolean blind) {
         long owner =
                 db.queryForObject(
                         "SELECT owner_id FROM privacy_policy WHERE scope='MEMBER_AUTH' AND"
@@ -136,6 +151,7 @@ public abstract class PlaytestReportFixture extends LocalMemberAuthIT {
                         owner);
         ObjectNode source = FrozenSnapshotContractTest.complete();
         ObjectNode basic = (ObjectNode) source.path("sections").path("basic");
+        basic.put("difficulty", fixtureDifficulty());
         basic.put("estMin", 15).put("estMax", 30).put("timelineOrigin", "사건 당일 자정");
         JsonNode resources = source.path("resources");
         for (JsonNode row : resources.path("persons"))
@@ -270,6 +286,10 @@ public abstract class PlaytestReportFixture extends LocalMemberAuthIT {
                                 Boolean.class,
                                 snapshot))
                 .isTrue();
+        if (blind) {
+            assertThat(members).hasSize(2).doesNotHaveDuplicates();
+            for (UUID member : members) blindAssessment(member, snapshot);
+        }
         var result =
                 invitations.createInvitation(
                         prepared.id(),
@@ -279,13 +299,91 @@ public abstract class PlaytestReportFixture extends LocalMemberAuthIT {
                         2,
                         snapshot,
                         "H5_SYNTHETIC",
-                        "FUNCTIONAL",
+                        blind ? "BLIND" : "FUNCTIONAL",
                         "R1",
                         "R2",
                         members,
                         UUID.randomUUID(),
                         UUID.randomUUID());
         return (UUID) result.current().get("testKey");
+    }
+
+    protected UUID blindAssessment(UUID member, long snapshot) {
+        return blindEligibility
+                .create(
+                        invitationSid,
+                        invitationActor,
+                        invitationStoryCode,
+                        1,
+                        2,
+                        snapshot,
+                        member,
+                        "ELIGIBLE",
+                        "NON_PARTICIPATION_CONFIRMED",
+                        "synthetic.test:non-participation",
+                        Instant.now().minusSeconds(30),
+                        true,
+                        null,
+                        UUID.randomUUID(),
+                        UUID.randomUUID())
+                .assessmentKey();
+    }
+
+    /** 같은 REVIEW 원고에 새 합성 두 회원을 평가·초대한다. 원고를 재생성하거나 기존 FUNCTIONAL을 변조하지 않는다. */
+    protected UUID additionalBlindInvitation(
+            long snapshot, String roleA, String roleB, List<UUID> members) {
+        assertThat(members).hasSize(2).doesNotHaveDuplicates();
+        for (UUID member : members) blindAssessment(member, snapshot);
+        var created =
+                invitations.createInvitation(
+                        invitationSid,
+                        invitationActor,
+                        invitationStoryCode,
+                        1,
+                        2,
+                        snapshot,
+                        "H5_SYNTHETIC",
+                        "BLIND",
+                        roleA,
+                        roleB,
+                        members,
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
+        return (UUID) created.current().get("testKey");
+    }
+
+    /** 보호된 합성 프로필과 실제 공통 TEST worker 경계를 통해 대기 작업 하나를 실행한다. */
+    protected void gradeBlindTest(UUID job) throws Exception {
+        Path root =
+                Files.createTempDirectory(
+                                "blind-cohort-worker-",
+                                PosixFilePermissions.asFileAttribute(
+                                        PosixFilePermissions.fromString("rwx------")))
+                        .toRealPath();
+        Scope scope = new Scope(SERVER_SCOPE, WORKER, CommonUtil.sha256(SECRET));
+        try {
+            var profiles = profiles(root);
+            Path descriptor = journal(root, scope);
+            try (var owner =
+                    new GradeRemoteBatchWorker(
+                            GradeRemoteOnceJournal.open(descriptor.toString()),
+                            new AssemblyTransport(scope),
+                            new GradeRemoteBatchWorker.TransportBounds(
+                                    8 * 1024 * 1024, Duration.ofSeconds(10)),
+                            profiles)) {
+                var outcome = owner.pollAndRunOnce("H5_SYNTHETIC");
+                assertThat(outcome.state()).isEqualTo(GradeRemoteBatchWorker.State.RECEIPT);
+                assertThat(outcome.receipt().jobKey()).isEqualTo(job);
+                assertThat(outcome.receipt().accepted()).isTrue();
+                assertThat(outcome.receipt().state()).isEqualTo("COMPLETED");
+            }
+        } finally {
+            Files.deleteIfExists(root.resolve("profiles.json"));
+            Files.deleteIfExists(root.resolve("descriptor.json"));
+            Files.deleteIfExists(root.resolve("journal.bin"));
+            Files.deleteIfExists(root.resolve("owner.lock"));
+            Files.deleteIfExists(root);
+        }
     }
 
     /** 기존 합성 원고의 자원별 활성 행을 실제 검수 저장 구조에 넣는다. */

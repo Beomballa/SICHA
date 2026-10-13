@@ -88,6 +88,7 @@ public final class PlaytestInvestigationService {
                 requestId,
                 revision,
                 (c, now) -> {
+                    access.requireBlindAdmission(c);
                     if (c.self().ready() == ready) throw AuthException.conflict("STATE_CONFLICT");
                     if (db.update(
                                     "UPDATE test_member SET ready_yn=?,updated_at=clock_timestamp()"
@@ -124,6 +125,7 @@ public final class PlaytestInvestigationService {
                 requestId,
                 revision,
                 (c, now) -> {
+                    access.requireBlindAdmission(c);
                     if (!c.self().ready()
                             || !c.partner().ready()
                             || !recent(c.self().seen(), now)
@@ -396,6 +398,7 @@ public final class PlaytestInvestigationService {
                             if (denied.denial() != null) return denied;
                             if (c.self().role() == null)
                                 throw AuthException.conflict("STATE_CONFLICT");
+                            access.requireBlindExposure(c);
                             ObjectNode body;
                             try {
                                 body =
@@ -437,10 +440,22 @@ public final class PlaytestInvestigationService {
                             }
                             body.put("requestId", requestId.toString());
                             db.update(
-                                    "INSERT INTO test_exposure(story_id,member_id) VALUES (?,?) ON"
-                                            + " CONFLICT DO NOTHING",
+                                    "INSERT INTO test_exposure(story_id,member_id,first_test_id)"
+                                        + " VALUES (?,?,?) ON CONFLICT DO NOTHING",
                                     c.storyId(),
-                                    c.self().id());
+                                    c.self().id(),
+                                    c.id());
+                            Long source =
+                                    db.query(
+                                            "SELECT first_test_id FROM test_exposure WHERE"
+                                                + " story_id=? AND member_id=?",
+                                            rs -> rs.next() ? (Long) rs.getObject(1) : null,
+                                            c.storyId(),
+                                            c.self().id());
+                            if (source == null || source != c.id())
+                                throw AuthException.conflict("BLIND_INELIGIBLE");
+                            access.requireBlindExposure(c);
+                            audit(c, "CONTENT_READ", requestId, "SUCCESS");
                             audit(c, "TEST_MATERIALS", requestId, "EXPOSED");
                             return Result.allow(body);
                         })
@@ -537,11 +552,6 @@ public final class PlaytestInvestigationService {
                                                 level,
                                                 Timestamp.from(now))
                                         != 1) throw unavailable();
-                                db.update(
-                                        "INSERT INTO test_exposure(story_id,member_id) VALUES (?,?)"
-                                                + " ON CONFLICT DO NOTHING",
-                                        c.storyId(),
-                                        c.self().id());
                                 if (db.update(
                                                 "UPDATE play_test SET"
                                                         + " rev=rev+1,updated_at=clock_timestamp()"
@@ -565,7 +575,6 @@ public final class PlaytestInvestigationService {
                                               AND (?=false OR h.opened_at=?)
                                               AND (SELECT count(*) FROM test_hint WHERE test_id=? AND member_id=? AND level=?)=1
                                               AND (SELECT count(*) FROM test_hint WHERE test_id=? AND member_id=?)=?
-                                              AND (?=false OR EXISTS(SELECT 1 FROM test_exposure WHERE story_id=? AND member_id=?))
                                             FROM play_test t JOIN test_hint h ON h.test_id=t.id AND h.member_id=? AND h.level=?
                                             WHERE t.id=?
                                             """,
@@ -579,9 +588,6 @@ public final class PlaytestInvestigationService {
                                             c.id(),
                                             c.self().id(),
                                             count + (changed ? 1 : 0),
-                                            changed,
-                                            c.storyId(),
-                                            c.self().id(),
                                             c.self().id(),
                                             level,
                                             c.id());

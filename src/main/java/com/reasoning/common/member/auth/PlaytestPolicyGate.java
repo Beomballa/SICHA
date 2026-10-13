@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
-/** Independent, fail-closed PLAYTEST evidence boundary. Never accepts MEMBER_AUTH evidence. */
+/** PLAYTEST와 FRIENDLY의 독립된 근거 경계. 다른 scope의 근거는 허용하지 않는다. */
 public final class PlaytestPolicyGate {
     public record Notice(
             long policyId, String code, String hash, String version, String body, String contact) {}
@@ -55,21 +55,54 @@ public final class PlaytestPolicyGate {
                     31536000L,
                     "backupMaxSeconds",
                     3024000L);
+    private enum Profile { PLAYTEST, FRIENDLY }
+
+    private static final Map<String, Object> FRIENDLY_RETENTION =
+            Map.of("inviteSeconds", 1800L, "lobbySeconds", 1800L,
+                    "raw", "ACCOUNT_ACTIVE", "backupMaxSeconds", 3024000L);
     private final JdbcTemplate db;
     private final MemberAuthConfiguration.Properties properties;
+    private final Profile profile;
 
     public PlaytestPolicyGate(JdbcTemplate db, MemberAuthConfiguration.Properties properties) {
+        this(db, properties, Profile.PLAYTEST);
+    }
+
+    private PlaytestPolicyGate(
+            JdbcTemplate db, MemberAuthConfiguration.Properties properties, Profile profile) {
         this.db = db;
         this.properties = properties;
+        this.profile = profile;
+    }
+
+    public static PlaytestPolicyGate friendly(
+            JdbcTemplate db, MemberAuthConfiguration.Properties properties) {
+        return new PlaytestPolicyGate(db, properties, Profile.FRIENDLY);
+    }
+
+    private boolean enabled() {
+        return profile == Profile.PLAYTEST
+                ? properties.isPlaytestCollectionEnabled()
+                : properties.isFriendlyCollectionEnabled();
+    }
+
+    private String registryFile() {
+        return profile == Profile.PLAYTEST
+                ? properties.getPlaytestEvidenceRegistryFile()
+                : properties.getFriendlyEvidenceRegistryFile();
+    }
+
+    private AuthException notReady() {
+        return AuthException.unavailable(profile.name() + "_COLLECTION_NOT_READY");
     }
 
     public Snapshot prepare() {
         try {
-            if (!properties.isPlaytestCollectionEnabled()
+            if (!enabled()
                     || properties.getEnvCode() == null
                     || !properties.getEnvCode().matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,39}"))
                 throw unavailable();
-            JsonNode root = parse(read(properties.getPlaytestEvidenceRegistryFile(), 131072));
+            JsonNode root = parse(read(registryFile(), 131072));
             exact(
                     root,
                     "formatNo",
@@ -81,7 +114,7 @@ public final class PlaytestPolicyGate {
                     "validUntil",
                     "records");
             integer(root, "formatNo", 1);
-            if (!"PLAYTEST".equals(text(root, "scope"))
+            if (!profile.name().equals(text(root, "scope"))
                     || !properties.getEnvCode().equals(text(root, "envCode"))) throw unavailable();
             long owner = positive(root, "ownerId");
             String hash = hash(root, "noticeHash");
@@ -122,7 +155,7 @@ public final class PlaytestPolicyGate {
                 if (!kind.equals(text(artifact, "kind"))
                         || !ref.equals(reference(artifact, "ref"))
                         || !properties.getEnvCode().equals(text(artifact, "envCode"))
-                        || !"PLAYTEST".equals(text(artifact, "scope"))
+                        || !profile.name().equals(text(artifact, "scope"))
                         || owner != positive(artifact, "ownerId")
                         || !hash.equals(hash(artifact, "noticeHash"))
                         || verified.isAfter(from)
@@ -135,7 +168,7 @@ public final class PlaytestPolicyGate {
             return new Snapshot(
                     properties.getEnvCode(), owner, hash, from, until, Map.copyOf(result));
         } catch (Exception failure) {
-            throw unavailable();
+            throw notReady();
         }
     }
 
@@ -147,18 +180,18 @@ public final class PlaytestPolicyGate {
     /**
      * 사전 잠금된 소유자 밖으로 정책이 바뀌면 새 소유자를 잠그지 않고 거절한다.
      *
-     * @param evidence 잠금 전에 준비한 PLAYTEST 근거
+     * @param evidence 잠금 전에 준비한 해당 scope 근거
      * @param lockedOwners 이미 ID순으로 잠근 관리자 ID 집합; null이면 직접 잠금
      * @return 현재 유효한 고지
      * @throws AuthException 정책 소유자·근거 또는 수집 상태가 달라졌을 때
      */
     public Notice lock(Snapshot evidence, Set<Long> lockedOwners) {
         try {
-            if (!properties.isPlaytestCollectionEnabled()) throw unavailable();
+            if (!enabled() || !properties.getEnvCode().equals(evidence.env())) throw unavailable();
             var rows =
                     db.query(
                             "SELECT id,code,notice_hash,owner_id,policy_data::text FROM"
-                                    + " privacy_policy WHERE env_code=? AND scope='PLAYTEST' AND"
+                                    + " privacy_policy WHERE env_code=? AND scope=? AND"
                                     + " state='ACTIVE'",
                             (rs, n) ->
                                     new Object[] {
@@ -168,7 +201,7 @@ public final class PlaytestPolicyGate {
                                         rs.getLong(4),
                                         rs.getString(5)
                                     },
-                            evidence.env());
+                            evidence.env(), profile.name());
             if (rows.size() != 1) throw unavailable();
             Object[] row = rows.getFirst();
             long id = (long) row[0], owner = (long) row[3];
@@ -181,15 +214,15 @@ public final class PlaytestPolicyGate {
                         owner);
             var locked =
                     db.query(
-                            "SELECT id FROM privacy_policy WHERE id=? AND scope='PLAYTEST' AND"
+                            "SELECT id FROM privacy_policy WHERE id=? AND scope=? AND"
                                     + " state='ACTIVE' FOR SHARE",
                             (rs, n) -> rs.getLong(1),
-                            id);
+                            id, profile.name());
             if (locked.size() != 1) throw unavailable();
             rows =
                     db.query(
                             "SELECT id,code,notice_hash,owner_id,policy_data::text FROM"
-                                    + " privacy_policy WHERE env_code=? AND scope='PLAYTEST' AND"
+                                    + " privacy_policy WHERE env_code=? AND scope=? AND"
                                     + " state='ACTIVE'",
                             (rs, n) ->
                                     new Object[] {
@@ -199,7 +232,7 @@ public final class PlaytestPolicyGate {
                                         rs.getLong(4),
                                         rs.getString(5)
                                     },
-                            evidence.env());
+                            evidence.env(), profile.name());
             if (rows.size() != 1) throw unavailable();
             row = rows.getFirst();
             if ((long) row[0] != id || (long) row[3] != owner || !evidence.hash().equals(row[2]))
@@ -220,8 +253,12 @@ public final class PlaytestPolicyGate {
                     || evidence.from().isAfter(from)
                     || evidence.until().isBefore(until)) throw unavailable();
             JsonNode retention = data.get("retention");
-            exact(retention, RETENTION.keySet().toArray(String[]::new));
-            RETENTION.forEach((key, value) -> integer(retention, key, value));
+            Map<String, ?> expected = profile == Profile.PLAYTEST ? RETENTION : FRIENDLY_RETENTION;
+            exact(retention, expected.keySet().toArray(String[]::new));
+            expected.forEach((key, value) -> {
+                if (value instanceof Long seconds) integer(retention, key, seconds);
+                else if (!value.equals(text(retention, key))) throw unavailable();
+            });
             JsonNode notice = data.get("notice");
             exact(notice, "version", "body", "contact");
             for (String field : new String[] {"version", "body", "contact"}) {
@@ -241,7 +278,7 @@ public final class PlaytestPolicyGate {
             }
             var commitment = JSON.createObjectNode();
             commitment.put("formatNo", 1);
-            commitment.put("scope", "PLAYTEST");
+            commitment.put("scope", profile.name());
             commitment.put("policyCode", (String) row[1]);
             commitment.set("notice", notice);
             if (!sha256(canonical(commitment).getBytes(StandardCharsets.UTF_8)).equals(row[2]))
@@ -262,7 +299,7 @@ public final class PlaytestPolicyGate {
                         || !actual.ref().equals(reference(item, "ref"))
                         || !actual.hash().equals(hash(item, "sha256"))
                         || !evidence.env().equals(text(item, "envCode"))
-                        || !"PLAYTEST".equals(text(item, "scope"))
+                        || !profile.name().equals(text(item, "scope"))
                         || !actual.verified().equals(instant(item, "verifiedAt"))
                         || !actual.until().equals(instant(item, "validUntil"))
                         || actual.verified().isAfter(now)
@@ -278,14 +315,22 @@ public final class PlaytestPolicyGate {
                     text(notice, "body"),
                     text(notice, "contact"));
         } catch (Exception failure) {
-            throw unavailable();
+            throw notReady();
         }
     }
 
     public static String noticeHash(String code, JsonNode notice) {
+        return noticeHash(Profile.PLAYTEST, code, notice);
+    }
+
+    public static String friendlyNoticeHash(String code, JsonNode notice) {
+        return noticeHash(Profile.FRIENDLY, code, notice);
+    }
+
+    private static String noticeHash(Profile profile, String code, JsonNode notice) {
         var object = JSON.createObjectNode();
         object.put("formatNo", 1);
-        object.put("scope", "PLAYTEST");
+        object.put("scope", profile.name());
         object.put("policyCode", code);
         object.set("notice", notice);
         return sha256(canonical(object).getBytes(StandardCharsets.UTF_8));

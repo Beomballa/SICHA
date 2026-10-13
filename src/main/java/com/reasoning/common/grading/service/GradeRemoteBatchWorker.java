@@ -315,7 +315,7 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
     }
 
     /**
-     * 한 original NEW를 실제 MODEL 또는 승인 ENGINE_ERROR로 소비하고 완료를 최대 한 번 요청한다. budget·renewal 게시를 close와
+     * BATCH·TEST·GAME의 한 original NEW를 실제 MODEL 또는 BATCH의 승인 ENGINE_ERROR로 소비하고 완료를 최대 한 번 요청한다. budget·renewal 게시를 close와
      * 직렬화하며 provider/완료 및 finally 정리 전에는 admission을 반환하지 않는다.
      *
      * @param jobKey null·영 UUID 불가인 실제 작업
@@ -429,6 +429,7 @@ public final class GradeRemoteBatchWorker implements AutoCloseable {
             LocalSemanticEngine.Result result = null;
             String error = null;
             boolean model = "MODEL".equals(input.variant());
+            if (!model && !"BATCH".equals(input.sourceKind())) throw refused();
             if (model) {
                 var semantic = FrozenModelProjection.decodeCanonical(input.modelInput().bytes());
                 original.budget.requireLive();

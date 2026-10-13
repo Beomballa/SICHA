@@ -57,11 +57,116 @@ public final class MemberWebPolicy {
     }
 
     static boolean route(HttpServletRequest request) {
+        return cookieRoute(request) || publicRoute(request);
+    }
+
+    /** 검수 고지와 수락은 인증 쿠키가 아닌 Bearer에만 열린 정확한 경로다. */
+    static boolean qualificationRoute(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "GET".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS + "/" + UUID4 + "/notice")
+                || "GET".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS + "/" + UUID4 + "/materials")
+                || "GET".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS
+                                        + "/"
+                                        + UUID4
+                                        + "/(?:report|result)")
+                || "PATCH".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS + "/" + UUID4 + "/report")
+                || "POST".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS
+                                        + "/"
+                                        + UUID4
+                                        + "/(?:report/submit|feedback)")
+                || "POST".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS + "/" + UUID4 + "/accept")
+                || "POST".equals(request.getMethod())
+                        && path.matches(
+                                MemberSecurityConfig.QUALIFICATIONS + "/" + UUID4 + "/start");
+    }
+
+    /** 공개 게임도 익명 공개 경로가 아닌 현재 회원 Bearer 전용 업무다. */
+    static boolean gameRoute(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "GET".equals(request.getMethod())
+                        && (path.equals("/api/stories")
+                                || path.matches("/api/stories/[A-Z0-9_]{1,40}")
+                                || path.equals("/api/member/privacy/policies/friendly")
+                                || path.equals("/api/games/current")
+                                || path.equals("/api/member/records")
+                                || path.matches(
+                                        "/api/member/records/"
+                                                + UUID4
+                                                + "(?:/reports/"
+                                                + UUID4
+                                                + ")?")
+                                || path.matches(
+                                        "/api/games/" + UUID4 + "(?:/materials|/report|/result)?"))
+                || "PATCH".equals(request.getMethod())
+                        && path.matches("/api/games/" + UUID4 + "/report")
+                || "POST".equals(request.getMethod())
+                        && (path.equals("/api/games")
+                                || path.equals("/api/games/invitations/inspect")
+                                || path.equals("/api/games/invitations/join")
+                                || path.matches(
+                                        "/api/games/"
+                                                + UUID4
+                                                + "(?:/start|/report/submit|/report/proposals(?:/"
+                                                + UUID4
+                                                + "/respond)?|/heartbeat|/forfeit|/invitations|/leave|/ready|/selection/refresh|/hints/[1-3]/open|/clues/[A-Z0-9_]{1,32}/read)"));
+    }
+
+    /** 목록의 제한된 커서·크기만 허용하고 중복 키와 임의 query를 거절한다. */
+    static boolean gameListQuery(HttpServletRequest request) {
+        if (!"GET".equals(request.getMethod())
+                || !(request.getRequestURI().equals("/api/stories")
+                        || request.getRequestURI().equals("/api/member/records"))) return false;
+        if (request.getQueryString() == null
+                || request.getQueryString().isEmpty()
+                || request.getQueryString().length() > 4096) return false;
+        for (var entry : request.getParameterMap().entrySet()) {
+            String[] values = entry.getValue();
+            if (values.length != 1) return false;
+            if (entry.getKey().equals("cursor")) {
+                if (values[0].isEmpty() || values[0].length() > 2048) return false;
+            } else if (entry.getKey().equals("size")) {
+                if (!values[0].matches("[1-9][0-9]{0,2}") || Integer.parseInt(values[0]) > 100)
+                    return false;
+            } else return false;
+        }
+        return !request.getParameterMap().isEmpty();
+    }
+
+    /** 쿠키를 새로 발급하거나 회수하는 exact POST만 인증 경로로 분류한다. */
+    static boolean cookieRoute(HttpServletRequest request) {
         return "POST".equals(request.getMethod())
                 && switch (request.getRequestURI()) {
-                    case BASE + "/login/local", BASE + "/refresh", BASE + "/logout" -> true;
+                    case BASE + "/login/local",
+                            BASE + "/refresh",
+                            BASE + "/logout",
+                            BASE + "/email/signup/complete" ->
+                            true;
                     default -> false;
                 };
+    }
+
+    /** 고지와 확인 흐름은 기존 refresh 증명을 업무 자격으로 받지 않는다. */
+    static boolean publicRoute(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "GET".equals(request.getMethod()) && path.equals(BASE + "/notice")
+                || "POST".equals(request.getMethod())
+                        && (path.equals(BASE + "/email/signup")
+                                || path.equals(BASE + "/password/reset")
+                                || path.equals(BASE + "/password/reset/complete")
+                                || path.equals(MemberSecurityConfig.ERASE_STATUS)
+                                || path.equals(BASE + "/email/verify"));
     }
 
     /** raw 헤더 개수를 유지하여 중복·합쳐진 값을 거절한다. */
@@ -80,7 +185,9 @@ public final class MemberWebPolicy {
                 || (origin.getPort() == -1 ? 443 : origin.getPort()) != request.getServerPort()
                 || !"1".equals(single(request, WEB))) throw forbidden();
         var origins = Collections.list(request.getHeaders("Origin"));
-        if (origins.isEmpty() && !cookieAuth) {
+        if (origins.isEmpty()
+                && !cookieAuth
+                && (!publicRoute(request) || "GET".equals(request.getMethod()))) {
             if (!"same-origin".equals(single(request, "Sec-Fetch-Site"))) throw forbidden();
         } else if (origins.size() != 1 || !origin.toString().equals(origins.getFirst())) {
             throw forbidden();
@@ -94,12 +201,18 @@ public final class MemberWebPolicy {
         if (request.getHeader("Sec-Fetch-Dest") != null
                 && !"empty".equals(single(request, "Sec-Fetch-Dest"))) throw forbidden();
         if (request.getHeader("Sec-Fetch-User") != null) throw forbidden();
-        if (request.getQueryString() != null && !invitationQuery(request))
-            throw AuthException.badRequest("INVALID_REQUEST");
+        if (request.getQueryString() != null
+                && !invitationQuery(request)
+                && !gameListQuery(request)) throw AuthException.badRequest("INVALID_REQUEST");
         if (cookieAuth) {
             if (request.getHeader("Authorization") != null) throw forbidden();
             epoch(request);
-        } else if (request.getHeader("Cookie") != null) throw forbidden();
+        } else {
+            if (request.getHeader("Cookie") != null
+                    || publicRoute(request) && request.getHeader("Authorization") != null)
+                throw forbidden();
+            if (publicRoute(request)) epoch(request);
+        }
     }
 
     /** 웹 목록은 선택적 양의 long 커서와 1~100 크기만 허용하며 중복·다른 query는 거절한다. */

@@ -53,6 +53,7 @@ public final class GradeWorkerController {
         private final GradeRecoveryService recovery;
         private final GradeLeaseRepository testLeases;
         private final JdbcTemplate testJdbc;
+        private final boolean gamesEnabled;
 
         /**
          * 이전 BATCH 조립만 받으며 TEST 정책을 포함한 서비스는 복구 없는 활성화를 막기 위해 거절한다.
@@ -73,6 +74,7 @@ public final class GradeWorkerController {
             this.recovery = null;
             this.testLeases = null;
             this.testJdbc = null;
+            this.gamesEnabled = false;
             start.requireHttpAssembly(credentials, completion);
             start.requireBatchAssembly(completion);
         }
@@ -100,6 +102,37 @@ public final class GradeWorkerController {
                 MemberPolicyGate memberPolicy,
                 CryptoService crypto,
                 String trustedCoordinatorKey) {
+            return forSources(credentials, jdbc, manager, installations, policy, null,
+                    memberPolicy, crypto, trustedCoordinatorKey);
+        }
+
+        /** 별도의 FRIENDLY 근거를 공급한 조립만 PUBLIC GAME 실행을 활성화한다. */
+        public static Assembly forGames(
+                GradeWorkerCredentials credentials,
+                JdbcTemplate jdbc,
+                PlatformTransactionManager manager,
+                Map<String, InstalledRuntimeManifestVerifier> installations,
+                PlaytestPolicyGate policy,
+                PlaytestPolicyGate friendlyPolicy,
+                MemberPolicyGate memberPolicy,
+                CryptoService crypto,
+                String trustedCoordinatorKey) {
+            return forSources(credentials, jdbc, manager, installations, policy,
+                    Objects.requireNonNull(friendlyPolicy), memberPolicy, crypto,
+                    trustedCoordinatorKey);
+        }
+
+        /** 동일한 저장소·설치·자격 소유자로 세 출처의 예약·정산·복구를 조립한다. */
+        private static Assembly forSources(
+                GradeWorkerCredentials credentials,
+                JdbcTemplate jdbc,
+                PlatformTransactionManager manager,
+                Map<String, InstalledRuntimeManifestVerifier> installations,
+                PlaytestPolicyGate policy,
+                PlaytestPolicyGate friendlyPolicy,
+                MemberPolicyGate memberPolicy,
+                CryptoService crypto,
+                String trustedCoordinatorKey) {
             if (TransactionSynchronizationManager.isActualTransactionActive())
                 throw new IllegalStateException("TEST_ASSEMBLY_REQUIRES_SEPARATE_TRANSACTION");
             Objects.requireNonNull(credentials);
@@ -123,6 +156,7 @@ public final class GradeWorkerController {
                             credentials,
                             installations,
                             policy,
+                            friendlyPolicy,
                             memberPolicy,
                             crypto);
             var completion =
@@ -134,6 +168,7 @@ public final class GradeWorkerController {
                             crypto,
                             trustedCoordinatorKey,
                             policy,
+                            friendlyPolicy,
                             memberPolicy);
             var recovery =
                     new GradeRecoveryService(
@@ -143,6 +178,7 @@ public final class GradeWorkerController {
                             installations,
                             trustedCoordinatorKey,
                             policy,
+                            friendlyPolicy,
                             memberPolicy,
                             crypto);
             start.requireHttpAssembly(credentials, completion);
@@ -171,7 +207,8 @@ public final class GradeWorkerController {
                     completion,
                     recovery,
                     new GradeLeaseRepository(jdbc, manager),
-                    jdbc);
+                    jdbc,
+                    friendlyPolicy != null);
         }
 
         private Assembly(
@@ -180,13 +217,15 @@ public final class GradeWorkerController {
                 GradeCompletionService completion,
                 GradeRecoveryService recovery,
                 GradeLeaseRepository testLeases,
-                JdbcTemplate testJdbc) {
+                JdbcTemplate testJdbc,
+                boolean gamesEnabled) {
             this.credentials = credentials;
             this.start = start;
             this.completion = completion;
             this.recovery = recovery;
             this.testLeases = testLeases;
             this.testJdbc = testJdbc;
+            this.gamesEnabled = gamesEnabled;
         }
 
         /**
@@ -270,6 +309,10 @@ public final class GradeWorkerController {
                             // 인증된 runtime만 복구한다. 실패는 503/접근 감사로 관측되며 다른 runtime은
                             // 명시 coordinator 복구 경계에 남긴다.
                             ready.recovery.recoverExpiredTestRuntime(runtimeCode, 20);
+                            if (ready.gamesEnabled) {
+                                for (UUID key : ready.testLeases.getExpiredGameRuntimeList(runtimeCode, 20))
+                                    ready.recovery.recover(key);
+                            }
                             // 이미 실행 중인 소유자에게 저장소의 기존 임대 재전송을 노출하지 않는다.
                             if (!ready.testJdbc
                                     .queryForList(
@@ -278,8 +321,10 @@ public final class GradeWorkerController {
                                             Long.class,
                                             verified.workerKey())
                                     .isEmpty()) return null;
-                            return ready.testLeases
-                                    .claimTest(verified.workerKey(), runtimeCode)
+                            var claimed = ready.testLeases.claimTest(verified.workerKey(), runtimeCode);
+                            if (claimed.isEmpty() && ready.gamesEnabled)
+                                claimed = ready.testLeases.claimGame(verified.workerKey(), runtimeCode);
+                            return claimed
                                     .map(
                                             lease ->
                                                     JsonNodeFactory.instance

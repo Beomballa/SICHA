@@ -36,14 +36,24 @@ import java.util.Set;
 public class MemberSecurityConfig {
     static final String AUTH = "/api/member/auth";
     static final String NOTICE = "/api/member/privacy/policies/member-auth";
+    static final String ERASE_STATUS = "/api/member/privacy/erase/status";
     static final String PLAYTEST = "/api/playtests";
-    private static final String TEST_KEY =
+    static final String QUALIFICATIONS = "/api/qualifications";
+    private static final String UUID_KEY =
             "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+    private static final String TEST_KEY = UUID_KEY;
     private static final Set<String> POST =
             Set.of(
                     AUTH + "/email/signup",
                     AUTH + "/email/verify",
                     AUTH + "/email/signup/complete",
+                    AUTH + "/password/reset",
+                    AUTH + "/password/reset/complete",
+                    AUTH + "/reauth/local",
+                    AUTH + "/password/change",
+                    AUTH + "/logout-all",
+                    AUTH + "/account/delete",
+                    ERASE_STATUS,
                     AUTH + "/login/local",
                     AUTH + "/refresh",
                     AUTH + "/logout");
@@ -63,7 +73,13 @@ public class MemberSecurityConfig {
                                 request.getRequestURI().equals("/api/member")
                                         || request.getRequestURI().startsWith("/api/member/")
                                         || request.getRequestURI().equals(PLAYTEST)
-                                        || request.getRequestURI().startsWith(PLAYTEST + "/"))
+                                        || request.getRequestURI().startsWith(PLAYTEST + "/")
+                                        || request.getRequestURI().equals(QUALIFICATIONS)
+                                        || request.getRequestURI().startsWith(QUALIFICATIONS + "/")
+                                        || request.getRequestURI().equals("/api/stories")
+                                        || request.getRequestURI().startsWith("/api/stories/")
+                                        || request.getRequestURI().equals("/api/games")
+                                        || request.getRequestURI().startsWith("/api/games/"))
                 .securityContext(
                         context ->
                                 context.securityContextRepository(
@@ -110,6 +126,8 @@ public class MemberSecurityConfig {
     /** 메서드와 exact 경로를 함께 검사하여 미래 회원 API를 자동 공개하지 않는다. */
     static boolean route(HttpServletRequest request) {
         if (MemberWebPolicy.route(request)) return true;
+        if (MemberWebPolicy.qualificationRoute(request)) return true;
+        if (MemberWebPolicy.gameRoute(request)) return true;
         String path = request.getRequestURI();
         if (path.startsWith(PLAYTEST + "/")) {
             String suffix = path.substring(PLAYTEST.length());
@@ -152,8 +170,9 @@ public class MemberSecurityConfig {
         return headers.getFirst().substring(7);
     }
 
-    /** 웹 Bearer는 회원 확인·초대·조사와 지정된 보고서 경로만 열고 나머지는 닫는다. */
+    /** 웹 Bearer는 지정된 회원 보안·초대·조사 경로만 열고 나머지는 닫는다. */
     static boolean browserBearerRoute(HttpServletRequest request) {
+        if (MemberWebPolicy.qualificationRoute(request)) return true;
         String path = request.getRequestURI();
         if ("GET".equals(request.getMethod())) {
             return path.equals(AUTH + "/me")
@@ -168,7 +187,11 @@ public class MemberSecurityConfig {
         if ("PATCH".equals(request.getMethod()))
             return path.matches(PLAYTEST + "/" + TEST_KEY + "/report");
         return "POST".equals(request.getMethod())
-                && (path.matches(PLAYTEST + "/" + TEST_KEY + "/accept")
+                && (path.equals(AUTH + "/reauth/local")
+                        || path.equals(AUTH + "/password/change")
+                        || path.equals(AUTH + "/logout-all")
+                        || path.equals(AUTH + "/account/delete")
+                        || path.matches(PLAYTEST + "/" + TEST_KEY + "/accept")
                         || path.matches(PLAYTEST + "/" + TEST_KEY + "/ready")
                         || path.matches(PLAYTEST + "/" + TEST_KEY + "/start")
                         || path.matches(PLAYTEST + "/" + TEST_KEY + "/heartbeat")
@@ -249,6 +272,17 @@ public class MemberSecurityConfig {
 
     /** 승인된 동적 경로의 실제 UUID를 접근 이력에 남기지 않는다. */
     private static String auditRoute(String uri) {
+        if (uri.startsWith("/api/member/records/"))
+            return uri.replaceFirst("/" + UUID_KEY + "(?=/|$)", "/{recordKey}")
+                    .replaceFirst("/reports/" + UUID_KEY + "$", "/reports/{reportKey}");
+        if (uri.startsWith("/api/games/"))
+            return uri.replaceFirst("/" + UUID_KEY + "(?=/|$)", "/{gameKey}")
+                    .replaceFirst(
+                            "/report/proposals/" + UUID_KEY + "(?=/|$)",
+                            "/report/proposals/{reportKey}");
+        if (uri.matches("/api/stories/[A-Z0-9_]{1,40}")) return "/api/stories/{storyCode}";
+        if (uri.startsWith(QUALIFICATIONS + "/"))
+            return uri.replaceFirst("/" + UUID_KEY + "(?=/|$)", "/{roomKey}");
         if (uri.startsWith(PLAYTEST + "/")) {
             return uri.replaceFirst("/" + TEST_KEY + "(?=/|$)", "/{testKey}")
                     .replaceFirst(
@@ -280,12 +314,14 @@ public class MemberSecurityConfig {
                     || request.getRequestURI().startsWith(MemberWebPolicy.BASE + "/")
                     || request.getHeader(MemberWebPolicy.WEB) != null) {
                 try {
-                    boolean cookieAuth = MemberWebPolicy.route(request);
+                    boolean cookieAuth = MemberWebPolicy.cookieRoute(request);
+                    boolean publicRoute = MemberWebPolicy.publicRoute(request);
                     boolean bearerRoute = browserBearerRoute(request);
-                    if (!cookieAuth && !bearerRoute)
+                    if (!cookieAuth && !publicRoute && !bearerRoute)
                         throw new AuthException(403, "FORBIDDEN", "FORBIDDEN");
                     web.admit(request, cookieAuth);
-                    if (bearerRoute) principal(service.authenticate(bearer(request), false));
+                    if (bearerRoute)
+                        principal(service.authenticate(bearer(request), rightsRoute(request)));
                 } catch (AuthException failure) {
                     error(mapper, request, response, failure.status(), failure.code());
                     return;
@@ -299,26 +335,36 @@ public class MemberSecurityConfig {
                     || request.getHeader("Sec-Fetch-Mode") != null
                     || request.getHeader("Sec-Fetch-Dest") != null
                     || request.getHeader("Sec-Fetch-User") != null
-                    || (request.getRequestURI().startsWith(PLAYTEST + "/")
+                    || ((request.getRequestURI().startsWith(PLAYTEST + "/")
+                                    || request.getRequestURI().startsWith(QUALIFICATIONS + "/")
+                                    || MemberWebPolicy.gameRoute(request))
                             && request.getHeader("Cookie") != null)) {
                 error(mapper, request, response, 403, "FORBIDDEN");
                 return;
             }
             if (request.getQueryString() != null
                     && !(request.getRequestURI().equals(PLAYTEST + "/invitations")
-                            && "GET".equals(request.getMethod()))) {
+                            && "GET".equals(request.getMethod()))
+                    && !MemberWebPolicy.gameListQuery(request)) {
                 error(mapper, request, response, 400, "INVALID_REQUEST");
                 return;
             }
             if (route(request)
                     && (request.getRequestURI().equals(AUTH + "/me")
                             || request.getRequestURI().equals(AUTH + "/logout")
-                            || request.getRequestURI().startsWith(PLAYTEST + "/"))) {
+                            || request.getRequestURI().equals(AUTH + "/reauth/local")
+                            || request.getRequestURI().equals(AUTH + "/password/change")
+                            || request.getRequestURI().equals(AUTH + "/logout-all")
+                            || request.getRequestURI().equals(AUTH + "/account/delete")
+                            || request.getRequestURI().startsWith(PLAYTEST + "/")
+                            || request.getRequestURI().startsWith(QUALIFICATIONS + "/")
+                            || MemberWebPolicy.gameRoute(request))) {
                 try {
                     principal(
                             service.authenticate(
                                     bearer(request),
-                                    request.getRequestURI().equals(AUTH + "/logout")));
+                                    request.getRequestURI().equals(AUTH + "/logout")
+                                            || rightsRoute(request)));
                 } catch (AuthException failure) {
                     error(mapper, request, response, failure.status(), failure.code());
                     return;
@@ -326,5 +372,11 @@ public class MemberSecurityConfig {
             }
             chain.doFilter(request, response);
         }
+    }
+
+    /** 최근 확인의 목적별 정책은 서비스가 검사하며 탈퇴는 현재 자격만 선검사한다. */
+    private static boolean rightsRoute(HttpServletRequest request) {
+        return request.getRequestURI().equals(AUTH + "/reauth/local")
+                || request.getRequestURI().equals(AUTH + "/account/delete");
     }
 }

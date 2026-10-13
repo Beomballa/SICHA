@@ -73,7 +73,7 @@ public final class MemberMailTransport {
     }
 
     /** 발송 실패는 계정 존재를 노출하지 않고 시작 봉투의 의미도 바꾸지 않는다. */
-    public boolean sendSignup(String email, String code, Boundary expected) {
+    public boolean sendEmailCode(String email, String code, Boundary expected, boolean reset) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) throw unavailable();
         try {
             if (!boundary().equals(expected)) return false;
@@ -84,8 +84,9 @@ public final class MemberMailTransport {
                     new MimeMessageHelper(message, false, StandardCharsets.UTF_8.name());
             helper.setFrom(expected.from());
             helper.setTo(email);
-            helper.setSubject("회원 가입 이메일 확인");
-            helper.setText("회원 가입 확인 코드: " + code + "\n코드는 가입 시작부터 10분 동안만 유효합니다.", false);
+            String purpose = reset ? "비밀번호 복구" : "회원 가입";
+            helper.setSubject(purpose + " 이메일 확인");
+            helper.setText(purpose + " 확인 코드: " + code + "\n코드는 요청 시작부터 10분 동안만 유효합니다.", false);
             sender.send(message);
             return true;
         } catch (Exception failure) {

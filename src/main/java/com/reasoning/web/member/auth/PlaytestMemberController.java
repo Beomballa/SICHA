@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reasoning.common.auth.audit.RequestAuditKernel;
 import com.reasoning.common.auth.service.AuthException;
+import com.reasoning.common.game.service.GameQualificationService;
 import com.reasoning.common.story.service.PlaytestInvestigationService;
 import com.reasoning.common.story.service.PlaytestInvitationService;
 import com.reasoning.common.story.service.PlaytestReportService;
@@ -30,33 +31,36 @@ import java.util.UUID;
 /** Bearer 자격을 거래 안에서 재검증하는 초대·동의 전용 HTTP 경계다. */
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@RequestMapping(MemberSecurityConfig.PLAYTEST)
+@RequestMapping("/api")
 public final class PlaytestMemberController {
     private final PlaytestInvitationService invitations;
     private final PlaytestInvestigationService investigation;
     private final PlaytestReportService reports;
+    private final GameQualificationService qualifications;
     private final ObjectMapper mapper;
 
     public PlaytestMemberController(
             PlaytestInvitationService invitations,
             PlaytestInvestigationService investigation,
             PlaytestReportService reports,
+            GameQualificationService qualifications,
             ObjectMapper mapper) {
         this.invitations = invitations;
         this.investigation = investigation;
         this.reports = reports;
+        this.qualifications = qualifications;
         this.mapper = mapper;
     }
 
     /** 인증된 자신의 공개 참가 키만 반환한다. */
-    @GetMapping("/identity")
+    @GetMapping("/playtests/identity")
     public ResponseEntity<?> identity(HttpServletRequest request) {
         noQuery(request);
         return ok(invitations.getMemberIdentity(MemberSecurityConfig.bearer(request), id(request)));
     }
 
     /** 양의 ID 커서와 1~100 페이지 크기만 허용하며 상대 식별자는 노출하지 않는다. */
-    @GetMapping("/invitations")
+    @GetMapping("/playtests/invitations")
     public ResponseEntity<?> list(HttpServletRequest request) {
         query(request, Set.of("cursor", "size"));
         String cursor = request.getParameter("cursor");
@@ -69,7 +73,7 @@ public final class PlaytestMemberController {
     }
 
     /** 지정된 본인의 유효한 초대 상태만 조회한다. */
-    @GetMapping("/{testKey}")
+    @GetMapping("/playtests/{testKey}")
     public ResponseEntity<?> state(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         return ok(
@@ -78,7 +82,7 @@ public final class PlaytestMemberController {
     }
 
     /** PLAYTEST 정책이 현재 효력을 가지는지 재확인하고 해당 초대의 고지를 읽는다. */
-    @GetMapping("/{testKey}/policy-notice")
+    @GetMapping("/playtests/{testKey}/policy-notice")
     public ResponseEntity<?> notice(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         return ok(
@@ -86,8 +90,8 @@ public final class PlaytestMemberController {
                         MemberSecurityConfig.bearer(request), uuid(testKey), id(request)));
     }
 
-    /** FUNCTIONAL 동의만 허용한다. BLIND 적격성 판정이 없는 현재 서비스에는 선언을 전달하지 않는다. */
-    @PostMapping("/{testKey}/accept")
+    /** 별도 비노출 선언을 실제 회원 수락 거래에 전달한다. */
+    @PostMapping("/playtests/{testKey}/accept")
     public ResponseEntity<?> accept(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode body =
@@ -101,7 +105,7 @@ public final class PlaytestMemberController {
                                 "noticeHash",
                                 "requestKey"));
         JsonNode declared = body.get("blindDeclared");
-        if (!declared.isBoolean() || declared.booleanValue()) throw invalid();
+        if (!declared.isBoolean()) throw invalid();
         int generation = positiveInt(body, "inviteGen");
         long revision = revision(body, "expectedRev");
         UUID key = uuid(testKey);
@@ -112,6 +116,7 @@ public final class PlaytestMemberController {
                         key,
                         generation,
                         revision,
+                        declared.booleanValue(),
                         text(body, "policyCode"),
                         text(body, "noticeHash"),
                         requestKey,
@@ -119,7 +124,7 @@ public final class PlaytestMemberController {
     }
 
     /** 자신의 대기 의사를 명시적으로 설정하거나 철회하며 전체 의도를 영수증에 결속한다. */
-    @PostMapping("/{testKey}/ready")
+    @PostMapping("/playtests/{testKey}/ready")
     public ResponseEntity<?> ready(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode value = body(request, Set.of("expectedRev", "ready", "requestKey"));
@@ -132,7 +137,7 @@ public final class PlaytestMemberController {
     }
 
     /** 쌍의 준비 상태와 최근 접속을 확인한 뒤 단 한 번 역할을 배정한다. */
-    @PostMapping("/{testKey}/start")
+    @PostMapping("/playtests/{testKey}/start")
     public ResponseEntity<?> start(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode value = body(request, Set.of("expectedRev", "requestKey"));
@@ -146,7 +151,7 @@ public final class PlaytestMemberController {
     }
 
     /** 명시적 하트비트만 자신의 서버 접속 시각을 갱신한다. */
-    @PostMapping("/{testKey}/heartbeat")
+    @PostMapping("/playtests/{testKey}/heartbeat")
     public ResponseEntity<?> heartbeat(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         body(request, Set.of());
@@ -155,7 +160,7 @@ public final class PlaytestMemberController {
     }
 
     /** 자신의 확정된 역할로 허용된 고정 사본 자료만 읽는다. */
-    @GetMapping("/{testKey}/materials")
+    @GetMapping("/playtests/{testKey}/materials")
     public ResponseEntity<?> materials(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         return ok(
@@ -164,7 +169,7 @@ public final class PlaytestMemberController {
     }
 
     /** 자신의 영속 힌트 개봉만 허용하고 다른 참가자의 사용량과 본문은 노출하지 않는다. */
-    @PostMapping("/{testKey}/hints/{level}/open")
+    @PostMapping("/playtests/{testKey}/hints/{level}/open")
     public ResponseEntity<?> openHint(
             @PathVariable String testKey, @PathVariable String level, HttpServletRequest request) {
         noQuery(request);
@@ -181,14 +186,14 @@ public final class PlaytestMemberController {
     }
 
     /** 공동 초안과 현재 제안을 참가자에게만 반환한다. */
-    @GetMapping("/{testKey}/report")
+    @GetMapping("/playtests/{testKey}/report")
     public ResponseEntity<?> report(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         return ok(reports.report(MemberSecurityConfig.bearer(request), uuid(testKey), id(request)));
     }
 
     /** 전체 REPORT-1 본문을 엄격히 읽어 공동 초안을 수정한다. */
-    @PatchMapping("/{testKey}/report")
+    @PatchMapping("/playtests/{testKey}/report")
     public ResponseEntity<?> editReport(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode value =
@@ -208,7 +213,7 @@ public final class PlaytestMemberController {
     }
 
     /** 현재 공동 초안을 암호화된 불변 제안으로 고정한다. */
-    @PostMapping("/{testKey}/report/proposals")
+    @PostMapping("/playtests/{testKey}/report/proposals")
     public ResponseEntity<?> propose(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode value =
@@ -225,7 +230,7 @@ public final class PlaytestMemberController {
     }
 
     /** ACCEPT는 실제 판정 소비·복구·정산 경로가 연결되기 전까지 차단한다. */
-    @PostMapping("/{testKey}/report/proposals/{reportKey}/respond")
+    @PostMapping("/playtests/{testKey}/report/proposals/{reportKey}/respond")
     public ResponseEntity<?> respond(
             @PathVariable String testKey,
             @PathVariable String reportKey,
@@ -244,7 +249,7 @@ public final class PlaytestMemberController {
     }
 
     /** 대기 중인 제출이 없는 플레이만 명시적으로 포기한다. */
-    @PostMapping("/{testKey}/forfeit")
+    @PostMapping("/playtests/{testKey}/forfeit")
     public ResponseEntity<?> forfeit(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode value = body(request, Set.of("expectedRev", "requestKey"));
@@ -258,14 +263,14 @@ public final class PlaytestMemberController {
     }
 
     /** 종료된 자신의 피드백 허용 창을 검사해 최소 결과만 반환한다. */
-    @GetMapping("/{testKey}/result")
+    @GetMapping("/playtests/{testKey}/result")
     public ResponseEntity<?> result(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         return ok(reports.result(MemberSecurityConfig.bearer(request), uuid(testKey), id(request)));
     }
 
     /** 자신의 첫 피드백만 암호화 저장한다. */
-    @PostMapping("/{testKey}/feedback")
+    @PostMapping("/playtests/{testKey}/feedback")
     public ResponseEntity<?> feedback(@PathVariable String testKey, HttpServletRequest request) {
         noQuery(request);
         JsonNode value = body(request, Set.of("requestKey", "feedback"), 524288);
@@ -274,6 +279,136 @@ public final class PlaytestMemberController {
                         MemberSecurityConfig.bearer(request),
                         uuid(testKey),
                         value.get("feedback"),
+                        uuid(text(value, "requestKey")),
+                        id(request)));
+    }
+
+    /** 지정한 단독 검수 방의 실제 참가 후보에게 현재 효력 고지만 반환한다. */
+    @GetMapping("/qualifications/{roomKey}/notice")
+    public ResponseEntity<?> qualificationNotice(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        return ok(
+                qualifications.getAcceptanceNotice(
+                        MemberSecurityConfig.bearer(request), uuid(roomKey), id(request)));
+    }
+
+    /** 현재 회원의 별도 명시 동의만 수락하며 게임 준비나 진행은 시작하지 않는다. */
+    @PostMapping("/qualifications/{roomKey}/accept")
+    public ResponseEntity<?> qualificationAccept(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        JsonNode value =
+                body(request, Set.of("blindDeclared", "policyCode", "noticeHash", "requestKey"));
+        JsonNode declared = value.get("blindDeclared");
+        if (!declared.isBoolean()) throw invalid();
+        String code = text(value, "policyCode");
+        String hash = text(value, "noticeHash");
+        if (!code.matches("[A-Za-z0-9_:-]{1,80}") || !hash.matches("[0-9a-f]{64}")) throw invalid();
+        return ok(
+                qualifications.acceptQualification(
+                        MemberSecurityConfig.bearer(request),
+                        uuid(roomKey),
+                        declared.booleanValue(),
+                        code,
+                        hash,
+                        uuid(text(value, "requestKey")),
+                        id(request)));
+    }
+
+    /** 수락한 단독 회원만 현재 방 수정번호로 명시 시작한다. 동일 요청 키는 원래 시작만 재전송한다. */
+    @PostMapping("/qualifications/{roomKey}/start")
+    public ResponseEntity<?> qualificationStart(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        JsonNode value = body(request, Set.of("expectedRev", "requestKey"));
+        return ok(
+                qualifications.startQualification(
+                        MemberSecurityConfig.bearer(request),
+                        uuid(roomKey),
+                        revision(value, "expectedRev"),
+                        uuid(text(value, "requestKey")),
+                        id(request)));
+    }
+
+    /** 서버 사본의 두 역할·공통 자료만 반환하며 노출 이력과 업무 감사를 먼저 원자적으로 확정한다. */
+    @GetMapping("/qualifications/{roomKey}/materials")
+    public ResponseEntity<?> qualificationMaterials(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        return ok(
+                qualifications.getMaterials(
+                        MemberSecurityConfig.bearer(request), uuid(roomKey), id(request)));
+    }
+
+    /** 현재 검수 참가자의 저장 초안과 독립 수정번호만 반환한다. */
+    @GetMapping("/qualifications/{roomKey}/report")
+    public ResponseEntity<?> qualificationReport(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        return ok(
+                qualifications.getReport(
+                        MemberSecurityConfig.bearer(request), uuid(roomKey), id(request)));
+    }
+
+    /** 명시적으로 저장한 REPORT-1만 CAS 처리하며 무변경 초안은 수정번호를 보존한다. */
+    @PatchMapping("/qualifications/{roomKey}/report")
+    public ResponseEntity<?> qualificationEditReport(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        JsonNode value =
+                body(
+                        request,
+                        Set.of("expectedRev", "expectedDraftRev", "report", "requestKey"),
+                        131072);
+        return ok(
+                qualifications.editReport(
+                        MemberSecurityConfig.bearer(request),
+                        uuid(roomKey),
+                        revision(value, "expectedRev"),
+                        revision(value, "expectedDraftRev"),
+                        value.get("report"),
+                        uuid(text(value, "requestKey")),
+                        id(request)));
+    }
+
+    /** 본인이 확인한 저장본만 불변 검수 보고서와 실제 GAME 작업으로 접수한다. */
+    @PostMapping("/qualifications/{roomKey}/report/submit")
+    public ResponseEntity<?> qualificationSubmitReport(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        JsonNode value = body(request, Set.of("expectedRev", "expectedDraftRev", "requestKey"));
+        return ok(
+                qualifications.submitReport(
+                        MemberSecurityConfig.bearer(request),
+                        uuid(roomKey),
+                        revision(value, "expectedRev"),
+                        revision(value, "expectedDraftRev"),
+                        uuid(text(value, "requestKey")),
+                        id(request)));
+    }
+
+    /** 검수 종료 후 허용된 24시간 안에서 실제 저장 결과만 반환한다. */
+    @GetMapping("/qualifications/{roomKey}/result")
+    public ResponseEntity<?> qualificationResult(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        return ok(
+                qualifications.getResult(
+                        MemberSecurityConfig.bearer(request), uuid(roomKey), id(request)));
+    }
+
+    /** 검수 참가자의 명시적 피드백을 현재 인가·감사·영수증과 함께 접수한다. */
+    @PostMapping("/qualifications/{roomKey}/feedback")
+    public ResponseEntity<?> qualificationFeedback(
+            @PathVariable String roomKey, HttpServletRequest request) {
+        noQuery(request);
+        JsonNode value = body(request, Set.of("feedback", "requestKey"), 32768);
+        return ok(
+                qualifications.submitFeedback(
+                        MemberSecurityConfig.bearer(request),
+                        uuid(roomKey),
+                        text(value, "feedback"),
                         uuid(text(value, "requestKey")),
                         id(request)));
     }

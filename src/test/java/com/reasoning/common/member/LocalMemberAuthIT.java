@@ -877,6 +877,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                                         key,
                                         1,
                                         0,
+                                        false,
                                         notice.policyCode(),
                                         "0".repeat(64),
                                         UUID.randomUUID(),
@@ -916,6 +917,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                         key,
                         1,
                         0,
+                        false,
                         notice.policyCode(),
                         notice.noticeHash(),
                         request,
@@ -930,6 +932,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                                         key,
                                         1,
                                         0,
+                                        false,
                                         notice.policyCode(),
                                         notice.noticeHash(),
                                         request,
@@ -945,6 +948,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                                         key,
                                         1,
                                         0,
+                                        false,
                                         next.policyCode(),
                                         next.noticeHash(),
                                         UUID.randomUUID(),
@@ -955,6 +959,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                 key,
                 1,
                 1,
+                false,
                 next.policyCode(),
                 next.noticeHash(),
                 UUID.randomUUID(),
@@ -965,6 +970,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                         key,
                         1,
                         0,
+                        false,
                         notice.policyCode(),
                         notice.noticeHash(),
                         request,
@@ -1031,6 +1037,7 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                                             key,
                                             1,
                                             0,
+                                            false,
                                             policyCode,
                                             notice.noticeHash(),
                                             UUID.randomUUID(),
@@ -1201,7 +1208,11 @@ public class LocalMemberAuthIT extends DatabaseContextTest {
                 .andExpect(status().isUnauthorized());
         mvc.perform(get(BASE + "/me?accessToken=secret").secure(true))
                 .andExpect(status().isBadRequest());
-        mvc.perform(post(BASE + "/password/reset").secure(true)).andExpect(status().isForbidden());
+        mvc.perform(post(BASE + "/password/reset").secure(true)).andExpect(status().isBadRequest());
+        mvc.perform(post(BASE + "/password/reset/complete").secure(true))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post(BASE + "/password/reset/unknown").secure(true))
+                .andExpect(status().isForbidden());
         mvc.perform(
                         post("/admin/api/auth/login")
                                 .secure(true)

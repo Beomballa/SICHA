@@ -68,7 +68,7 @@ class PlaytestInvitationIT {
     }
 
     @Test
-    void blindCannotClaimEligibilityWithoutEvidence() {
+    void unknownModeCannotCreateAnInvitation() {
         assertThatThrownBy(
                         () ->
                                 service.createInvitation(
@@ -79,13 +79,13 @@ class PlaytestInvitationIT {
                                         0,
                                         1,
                                         "RUNTIME",
-                                        "BLIND",
+                                        "UNVERIFIED",
                                         "A",
                                         "B",
                                         List.of(UUID.randomUUID(), UUID.randomUUID()),
                                         UUID.randomUUID(),
                                         UUID.randomUUID()))
-                .hasMessageContaining("BLIND_INELIGIBLE");
+                .hasMessageContaining("INVALID_REQUEST");
         verifyNoInteractions(stories, runtimes, db);
     }
 
@@ -175,6 +175,7 @@ class PlaytestInvitationIT {
                         invitationService,
                         mock(com.reasoning.common.story.service.PlaytestInvestigationService.class),
                         mock(com.reasoning.common.story.service.PlaytestReportService.class),
+                        mock(com.reasoning.common.game.service.GameQualificationService.class),
                         new ObjectMapper());
         UUID testKey = UUID.randomUUID();
         UUID requestKey = UUID.randomUUID();
@@ -185,7 +186,8 @@ class PlaytestInvitationIT {
                         + "\"}";
         controller.accept(testKey.toString(), request(testKey, "\"0\"" + suffix));
         verify(invitationService)
-                .acceptInvitation("x".repeat(43), testKey, 1, 0L, "P", "H", requestKey, testKey);
+                .acceptInvitation(
+                        "x".repeat(43), testKey, 1, 0L, false, "P", "H", requestKey, testKey);
         assertThatThrownBy(
                         () -> controller.accept(testKey.toString(), request(testKey, "0" + suffix)))
                 .hasMessageContaining("INVALID_REQUEST");

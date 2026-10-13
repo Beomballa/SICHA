@@ -25,7 +25,7 @@ import java.util.UUID;
 class SchemaIT {
     /** 승인된 최신 물리 구조의 전체 테이블·컬럼·인덱스·FK와 기존 인증/사건 제약을 대조한다. */
     @Test
-    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V23 구조와 회귀 저장 제약 검증")
+    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V42 구조와 회귀 저장 제약 검증")
     void appliesH0Schema() throws Exception {
         DockerImageName image =
                 DockerImageName.parse(
@@ -42,7 +42,7 @@ class SchemaIT {
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(42);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -98,6 +98,8 @@ class SchemaIT {
                                 "evidence_item",
                                 "member_account",
                                 "privacy_policy",
+                                "privacy_erase",
+                                "privacy_target",
                                 "member_profile",
                                 "member_identity",
                                 "member_session",
@@ -110,7 +112,22 @@ class SchemaIT {
                                 "test_hint",
                                 "test_exposure",
                                 "test_retention",
-                                "test_report");
+                                "test_report",
+                                "game_room",
+                                "game_member",
+                                "game_report",
+                                "game_action",
+                                "game_audit",
+                                "story_release",
+                                "release_solo_feedback",
+                                "release_human_review",
+                                "release_evidence",
+                                "release_evidence_item",
+                                "play_record",
+                                "game_hint",
+                                "game_clue_read",
+                                "game_invite",
+                                "blind_assessment");
                 Map<String, Set<String>> expectedColumns =
                         new HashMap<>(
                                 Map.of(
@@ -373,7 +390,8 @@ class SchemaIT {
                                 "created_at",
                                 "updated_at",
                                 "report_id",
-                                "report_hash"));
+                                "report_hash",
+                                "game_report_id"));
                 expectedColumns.put(
                         "grade_attempt",
                         Set.of(
@@ -628,7 +646,12 @@ class SchemaIT {
                                 "created_at",
                                 "expires_at",
                                 "verified_at",
-                                "consumed_at"));
+                                "consumed_at",
+                                "member_id",
+                                "identity_id",
+                                "auth_rev",
+                                "session_id",
+                                "reauth_purpose"));
                 expectedColumns.put(
                         "member_auth_audit",
                         Set.of(
@@ -703,7 +726,8 @@ class SchemaIT {
                                 "created_at",
                                 "updated_at",
                                 "feedback_cipher",
-                                "feedback_at"));
+                                "feedback_at",
+                                "assessment_id"));
                 expectedColumns.put(
                         "test_report",
                         Set.of(
@@ -726,12 +750,319 @@ class SchemaIT {
                                 "created_at",
                                 "updated_at"));
                 expectedColumns.put(
-                        "test_exposure", Set.of("story_id", "member_id", "first_exposed_at"));
+                        "test_exposure",
+                        Set.of(
+                                "story_id",
+                                "member_id",
+                                "first_exposed_at",
+                                "first_test_id",
+                                "first_room_id"));
                 expectedColumns.put(
                         "test_hint", Set.of("test_id", "member_id", "level", "opened_at"));
                 expectedColumns.put(
                         "test_retention",
                         Set.of("test_id", "policy_id", "raw_until", "max_until", "selected_at"));
+                expectedColumns.put(
+                        "privacy_erase",
+                        Set.of(
+                                "id",
+                                "erase_key",
+                                "scope",
+                                "member_id",
+                                "policy_id",
+                                "state",
+                                "reason_code",
+                                "locator_cipher",
+                                "receipt_hash",
+                                "receipt_until",
+                                "created_at",
+                                "blocked_at",
+                                "primary_done_at",
+                                "external_done_at",
+                                "backup_until",
+                                "completed_at",
+                                "sealed_at",
+                                "target_count"));
+                expectedColumns.put(
+                        "privacy_target",
+                        Set.of(
+                                "id",
+                                "erase_id",
+                                "target_key",
+                                "kind",
+                                "state",
+                                "member_id",
+                                "test_id",
+                                "source_job_id",
+                                "dependency_id",
+                                "source_attempt_no",
+                                "locator_cipher",
+                                "lookup_hash",
+                                "attempt_count",
+                                "lease_gen",
+                                "lease_until",
+                                "next_run_at",
+                                "result_code",
+                                "confirmed_at",
+                                "source_kind",
+                                "room_id",
+                                "game_member_id"));
+                expectedColumns.put(
+                        "game_room",
+                        Set.of(
+                                "id",
+                                "room_key",
+                                "purpose",
+                                "mode",
+                                "qualification_kind",
+                                "reviewer_id",
+                                "selected_member_id",
+                                "story_id",
+                                "version_id",
+                                "snapshot_id",
+                                "runtime_id",
+                                "runtime_epoch",
+                                "config_hash",
+                                "rubric_hash",
+                                "policy_id",
+                                "play_rev",
+                                "rev",
+                                "draft_rev",
+                                "draft_cipher",
+                                "draft_hash",
+                                "state",
+                                "end_reason",
+                                "difficulty",
+                                "limit_sec",
+                                "max_attempts",
+                                "max_hints",
+                                "role_a",
+                                "role_b",
+                                "created_at",
+                                "lobby_until",
+                                "started_at",
+                                "deadline_at",
+                                "ended_at",
+                                "time_basis_at",
+                                "graded_count",
+                                "wrong_count",
+                                "last_base_score",
+                                "final_score",
+                                "updated_at",
+                                "assessment_id"));
+                expectedColumns.put(
+                        "game_member",
+                        Set.of(
+                                "id",
+                                "room_id",
+                                "member_id",
+                                "identity_id",
+                                "slot",
+                                "active_yn",
+                                "ready_yn",
+                                "version_id",
+                                "role_code",
+                                "policy_id",
+                                "accepted_at",
+                                "last_seen_at",
+                                "presence_session_id",
+                                "presence_auth_rev",
+                                "created_at",
+                                "updated_at",
+                                "occupying_yn",
+                                "blind_declared"));
+                expectedColumns.put(
+                        "game_report",
+                        Set.of(
+                                "id",
+                                "report_key",
+                                "room_id",
+                                "snapshot_id",
+                                "source_rev",
+                                "proposer_id",
+                                "accepted_by",
+                                "state",
+                                "payload_cipher",
+                                "payload_hash",
+                                "purged_at",
+                                "accepted_at",
+                                "grade_deadline_at",
+                                "ordinal",
+                                "base_score",
+                                "success_yn",
+                                "score_data",
+                                "graded_at",
+                                "created_at"));
+                expectedColumns.put(
+                        "game_action",
+                        Set.of(
+                                "id",
+                                "request_key",
+                                "admin_id",
+                                "member_id",
+                                "room_id",
+                                "action",
+                                "request_hash",
+                                "result_data",
+                                "created_at"));
+                expectedColumns.put(
+                        "game_audit",
+                        Set.of(
+                                "id",
+                                "event_key",
+                                "room_id",
+                                "actor_kind",
+                                "admin_id",
+                                "member_id",
+                                "action",
+                                "request_id",
+                                "result",
+                                "created_at"));
+                expectedColumns.put(
+                        "story_release",
+                        Set.of(
+                                "id",
+                                "version_id",
+                                "snapshot_id",
+                                "source_rev",
+                                "runtime_id",
+                                "runtime_epoch",
+                                "config_hash",
+                                "evidence_hash",
+                                "bundle_data",
+                                "blocked_yn",
+                                "blocked_reason",
+                                "blocked_ref",
+                                "blocked_by",
+                                "blocked_at",
+                                "created_by",
+                                "created_at"));
+                expectedColumns.put(
+                        "release_solo_feedback",
+                        Set.of(
+                                "room_id",
+                                "member_id",
+                                "feedback_cipher",
+                                "submitted_at",
+                                "ended_at",
+                                "raw_until",
+                                "selected_at"));
+                expectedColumns.put(
+                        "release_human_review",
+                        Set.of(
+                                "id",
+                                "snapshot_id",
+                                "test_id",
+                                "room_id",
+                                "reviewer_id",
+                                "verdict",
+                                "critical_open_count",
+                                "detail",
+                                "verification_ref",
+                                "supersedes_id",
+                                "finding_ref",
+                                "created_at"));
+                expectedColumns.put(
+                        "release_evidence",
+                        Set.of(
+                                "id",
+                                "receipt_key",
+                                "snapshot_id",
+                                "runtime_id",
+                                "runtime_epoch",
+                                "config_hash",
+                                "evidence_hash",
+                                "created_by",
+                                "created_at",
+                                "collection_tx"));
+                expectedColumns.put(
+                        "release_evidence_item",
+                        Set.of(
+                                "receipt_id",
+                                "source_kind",
+                                "pair_a",
+                                "pair_b",
+                                "test_id",
+                                "room_id",
+                                "review_id",
+                                "source_hash"));
+                expectedColumns.put(
+                        "play_record",
+                        Set.of(
+                                "id",
+                                "record_key",
+                                "member_id",
+                                "room_id",
+                                "state",
+                                "mode",
+                                "story_code",
+                                "story_title",
+                                "difficulty",
+                                "role_a",
+                                "role_b",
+                                "own_role",
+                                "own_role_name",
+                                "result_status",
+                                "end_reason",
+                                "started_at",
+                                "ended_at",
+                                "time_basis_at",
+                                "duration_seconds",
+                                "graded_count",
+                                "own_hint_count",
+                                "final_score",
+                                "source_erased_yn",
+                                "rev",
+                                "created_at"));
+                expectedColumns.put(
+                        "game_hint",
+                        Set.of(
+                                "room_id",
+                                "member_id",
+                                "snapshot_id",
+                                "level",
+                                "hint_code",
+                                "opened_at"));
+                expectedColumns.put(
+                        "game_clue_read",
+                        Set.of("room_id", "member_id", "snapshot_id", "clue_code", "read_at"));
+                expectedColumns.put(
+                        "game_invite",
+                        Set.of(
+                                "id",
+                                "invite_key",
+                                "room_id",
+                                "generation",
+                                "token_hash",
+                                "expires_at",
+                                "revoked_at",
+                                "consumed_at",
+                                "created_at"));
+                expectedColumns.put(
+                        "blind_assessment",
+                        Set.of(
+                                "id",
+                                "assessment_key",
+                                "story_id",
+                                "version_id",
+                                "snapshot_id",
+                                "member_id",
+                                "assessed_by",
+                                "decision",
+                                "reason_code",
+                                "verification_ref",
+                                "checked_at",
+                                "recorded_at",
+                                "valid_until",
+                                "supersedes_id",
+                                "action_id",
+                                "audit_id",
+                                "revoked_at",
+                                "revoked_by",
+                                "revoke_reason_code",
+                                "revoke_verification_ref",
+                                "revoke_action_id",
+                                "revoke_audit_id"));
                 for (var entry : expectedColumns.entrySet()) {
                     Set<String> columns = new HashSet<>();
                     try (ResultSet rs = metadata.getColumns(null, "public", entry.getKey(), "%")) {
@@ -839,7 +1170,8 @@ class SchemaIT {
                                 "uk_grade_job_key",
                                 "uk_grade_job_sample",
                                 "uk_gj_worker",
-                                "uk_gj_report"));
+                                "uk_gj_report",
+                                "uk_gj_game_report"));
                 approvedIndexes.put("grade_attempt", Set.of("pk_grade_attempt", "uk_ga_lease"));
                 approvedIndexes.put(
                         "grade_event", Set.of("pk_grade_event", "uk_grade_event_command"));
@@ -904,6 +1236,24 @@ class SchemaIT {
                         "member_auth_audit", Set.of("pk_member_auth_audit", "uk_maa_event"));
                 approvedIndexes.put("member_auth_limit", Set.of("pk_member_auth_limit"));
                 approvedIndexes.put(
+                        "privacy_erase",
+                        Set.of(
+                                "privacy_erase_pkey",
+                                "privacy_erase_erase_key_key",
+                                "uk_pe_live_member"));
+                approvedIndexes.put(
+                        "privacy_target",
+                        Set.of(
+                                "privacy_target_pkey",
+                                "privacy_target_target_key_key",
+                                "uk_pt_primary_member",
+                                "uk_pt_primary_test",
+                                "uk_pt_canonical_test",
+                                "uk_pt_canonical_room",
+                                "uk_pt_membership",
+                                "uk_pt_processor_lookup",
+                                "uk_pt_processor_attempt"));
+                approvedIndexes.put(
                         "play_test",
                         Set.of(
                                 "pk_play_test",
@@ -928,6 +1278,76 @@ class SchemaIT {
                 approvedIndexes.put("test_exposure", Set.of("pk_test_exposure"));
                 approvedIndexes.put("test_hint", Set.of("pk_test_hint"));
                 approvedIndexes.put("test_retention", Set.of("pk_test_retention", "ix_tret_due"));
+                approvedIndexes.put(
+                        "game_room",
+                        Set.of(
+                                "pk_game_room",
+                                "uk_gr_key",
+                                "uk_gr_version",
+                                "uk_gr_snapshot",
+                                "ix_gr_lobby",
+                                "ix_gr_deadline"));
+                approvedIndexes.put(
+                        "game_member",
+                        Set.of(
+                                "pk_game_member",
+                                "uk_gm_member",
+                                "uk_gm_active_slot",
+                                "uk_gm_started_slot",
+                                "uk_gm_occupied_member"));
+                approvedIndexes.put(
+                        "game_report",
+                        Set.of(
+                                "pk_game_report",
+                                "uk_grp_key",
+                                "uk_grp_snapshot",
+                                "uk_grp_ordinal",
+                                "uk_grp_pending"));
+                approvedIndexes.put(
+                        "game_action", Set.of("pk_game_action", "uk_game_action_request"));
+                approvedIndexes.put("game_audit", Set.of("pk_game_audit", "uk_game_audit_event"));
+                approvedIndexes.put(
+                        "story_release", Set.of("pk_story_release", "uk_release_snapshot"));
+                approvedIndexes.put("release_solo_feedback", Set.of("release_solo_feedback_pkey"));
+                approvedIndexes.put("release_human_review", Set.of("release_human_review_pkey"));
+                approvedIndexes.put(
+                        "release_evidence",
+                        Set.of(
+                                "release_evidence_pkey",
+                                "release_evidence_receipt_key_key",
+                                "release_evidence_snapshot_id_id_key"));
+                approvedIndexes.put(
+                        "release_evidence_item",
+                        Set.of("release_evidence_item_pkey", "uk_rei_test", "uk_rei_room"));
+                approvedIndexes.put(
+                        "play_record",
+                        Set.of(
+                                "pk_play_record",
+                                "uk_play_record_key",
+                                "uk_play_record_owner_room",
+                                "ix_play_record_member_page",
+                                "ix_play_record_room"));
+                approvedIndexes.put("game_hint", Set.of("pk_game_hint", "uk_game_hint_code"));
+                approvedIndexes.put("game_clue_read", Set.of("pk_game_clue_read"));
+                approvedIndexes.put(
+                        "game_invite",
+                        Set.of(
+                                "pk_game_invite",
+                                "uk_game_invite_key",
+                                "uk_game_invite_generation",
+                                "uk_game_invite_open",
+                                "ix_game_invite_room"));
+                approvedIndexes.put(
+                        "blind_assessment",
+                        Set.of(
+                                "pk_blind_assessment",
+                                "uk_ba_key",
+                                "uk_ba_supersedes",
+                                "blind_assessment_action_id_key",
+                                "blind_assessment_audit_id_key",
+                                "blind_assessment_revoke_action_id_key",
+                                "blind_assessment_revoke_audit_id_key",
+                                "ix_ba_member_story_latest"));
                 for (var entry : approvedIndexes.entrySet()) {
                     Set<String> indexes = new HashSet<>();
                     try (ResultSet rs =
@@ -992,7 +1412,12 @@ class SchemaIT {
                         "grade_batch", Set.of("fk_gb_snapshot", "fk_gb_runtime", "fk_gb_admin"));
                 approvedForeignKeys.put(
                         "grade_job",
-                        Set.of("fk_gj_snapshot", "fk_gj_runtime", "fk_gj_batch", "fk_gj_report"));
+                        Set.of(
+                                "fk_gj_snapshot",
+                                "fk_gj_runtime",
+                                "fk_gj_batch",
+                                "fk_gj_report",
+                                "fk_gj_game_report"));
                 approvedForeignKeys.put(
                         "test_report",
                         Set.of("fk_report_test", "fk_report_proposer", "fk_report_acceptor"));
@@ -1041,9 +1466,23 @@ class SchemaIT {
                 approvedForeignKeys.put("member_identity", Set.of("fk_mi_member"));
                 approvedForeignKeys.put("member_session", Set.of("fk_ms_member", "fk_ms_identity"));
                 approvedForeignKeys.put("member_token", Set.of("fk_mt_session"));
-                approvedForeignKeys.put("member_flow", Set.of());
+                approvedForeignKeys.put(
+                        "member_flow", Set.of("fk_mf_member", "fk_mf_identity", "fk_mf_session"));
                 approvedForeignKeys.put("member_auth_audit", Set.of("fk_maa_member"));
                 approvedForeignKeys.put("member_auth_limit", Set.of());
+                approvedForeignKeys.put(
+                        "privacy_erase",
+                        Set.of("privacy_erase_member_id_fkey", "privacy_erase_policy_id_fkey"));
+                approvedForeignKeys.put(
+                        "privacy_target",
+                        Set.of(
+                                "privacy_target_erase_id_fkey",
+                                "privacy_target_member_id_fkey",
+                                "privacy_target_test_id_fkey",
+                                "privacy_target_dependency_id_fkey",
+                                "fk_pt_attempt",
+                                "privacy_target_room_id_fkey",
+                                "privacy_target_game_member_id_fkey"));
                 approvedForeignKeys.put(
                         "play_test",
                         Set.of(
@@ -1053,10 +1492,110 @@ class SchemaIT {
                                 "fk_test_pair",
                                 "fk_test_admin"));
                 approvedForeignKeys.put(
-                        "test_member", Set.of("fk_tm_test", "fk_tm_member", "fk_tm_policy"));
-                approvedForeignKeys.put("test_exposure", Set.of("fk_tex_story", "fk_tex_member"));
+                        "test_member",
+                        Set.of("fk_tm_test", "fk_tm_member", "fk_tm_policy", "fk_tm_assessment"));
+                approvedForeignKeys.put(
+                        "test_exposure",
+                        Set.of(
+                                "fk_tex_story",
+                                "fk_tex_member",
+                                "test_exposure_first_test_id_fkey",
+                                "test_exposure_first_room_id_fkey"));
                 approvedForeignKeys.put("test_hint", Set.of("fk_hint_member"));
                 approvedForeignKeys.put("test_retention", Set.of("fk_tret_test", "fk_tret_policy"));
+                approvedForeignKeys.put(
+                        "game_room",
+                        Set.of(
+                                "fk_gr_story",
+                                "fk_gr_snapshot",
+                                "fk_gr_pair",
+                                "game_room_reviewer_id_fkey",
+                                "game_room_selected_member_id_fkey",
+                                "game_room_runtime_id_fkey",
+                                "game_room_policy_id_fkey",
+                                "game_room_assessment_id_fkey"));
+                approvedForeignKeys.put(
+                        "game_member",
+                        Set.of(
+                                "game_member_room_id_fkey",
+                                "game_member_member_id_fkey",
+                                "game_member_policy_id_fkey",
+                                "fk_gm_identity",
+                                "fk_gm_version",
+                                "fk_gm_role",
+                                "fk_gm_presence"));
+                approvedForeignKeys.put(
+                        "game_report", Set.of("fk_grp_room", "fk_grp_proposer", "fk_grp_accepter"));
+                approvedForeignKeys.put(
+                        "game_action",
+                        Set.of(
+                                "game_action_admin_id_fkey",
+                                "game_action_member_id_fkey",
+                                "game_action_room_id_fkey"));
+                approvedForeignKeys.put(
+                        "game_audit",
+                        Set.of(
+                                "game_audit_admin_id_fkey",
+                                "game_audit_member_id_fkey",
+                                "game_audit_room_id_fkey"));
+                approvedForeignKeys.put(
+                        "story_release",
+                        Set.of(
+                                "fk_release_snapshot",
+                                "story_release_runtime_id_fkey",
+                                "story_release_blocked_by_fkey",
+                                "story_release_created_by_fkey"));
+                approvedForeignKeys.put(
+                        "release_solo_feedback",
+                        Set.of(
+                                "fk_rsf_member",
+                                "release_solo_feedback_room_id_fkey",
+                                "release_solo_feedback_member_id_fkey"));
+                approvedForeignKeys.put(
+                        "release_human_review",
+                        Set.of(
+                                "fk_rhr_test",
+                                "fk_rhr_room",
+                                "release_human_review_snapshot_id_fkey",
+                                "release_human_review_test_id_fkey",
+                                "release_human_review_room_id_fkey",
+                                "release_human_review_reviewer_id_fkey",
+                                "release_human_review_supersedes_id_fkey"));
+                approvedForeignKeys.put(
+                        "release_evidence",
+                        Set.of(
+                                "release_evidence_snapshot_id_fkey",
+                                "release_evidence_runtime_id_fkey",
+                                "release_evidence_created_by_fkey"));
+                approvedForeignKeys.put(
+                        "release_evidence_item",
+                        Set.of(
+                                "release_evidence_item_receipt_id_fkey",
+                                "release_evidence_item_test_id_fkey",
+                                "release_evidence_item_room_id_fkey",
+                                "release_evidence_item_review_id_fkey"));
+                approvedForeignKeys.put(
+                        "play_record",
+                        Set.of("play_record_member_id_fkey", "play_record_room_id_fkey"));
+                approvedForeignKeys.put(
+                        "game_hint", Set.of("fk_game_hint_member", "fk_game_hint_snapshot"));
+                approvedForeignKeys.put(
+                        "game_clue_read", Set.of("fk_game_clue_member", "fk_game_clue_snapshot"));
+                approvedForeignKeys.put("game_invite", Set.of("game_invite_room_id_fkey"));
+                approvedForeignKeys.put(
+                        "blind_assessment",
+                        Set.of(
+                                "blind_assessment_story_id_fkey",
+                                "blind_assessment_member_id_fkey",
+                                "blind_assessment_assessed_by_fkey",
+                                "blind_assessment_supersedes_id_fkey",
+                                "blind_assessment_action_id_fkey",
+                                "blind_assessment_audit_id_fkey",
+                                "blind_assessment_revoked_by_fkey",
+                                "blind_assessment_revoke_action_id_fkey",
+                                "blind_assessment_revoke_audit_id_fkey",
+                                "fk_ba_version",
+                                "fk_ba_snapshot"));
                 for (var entry : approvedForeignKeys.entrySet()) {
                     Set<String> foreignKeys = new HashSet<>();
                     try (ResultSet rs = metadata.getImportedKeys(null, "public", entry.getKey())) {
@@ -1067,7 +1606,7 @@ class SchemaIT {
                             .containsExactlyInAnyOrderElementsOf(entry.getValue());
                     fkCount += foreignKeys.size();
                 }
-                assertThat(fkCount).isEqualTo(90);
+                assertThat(fkCount).isEqualTo(169);
                 try (var statement = connection.createStatement();
                         ResultSet rs =
                                 statement.executeQuery(
@@ -1075,7 +1614,7 @@ class SchemaIT {
                                             + " ON n.oid=c.connamespace WHERE n.nspname='public'"
                                             + " AND c.contype='f'")) {
                     assertThat(rs.next()).isTrue();
-                    assertThat(rs.getInt(1)).isEqualTo(101);
+                    assertThat(rs.getInt(1)).isEqualTo(180);
                 }
                 // V16 수동 검수와 V18 근거의 세부 물리 경계는 전용 스키마 시험에서 추가 검사한다.
                 // 복합 참조의 열 순서와 삭제·갱신 차단 정책까지 검사한다.
@@ -1639,7 +2178,10 @@ class SchemaIT {
                 }
                 assertThat(auditChecks.keySet())
                         .containsExactlyInAnyOrder(
-                                "ck_story_audit_detail", "ck_story_audit_revision", "ck_sa_system");
+                                "ck_story_audit_detail",
+                                "ck_story_audit_revision",
+                                "ck_sa_system",
+                                "ck_story_release_audit");
                 assertThat(auditChecks.get("ck_story_audit_detail"))
                         .contains("jsonb_typeof(detail)", "object");
                 assertThat(auditChecks.get("ck_story_audit_revision"))

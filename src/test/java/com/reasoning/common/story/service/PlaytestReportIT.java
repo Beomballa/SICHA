@@ -21,6 +21,8 @@ import com.reasoning.common.grading.service.GradeRemoteExecutionProtocol.Attempt
 import com.reasoning.common.grading.service.GradeStartService;
 import com.reasoning.common.member.LocalMemberAuthIT;
 import com.reasoning.common.member.auth.MemberPolicyGate;
+import com.reasoning.common.story.repository.BlindEligibilityReader;
+import com.reasoning.common.story.repository.BlindEligibilityReader.Use;
 import com.reasoning.common.util.CommonUtil;
 
 import org.junit.jupiter.api.AfterEach;
@@ -254,6 +256,7 @@ public class PlaytestReportIT extends PlaytestReportFixture {
                     key,
                     1,
                     rev(key),
+                    false,
                     notice.policyCode(),
                     notice.noticeHash(),
                     UUID.randomUUID(),
@@ -265,6 +268,321 @@ public class PlaytestReportIT extends PlaytestReportFixture {
         investigation.heartbeat(second, key, UUID.randomUUID());
         investigation.start(first, key, rev(key), UUID.randomUUID(), UUID.randomUUID());
         return new Pair(key, first, second, outsider);
+    }
+
+    /** 두 별도 합성 계정의 원평가·동의·선언을 거쳐 실제 BLIND TEST를 시작한다. */
+    private Pair runningBlind() throws Exception {
+        playtestPolicy();
+        policyReady = true;
+        String first =
+                account("blind-first-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        String second =
+                account("blind-second-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        UUID key =
+                blindInvitation(
+                        List.of(
+                                invitations.getMemberIdentity(first, UUID.randomUUID()).memberKey(),
+                                invitations
+                                        .getMemberIdentity(second, UUID.randomUUID())
+                                        .memberKey()));
+        for (String token : List.of(first, second)) {
+            var notice = invitations.getConsentNotice(token, key, UUID.randomUUID());
+            invitations.acceptInvitation(
+                    token,
+                    key,
+                    1,
+                    rev(key),
+                    true,
+                    notice.policyCode(),
+                    notice.noticeHash(),
+                    UUID.randomUUID(),
+                    UUID.randomUUID());
+        }
+        investigation.ready(first, key, rev(key), true, UUID.randomUUID(), UUID.randomUUID());
+        investigation.ready(second, key, rev(key), true, UUID.randomUUID(), UUID.randomUUID());
+        investigation.heartbeat(first, key, UUID.randomUUID());
+        investigation.heartbeat(second, key, UUID.randomUUID());
+        investigation.start(first, key, rev(key), UUID.randomUUID(), UUID.randomUUID());
+        return new Pair(key, first, second, null);
+    }
+
+    /** 최초 노출은 회원별 자료 호출로만 생성되며 회수·후속 부적격은 증거를 제거한다. */
+    @Test
+    void blindTestPinsBothAssessmentsAndOwnMaterials() throws Exception {
+        Pair pair = runningBlind();
+        var reader = new BlindEligibilityReader(db);
+        var roots =
+                db.queryForList(
+                        "SELECT v.story_id,t.snapshot_id,t.id AS"
+                                + " test_id,m.member_id,m.assessment_id FROM play_test t JOIN"
+                                + " story_version v ON v.id=t.version_id JOIN test_member m ON"
+                                + " m.test_id=t.id WHERE t.test_key=? ORDER BY m.slot",
+                        pair.key());
+        assertThat(roots).hasSize(2);
+        for (var root : roots)
+            assertThat(
+                            reader.test(
+                                    ((Number) root.get("story_id")).longValue(),
+                                    ((Number) root.get("snapshot_id")).longValue(),
+                                    ((Number) root.get("member_id")).longValue(),
+                                    ((Number) root.get("test_id")).longValue(),
+                                    ((Number) root.get("assessment_id")).longValue(),
+                                    Use.EVIDENCE))
+                    .isFalse();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_exposure WHERE first_test_id=?",
+                                Integer.class,
+                                roots.getFirst().get("test_id")))
+                .isZero();
+        investigation.materials(pair.first(), pair.key(), UUID.randomUUID());
+        assertThat(
+                        reader.test(
+                                ((Number) roots.getFirst().get("story_id")).longValue(),
+                                ((Number) roots.getFirst().get("snapshot_id")).longValue(),
+                                ((Number) roots.getFirst().get("member_id")).longValue(),
+                                ((Number) roots.getFirst().get("test_id")).longValue(),
+                                ((Number) roots.getFirst().get("assessment_id")).longValue(),
+                                Use.EVIDENCE))
+                .isTrue();
+        assertThat(
+                        reader.test(
+                                ((Number) roots.get(1).get("story_id")).longValue(),
+                                ((Number) roots.get(1).get("snapshot_id")).longValue(),
+                                ((Number) roots.get(1).get("member_id")).longValue(),
+                                ((Number) roots.get(1).get("test_id")).longValue(),
+                                ((Number) roots.get(1).get("assessment_id")).longValue(),
+                                Use.EVIDENCE))
+                .isFalse();
+        investigation.materials(pair.second(), pair.key(), UUID.randomUUID());
+        for (var root : roots)
+            assertThat(
+                            reader.test(
+                                    ((Number) root.get("story_id")).longValue(),
+                                    ((Number) root.get("snapshot_id")).longValue(),
+                                    ((Number) root.get("member_id")).longValue(),
+                                    ((Number) root.get("test_id")).longValue(),
+                                    ((Number) root.get("assessment_id")).longValue(),
+                                    Use.EVIDENCE))
+                    .isTrue();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_exposure WHERE first_test_id=?"
+                                        + " AND first_room_id IS NULL",
+                                Integer.class,
+                                roots.getFirst().get("test_id")))
+                .isEqualTo(2);
+        var selected = roots.getFirst();
+        UUID assessment =
+                db.queryForObject(
+                        "SELECT assessment_key FROM blind_assessment WHERE id=?",
+                        UUID.class,
+                        selected.get("assessment_id"));
+        blindEligibility.revoke(
+                invitationSid,
+                invitationActor,
+                invitationStoryCode,
+                1,
+                assessment,
+                2,
+                "PARTICIPATION_FOUND",
+                "synthetic.test:revoked",
+                UUID.randomUUID(),
+                UUID.randomUUID());
+        assertThat(
+                        reader.test(
+                                ((Number) selected.get("story_id")).longValue(),
+                                ((Number) selected.get("snapshot_id")).longValue(),
+                                ((Number) selected.get("member_id")).longValue(),
+                                ((Number) selected.get("test_id")).longValue(),
+                                ((Number) selected.get("assessment_id")).longValue(),
+                                Use.EVIDENCE))
+                .isFalse();
+        assertThat(
+                        reader.test(
+                                ((Number) roots.get(1).get("story_id")).longValue(),
+                                ((Number) roots.get(1).get("snapshot_id")).longValue(),
+                                ((Number) roots.get(1).get("member_id")).longValue(),
+                                ((Number) roots.get(1).get("test_id")).longValue(),
+                                ((Number) roots.get(1).get("assessment_id")).longValue(),
+                                Use.EVIDENCE))
+                .isTrue();
+    }
+
+    /** 실제 TEST 채점 lease는 어느 회원의 원평가 철회에도 START/COMPLETE를 거부한다. */
+    @ParameterizedTest
+    @CsvSource({"FIRST,START", "SECOND,START", "FIRST,COMPLETE", "SECOND,COMPLETE"})
+    void blindTestGradingRejectsRevokedOriginalAssessment(String participant, String boundary)
+            throws Exception {
+        Pair pair = runningBlind();
+        investigation.materials(pair.first(), pair.key(), UUID.randomUUID());
+        investigation.materials(pair.second(), pair.key(), UUID.randomUUID());
+        UUID job = accepted(pair);
+        var worker =
+                credentials.authenticate(
+                        "Bearer " + Base64.getUrlEncoder().withoutPadding().encodeToString(SECRET));
+        var leases =
+                new GradeLeaseRepository(db, new DataSourceTransactionManager(db.getDataSource()));
+        var lease = leases.claimTest(worker.workerKey(), "H5_SYNTHETIC").orElseThrow();
+        assertThat(lease.jobKey()).isEqualTo(job);
+        if (boundary.equals("COMPLETE"))
+            assembly.start().startApproved(worker, job, lease.leaseGen());
+        UUID member =
+                invitations
+                        .getMemberIdentity(
+                                participant.equals("FIRST") ? pair.first() : pair.second(),
+                                UUID.randomUUID())
+                        .memberKey();
+        UUID assessment =
+                db.queryForObject(
+                        "SELECT a.assessment_key FROM blind_assessment a JOIN test_member m ON"
+                            + " m.assessment_id=a.id JOIN play_test t ON t.id=m.test_id WHERE"
+                            + " t.test_key=? AND a.member_id=(SELECT id FROM member_account WHERE"
+                            + " member_key=?)",
+                        UUID.class,
+                        pair.key(),
+                        member);
+        int chats = PROVIDER.chats;
+        blindEligibility.revoke(
+                invitationSid,
+                invitationActor,
+                invitationStoryCode,
+                1,
+                assessment,
+                2,
+                "PARTICIPATION_FOUND",
+                "synthetic.test:revoked",
+                UUID.randomUUID(),
+                UUID.randomUUID());
+        if (boundary.equals("START"))
+            assertThatThrownBy(() -> assembly.start().startApproved(worker, job, lease.leaseGen()))
+                    .hasMessage("REMOTE_EXECUTION_NOT_CURRENT");
+        else {
+            var denied =
+                    assembly.completion()
+                            .complete(
+                                    worker,
+                                    job,
+                                    lease.leaseGen(),
+                                    1,
+                                    null,
+                                    null,
+                                    "{\"kind\":\"ERROR\",\"errorCode\":\"ENGINE_TIMEOUT\"}",
+                                    UUID.randomUUID());
+            assertThat(denied.accepted()).isFalse();
+            assertThat(denied.reason()).isEqualTo("SOURCE_REVOKED");
+        }
+        assertThat(PROVIDER.chats).isEqualTo(chats);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT result_cipher IS NULL AND result_hash IS NULL FROM"
+                                        + " grade_job WHERE job_key=?",
+                                Boolean.class,
+                                job))
+                .isTrue();
+        db.update("UPDATE grade_job SET lease_until=clock_timestamp() WHERE job_key=?", job);
+        var recovered = assembly.testRecovery().recover(job);
+        assertThat(recovered.changed()).isTrue();
+        assertThat(recovered.state()).isEqualTo("FAILED");
+        assertThat(recovered.reason()).isEqualTo("SOURCE_REVOKED");
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM grade_attempt WHERE job_id=(SELECT id FROM"
+                                    + " grade_job WHERE job_key=?) AND completion_data IS NOT NULL",
+                                Integer.class,
+                                job))
+                .isZero();
+    }
+
+    /** 합성 공급자와 실제 설치 TEST worker가 두 회원의 BLIND 답안을 채점한다. */
+    @Test
+    void blindTestCompletesThroughInstalledWorkerForBothMembers() throws Exception {
+        Pair pair = runningBlind();
+        investigation.materials(pair.first(), pair.key(), UUID.randomUUID());
+        investigation.materials(pair.second(), pair.key(), UUID.randomUUID());
+        UUID job = accepted(pair);
+        int chats = PROVIDER.chats;
+        gradeBlindTest(job);
+        assertThat(PROVIDER.chats).isEqualTo(chats + 1);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM grade_job j JOIN test_report r ON"
+                                    + " r.id=j.report_id JOIN play_test t ON t.id=r.test_id WHERE"
+                                    + " j.job_key=? AND t.mode='BLIND' AND j.state='COMPLETED' AND"
+                                    + " r.state='GRADED'",
+                                Integer.class,
+                                job))
+                .isEqualTo(1);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM grade_attempt a JOIN grade_job j ON"
+                                    + " j.id=a.job_id WHERE j.job_key=? AND a.state='SUCCEEDED' AND"
+                                    + " a.completion_data IS NOT NULL",
+                                Integer.class,
+                                job))
+                .isEqualTo(1);
+        var members =
+                db.queryForList(
+                        "SELECT v.story_id,t.snapshot_id,t.id AS"
+                            + " test_id,m.member_id,m.assessment_id,"
+                            + " a.assessment_key,account.member_key FROM play_test t JOIN"
+                            + " story_version v ON v.id=t.version_id JOIN test_member m ON"
+                            + " m.test_id=t.id JOIN blind_assessment a ON a.id=m.assessment_id JOIN"
+                            + " member_account account ON account.id=m.member_id WHERE t.test_key=?"
+                            + " ORDER BY m.slot",
+                        pair.key());
+        assertThat(members).hasSize(2);
+        var reader = new BlindEligibilityReader(db);
+        for (var row : members)
+            assertThat(
+                            reader.test(
+                                    ((Number) row.get("story_id")).longValue(),
+                                    ((Number) row.get("snapshot_id")).longValue(),
+                                    ((Number) row.get("member_id")).longValue(),
+                                    ((Number) row.get("test_id")).longValue(),
+                                    ((Number) row.get("assessment_id")).longValue(),
+                                    Use.EVIDENCE))
+                    .isTrue();
+        var first = members.getFirst();
+        blindEligibility.create(
+                invitationSid,
+                invitationActor,
+                invitationStoryCode,
+                1,
+                2,
+                ((Number) first.get("snapshot_id")).longValue(),
+                (UUID) first.get("member_key"),
+                "INELIGIBLE",
+                "PARTICIPATION_FOUND",
+                "synthetic.test:later-ineligible",
+                Instant.now().minusSeconds(10),
+                true,
+                (UUID) first.get("assessment_key"),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+        assertThat(
+                        reader.test(
+                                ((Number) first.get("story_id")).longValue(),
+                                ((Number) first.get("snapshot_id")).longValue(),
+                                ((Number) first.get("member_id")).longValue(),
+                                ((Number) first.get("test_id")).longValue(),
+                                ((Number) first.get("assessment_id")).longValue(),
+                                Use.EVIDENCE))
+                .isFalse();
+        var second = members.get(1);
+        assertThat(
+                        reader.test(
+                                ((Number) second.get("story_id")).longValue(),
+                                ((Number) second.get("snapshot_id")).longValue(),
+                                ((Number) second.get("member_id")).longValue(),
+                                ((Number) second.get("test_id")).longValue(),
+                                ((Number) second.get("assessment_id")).longValue(),
+                                Use.EVIDENCE))
+                .isTrue();
     }
 
     /**
@@ -1161,6 +1479,112 @@ public class PlaytestReportIT extends PlaytestReportFixture {
                                         UUID.randomUUID())
                                 .original()
                                 .get("jobKey"));
+    }
+
+    /** 공급자 참조가 없는 실제 START도 탈퇴 명세에 남고 후착 완료가 파기 원문을 복원하지 못한다. */
+    @Test
+    void inFlightWithoutProviderReferenceRemainsTrackedAfterPhysicalErasure() throws Exception {
+        Pair pair = running();
+        investigation.materials(pair.first(), pair.key(), UUID.randomUUID());
+        investigation.materials(pair.second(), pair.key(), UUID.randomUUID());
+        long survivor = service.authenticate(pair.second(), true).memberId();
+        var exposure =
+                db.queryForMap(
+                        "SELECT story_id,first_exposed_at,first_test_id FROM test_exposure"
+                                + " WHERE member_id=? AND first_test_id=(SELECT id FROM play_test"
+                                + " WHERE test_key=?)",
+                        survivor,
+                        pair.key());
+        UUID key = accepted(pair);
+        var worker =
+                credentials.authenticate(
+                        "Bearer " + Base64.getUrlEncoder().withoutPadding().encodeToString(SECRET));
+        var leases =
+                new GradeLeaseRepository(db, new DataSourceTransactionManager(db.getDataSource()));
+        var lease = leases.claimTest(worker.workerKey(), "H5_SYNTHETIC").orElseThrow();
+        assembly.start().startApproved(worker, key, lease.leaseGen());
+        long member = service.authenticate(pair.first(), true).memberId();
+        UUID identity =
+                db.queryForObject(
+                        "SELECT identity_key FROM member_identity WHERE member_id=? AND active_yn",
+                        UUID.class,
+                        member);
+        String grant =
+                service.reauthenticate(
+                                pair.first(),
+                                "DELETE_ACCOUNT",
+                                identity,
+                                "Synthetic-member-password-987!",
+                                "127.0.0.1",
+                                UUID.randomUUID())
+                        .reauthGrant();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT provider_ref FROM grade_attempt WHERE job_id=(SELECT id"
+                                        + " FROM grade_job WHERE job_key=?)",
+                                String.class,
+                                key))
+                .isNull();
+        var erase =
+                service.deleteAccount(pair.first(), grant, UUID.randomUUID(), UUID.randomUUID());
+        var rejected =
+                assembly.completion()
+                        .complete(
+                                worker,
+                                key,
+                                lease.leaseGen(),
+                                1,
+                                null,
+                                null,
+                                "{\"kind\":\"ERROR\",\"errorCode\":\"ENGINE_TIMEOUT\"}",
+                                UUID.randomUUID());
+        assertThat(rejected.accepted()).isFalse();
+        assertThat(rejected.reason()).isEqualTo("SOURCE_REVOKED");
+        assertThat(service.processPrimary(erase.eraseKey(), UUID.randomUUID())).isTrue();
+        var remainingExposure =
+                db.queryForMap(
+                        "SELECT first_exposed_at,first_test_id FROM test_exposure"
+                                + " WHERE member_id=? AND story_id=?",
+                        survivor,
+                        exposure.get("story_id"));
+        assertThat(remainingExposure.get("first_exposed_at"))
+                .isEqualTo(exposure.get("first_exposed_at"));
+        assertThat(remainingExposure.get("first_test_id")).isNull();
+        assertThatThrownBy(
+                        () ->
+                                assembly.completion()
+                                        .complete(
+                                                worker,
+                                                key,
+                                                lease.leaseGen(),
+                                                1,
+                                                null,
+                                                null,
+                                                "{\"kind\":\"ERROR\",\"errorCode\":\"ENGINE_TIMEOUT\"}",
+                                                UUID.randomUUID()))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM grade_job WHERE job_key=?",
+                                Integer.class,
+                                key))
+                .isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM privacy_target WHERE erase_id=(SELECT id FROM"
+                                    + " privacy_erase WHERE erase_key=?) AND kind='PROCESSOR' AND"
+                                    + " state='PENDING' AND source_job_id IS NULL AND"
+                                    + " locator_cipher IS NOT NULL",
+                                Integer.class,
+                                erase.eraseKey()))
+                .isEqualTo(1);
+        assertThat(service.processPrimary(erase.eraseKey(), UUID.randomUUID())).isTrue();
+        var status =
+                service.status(
+                        erase.eraseKey(), erase.receiptToken(), UUID.randomUUID(), "127.0.0.1");
+        assertThat(status.primaryDone()).isTrue();
+        assertThat(status.externalDone()).isFalse();
+        assertThat(status.backupDone()).isFalse();
     }
 
     /** ACCEPT 뒤 양쪽 참가자의 LOCAL 증명·현재 정책·소유권 회수는 dispatch와 완료 모두 차단한다. */

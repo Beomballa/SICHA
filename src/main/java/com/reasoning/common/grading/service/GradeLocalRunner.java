@@ -3,6 +3,9 @@ package com.reasoning.common.grading.service;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.reasoning.common.grading.engine.LocalSemanticEngine;
 import com.reasoning.common.grading.engine.LocalSemanticEngine.EngineException;
+import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier.RuntimeConfiguration;
+import com.reasoning.common.grading.config.WorkerGradeProfileLoader.Profiles;
+import com.reasoning.common.grading.model.FrozenModelProjection;
 import com.reasoning.common.grading.model.GradeModels.Status;
 import com.reasoning.common.grading.model.SnapshotJson;
 import com.reasoning.common.grading.repository.GradeLeaseRepository;
@@ -18,7 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * BATCH Reservation 전용 내부 단일 호출 조립이다. TEST 보고서 실행은 지원하지 않는다. 자동 활성화·폴링·재시도는 없다. SQL fence 커밋 뒤 회수
+ * BATCH Reservation 및 GAME 승인 입력의 내부 단일 호출 조립이다. TEST 보고서 실행은 지원하지 않는다. 자동 활성화·폴링·재시도는 없다. SQL fence 커밋 뒤 회수
  * 경쟁과 외부 실행의 불확실성은 남으며 heartbeat 중단은 전송 취소의 최선 노력이지 외부 exactly-once 증명이 아니다.
  */
 public final class GradeLocalRunner {
@@ -26,6 +29,7 @@ public final class GradeLocalRunner {
     private final GradeStartService start;
     private final GradeCompletionService completion;
     private final GradeLeaseRepository leases;
+    private final Profiles profiles;
 
     /**
      * 같은 실제 레지스트리·DB의 경계만 조립한다. 임대 저장소는 START가 같은 TX 관리자로 제공한다.
@@ -39,11 +43,18 @@ public final class GradeLocalRunner {
             GradeWorkerCredentials credentials,
             GradeStartService start,
             GradeCompletionService completion) {
+        this(credentials, start, completion, null);
+    }
+
+    /** GAME 승인 MODEL을 실행하는 경우 실제 보호 설치 profile을 전달한다. */
+    public GradeLocalRunner(GradeWorkerCredentials credentials, GradeStartService start,
+                            GradeCompletionService completion, Profiles profiles) {
         this.credentials = Objects.requireNonNull(credentials);
         this.start = Objects.requireNonNull(start);
         this.completion = Objects.requireNonNull(completion);
         start.requireAssembly(credentials, completion);
         leases = start.leases();
+        this.profiles = profiles;
     }
 
     /** 원문·해시·예외 없이 노출하는 호출 상태다. RECOVERY는 새 전송 허가가 아니다. */
@@ -136,6 +147,167 @@ public final class GradeLocalRunner {
             return new Outcome(State.RECEIPT, receipt);
         } catch (RuntimeException failure) {
             return new Outcome(State.RECOVERY, null);
+        }
+    }
+
+    /** GAME 출처만 실제 승인 예약·설치·단일 채팅·완료 경로로 실행한다. 재생은 모델을 호출하지 않는다. */
+    public Outcome runGameOnce(VerifiedWorker worker, UUID jobKey, long leaseGen) {
+        if (profiles == null) throw new IllegalStateException("GAME_PROFILE_REQUIRED");
+        if (!leases.isGameJob(jobKey)) throw new IllegalArgumentException("GAME_SOURCE_REQUIRED");
+        start.requireRunnerPermissions(worker, jobKey);
+        long started = System.nanoTime();
+        var reply = start.startApproved(worker, jobKey, leaseGen);
+        var approved = GradeRemoteReplyDecoder.decodeStart(SnapshotJson.encode(reply.toJson()));
+        if (!approved.identity().jobKey().equals(jobKey)
+                || approved.identity().leaseGen() != leaseGen) throw new IllegalStateException("GAME_START_MISMATCH");
+        if ("REPLAY".equals(approved.disposition())) return new Outcome(State.REPLAY, null);
+        var input = approved.input();
+        if (!"GAME".equals(input.sourceKind()) || !"MODEL".equals(input.variant()))
+            throw new IllegalStateException("GAME_SOURCE_MISMATCH");
+        var wire = input.runtime();
+        var runtime = new RuntimeConfiguration(wire.code(), wire.configHash(),
+                wire.engineVersion(), wire.modelId(), wire.modelVersion(), wire.pinMode(),
+                wire.promptHash(), wire.optionsHash(), wire.reportContractVersion());
+        var limits = approved.limits();
+        var budget = profiles.openDeadline(runtime, started,
+                limits.remainingBudgetMillis(), limits.remainingLeaseMillis());
+        var expected = new GradeRemoteExecutionProtocol.AttemptRequest(
+                leaseGen, approved.identity().attemptNo(), input.originalAttemptHash());
+        LocalSemanticEngine.Result result = null;
+        String error = null;
+        var heartbeat = new GameHeartbeat(worker, jobKey, expected, budget, Thread.currentThread());
+        try {
+            budget.requireLive();
+            var semantic = FrozenModelProjection.decodeCanonical(input.modelInput().bytes());
+            var qualified = profiles.bind(runtime, semantic);
+            budget.requireLive();
+            heartbeat.thread.start();
+            try {
+                result = qualified.evaluate(budget, () -> {
+                    heartbeat.requireLive();
+                    long observedAt = System.nanoTime();
+                    var observation = start.revalidate(worker, jobKey, expected);
+                    var checked = GradeRemoteReplyDecoder.decodeFence(SnapshotJson.encode(observation.toJson()));
+                    requireGameObservation(jobKey, expected, checked);
+                    budget.shortenFromFence(observedAt, checked.limits().remainingBudgetMillis(),
+                            checked.limits().remainingLeaseMillis());
+                    heartbeat.requireLive();
+                });
+            } catch (EngineException failure) {
+                if (failure.phase() == LocalSemanticEngine.FailurePhase.MAY_HAVE_SUBMITTED) {
+                    error = switch (failure.getMessage()) {
+                        case "LOCAL_DEADLINE_EXCEEDED" -> "ENGINE_TIMEOUT";
+                        case "LOCAL_HTTP_FAILURE", "LOCAL_UNAVAILABLE_OR_INVALID_RESPONSE" -> "ENGINE_UNAVAILABLE";
+                        case "INVALID_LOCAL_OUTPUT", "INVALID_LOCAL_RESPONSE", "LOCAL_OUTPUT_LIMIT" -> "INVALID_OUTPUT";
+                        default -> null;
+                    };
+                }
+            } catch (RuntimeException failure) {
+                // 소유권·설치 실패를 provider 오류로 변환하지 않는다.
+            } finally {
+                heartbeat.stopAndJoin();
+            }
+            if (heartbeat.failed.get() || Thread.currentThread().isInterrupted()
+                    || result == null && error == null) return new Outcome(State.RECOVERY, null);
+            try {
+                if (result != null) budget.requireLive();
+                budget.ownershipWait();
+            } catch (RuntimeException expired) {
+                return new Outcome(State.RECOVERY, null);
+            }
+            var envelope = JsonNodeFactory.instance.objectNode();
+            String observed = null;
+            if (result != null) {
+                observed = result.metadata().postDigest();
+                if (result.semanticResult().status() == Status.COMPLETE) {
+                    envelope.put("kind", "COMPLETE");
+                    envelope.set("semantic", SnapshotJson.parse(result.semanticJson().getBytes(StandardCharsets.UTF_8)));
+                } else envelope.put("kind", "UNRESOLVED").put("errorCode", "UNRESOLVED_REASONING");
+            } else envelope.put("kind", "ERROR").put("errorCode", error);
+            try {
+                CompletionReceipt receipt = completion.complete(worker, jobKey, leaseGen,
+                        expected.attemptNo(), observed, null,
+                        new String(SnapshotJson.encode(envelope), StandardCharsets.UTF_8), UUID.randomUUID());
+                return new Outcome(State.RECEIPT, receipt);
+            } catch (RuntimeException failure) {
+                return new Outcome(State.RECOVERY, null);
+            }
+        } finally {
+            budget.stopAlarm();
+        }
+    }
+
+    private static void requireGameObservation(UUID key, GradeRemoteExecutionProtocol.AttemptRequest expected,
+                                               GradeRemoteReplyDecoder.Observed observed) {
+        if (!key.equals(observed.identity().jobKey())
+                || expected.leaseGen() != observed.identity().leaseGen()
+                || expected.attemptNo() != observed.identity().attemptNo()
+                || !expected.originalAttemptHash().equals(observed.originalAttemptHash()))
+            throw new IllegalStateException("GAME_OWNER_CHANGED");
+    }
+
+    /** 서버가 재검증한 갱신만 원래 모델 예산에 반영하며 불확실한 갱신은 호출을 취소한다. */
+    private final class GameHeartbeat {
+        private final VerifiedWorker worker;
+        private final UUID key;
+        private final GradeRemoteExecutionProtocol.AttemptRequest expected;
+        private final LocalSemanticEngine.JobDeadline budget;
+        private final Thread caller;
+        private final AtomicBoolean stopped = new AtomicBoolean();
+        private final AtomicBoolean failed = new AtomicBoolean();
+        private final Thread thread;
+
+        private GameHeartbeat(VerifiedWorker worker, UUID key,
+                              GradeRemoteExecutionProtocol.AttemptRequest expected,
+                              LocalSemanticEngine.JobDeadline budget, Thread caller) {
+            this.worker = worker;
+            this.key = key;
+            this.expected = expected;
+            this.budget = budget;
+            this.caller = caller;
+            thread = Thread.ofPlatform().daemon(true).name("grade-game-heartbeat").unstarted(this::loop);
+        }
+
+        private void loop() {
+            try {
+                while (!stopped.get()) {
+                    Thread.sleep(5000);
+                    if (stopped.get()) return;
+                    long observedAt = System.nanoTime();
+                    var response = start.renewApproved(worker, key, expected);
+                    var checked = GradeRemoteReplyDecoder.decodeRenew(SnapshotJson.encode(response.toJson()));
+                    requireGameObservation(key, expected, checked);
+                    budget.renewFromResponse(observedAt, checked.limits().remainingBudgetMillis(),
+                            checked.limits().remainingLeaseMillis());
+                }
+            } catch (InterruptedException failure) {
+                if (!stopped.get()) cancel();
+            } catch (RuntimeException failure) {
+                cancel();
+            }
+        }
+
+        private void cancel() {
+            failed.set(true);
+            caller.interrupt();
+        }
+
+        private void requireLive() {
+            if (failed.get() || caller.isInterrupted()) throw new IllegalStateException("GAME_RUN_CANCELLED");
+        }
+
+        private void stopAndJoin() {
+            stopped.set(true);
+            thread.interrupt();
+            boolean interrupted = Thread.interrupted();
+            while (thread.isAlive()) {
+                try {
+                    thread.join();
+                } catch (InterruptedException failure) {
+                    interrupted = true;
+                }
+            }
+            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 

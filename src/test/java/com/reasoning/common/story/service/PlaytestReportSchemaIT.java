@@ -162,6 +162,7 @@ public class PlaytestReportSchemaIT extends LocalMemberAuthIT {
                     key,
                     1,
                     revision(key),
+                    false,
                     notice.policyCode(),
                     notice.noticeHash(),
                     UUID.randomUUID(),
@@ -272,6 +273,210 @@ public class PlaytestReportSchemaIT extends LocalMemberAuthIT {
                                         "UPDATE test_report SET payload_hash=? WHERE id=?",
                                         "b".repeat(64),
                                         id))
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    /** 실제 부모 종료의 첫 시계만 보존하고 한 번의 기한 내 선별만 허용한다. */
+    @Test
+    void terminalRetentionUsesOriginalEndAndCannotRestart() throws Exception {
+        playtestPolicy();
+        String a =
+                account("retention-a-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        String b =
+                account("retention-b-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        UUID key =
+                invitation(
+                        List.of(
+                                invitations.getMemberIdentity(a, UUID.randomUUID()).memberKey(),
+                                invitations.getMemberIdentity(b, UUID.randomUUID()).memberKey()));
+        long id = db.queryForObject("SELECT id FROM play_test WHERE test_key=?", Long.class, key);
+        Map<String, Object> waiting =
+                db.queryForMap(
+                        "SELECT raw_until,max_until,selected_at FROM test_retention WHERE"
+                            + " test_id=?",
+                        id);
+        assertThat(waiting.values()).containsOnlyNulls();
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET raw_until=now()+interval '90"
+                                            + " days' WHERE test_id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+
+        db.update(
+                "UPDATE play_test SET state='CANCELLED',cancel_reason='TESTER_REQUEST',"
+                        + "ended_at=clock_timestamp(),rev=rev+1 WHERE id=?",
+                id);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT r.raw_until=t.ended_at+interval '90 days' AND"
+                                    + " r.max_until=t.ended_at+interval '365 days' AND"
+                                    + " r.selected_at IS NULL FROM test_retention r JOIN play_test"
+                                    + " t ON t.id=r.test_id WHERE t.id=?",
+                                Boolean.class,
+                                id))
+                .isTrue();
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE play_test SET ended_at=ended_at+interval '1 day'"
+                                            + " WHERE id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.update("UPDATE play_test SET state='EXPIRED' WHERE id=?", id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET policy_id=policy_id+1 WHERE"
+                                            + " test_id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET test_id=test_id+1 WHERE"
+                                            + " test_id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET raw_until=raw_until+interval '1"
+                                            + " day' WHERE test_id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET raw_until=NULL,max_until=NULL"
+                                            + " WHERE test_id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+        assertThat(
+                        db.update(
+                                "UPDATE test_retention SET raw_until=max_until,selected_at=now()"
+                                    + " WHERE test_id=? AND selected_at IS NULL AND"
+                                    + " now()<raw_until",
+                                id))
+                .isEqualTo(1);
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET"
+                                            + " selected_at=now(),max_until=max_until+interval '1"
+                                            + " day' WHERE test_id=?",
+                                        id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.update("DELETE FROM test_retention WHERE test_id=?", id))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.update("TRUNCATE test_retention"))
+                .isInstanceOf(DataAccessException.class);
+
+        // 종료 경로가 서로 다른 상태를 써도 같은 부모 트리거가 기한을 설정한다.
+        long policy =
+                db.queryForObject(
+                        "SELECT policy_id FROM test_retention WHERE test_id=?", Long.class, id);
+        for (String terminal : List.of("ENDED", "EXPIRED")) {
+            long another =
+                    db.queryForObject(
+                            """
+                            INSERT INTO play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,
+                              runtime_epoch,role_a,role_b,mode,invite_until,created_by,created_at,updated_at)
+                            SELECT ?,version_id,snapshot_id,runtime_id,config_hash,runtime_epoch,
+                              role_a,role_b,mode,invite_until,created_by,created_at,updated_at
+                            FROM play_test WHERE id=? RETURNING id
+                            """,
+                            Long.class,
+                            UUID.randomUUID(),
+                            id);
+            db.update(
+                    "INSERT INTO test_retention(test_id,policy_id) VALUES (?,?)", another, policy);
+            db.update(
+                    "UPDATE play_test SET state=?,outcome=CASE WHEN ?='ENDED' "
+                            + "THEN 'FORFEIT' ELSE NULL END,ended_at=clock_timestamp() WHERE id=?",
+                    terminal,
+                    terminal,
+                    another);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT r.raw_until=t.ended_at+interval '90 days' AND"
+                                        + " r.max_until=t.ended_at+interval '365 days' FROM"
+                                        + " play_test t JOIN test_retention r ON r.test_id=t.id"
+                                        + " WHERE t.id=?",
+                                    Boolean.class,
+                                    another))
+                    .isTrue();
+        }
+    }
+
+    /** 오래전에 종료한 실제 부모를 나중에 결속해도 현재 시각으로 보관을 연장하지 않는다. */
+    @Test
+    void historicalTerminalInsertionKeepsOriginalExpiredDeadline() throws Exception {
+        playtestPolicy();
+        String a =
+                account("retention-history-a-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        String b =
+                account("retention-history-b-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        UUID key =
+                invitation(
+                        List.of(
+                                invitations.getMemberIdentity(a, UUID.randomUUID()).memberKey(),
+                                invitations.getMemberIdentity(b, UUID.randomUUID()).memberKey()));
+        long original =
+                db.queryForObject("SELECT id FROM play_test WHERE test_key=?", Long.class, key);
+        long historical =
+                db.queryForObject(
+                        """
+                        INSERT INTO play_test(test_key,version_id,snapshot_id,runtime_id,config_hash,
+                          runtime_epoch,role_a,role_b,mode,state,outcome,invite_until,ended_at,
+                          created_by,created_at,updated_at)
+                        SELECT ?,version_id,snapshot_id,runtime_id,config_hash,runtime_epoch,
+                          role_a,role_b,mode,'ENDED','FORFEIT',now()-interval '393 days',
+                          now()-interval '399 days',created_by,now()-interval '400 days',
+                          now()-interval '399 days'
+                        FROM play_test WHERE id=? RETURNING id
+                        """,
+                        Long.class,
+                        UUID.randomUUID(),
+                        original);
+        long policy =
+                db.queryForObject(
+                        "SELECT policy_id FROM test_retention WHERE test_id=?",
+                        Long.class,
+                        original);
+        db.update("INSERT INTO test_retention(test_id,policy_id) VALUES (?,?)", historical, policy);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT raw_until=ended_at+interval '90 days' AND"
+                                    + " max_until=ended_at+interval '365 days' AND raw_until<now()"
+                                    + " AND selected_at IS NULL FROM test_retention r JOIN"
+                                    + " play_test t ON t.id=r.test_id WHERE t.id=?",
+                                Boolean.class,
+                                historical))
+                .isTrue();
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET raw_until=max_until,"
+                                                + "selected_at=now() WHERE test_id=?",
+                                        historical))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(
+                        () ->
+                                db.update(
+                                        "UPDATE test_retention SET max_until=NULL "
+                                                + "WHERE test_id=?",
+                                        historical))
                 .isInstanceOf(DataAccessException.class);
     }
 

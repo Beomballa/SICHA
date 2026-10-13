@@ -2323,9 +2323,23 @@ class StoryBatchIT extends DatabaseContextTest {
 
     /** 폐기형 PG 소유 연결에서만 기존 역사 방어를 잠시 해제하며 성공·실패 모두 원상 복구한다. */
     private void withResolutionHistoryGuardDisabled(String table, String guard, Runnable action) {
+        // 고의로 손상된 역사 검증용 소유자 fixture에만 새 행 삭제 방어도 일시 해제한다.
+        String eraseGuard =
+                switch (table) {
+                    case "test_action" -> "tr_test_action_erase";
+                    case "test_audit" -> "tr_test_audit_erase";
+                    default -> null;
+                };
         db.execute("ALTER TABLE public." + table + " DISABLE TRIGGER " + guard);
         try {
-            action.run();
+            if (eraseGuard != null)
+                db.execute("ALTER TABLE public." + table + " DISABLE TRIGGER " + eraseGuard);
+            try {
+                action.run();
+            } finally {
+                if (eraseGuard != null)
+                    db.execute("ALTER TABLE public." + table + " ENABLE TRIGGER " + eraseGuard);
+            }
         } finally {
             db.execute("ALTER TABLE public." + table + " ENABLE TRIGGER " + guard);
         }

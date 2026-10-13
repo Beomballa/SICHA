@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.auth.service.CryptoService;
+import com.reasoning.common.game.service.GameRecordService;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier;
 import com.reasoning.common.grading.model.GradeModels.BaseResult;
 import com.reasoning.common.grading.model.SnapshotJson;
@@ -18,8 +19,12 @@ import com.reasoning.common.grading.repository.GradeEventRepository.Reason;
 import com.reasoning.common.grading.repository.GradeFrozenInputRepository;
 import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository;
+import com.reasoning.common.grading.repository.GradeSourceRepository.GamePreparation;
+import com.reasoning.common.grading.repository.GradeSourceRepository.GameRootEvidence;
+import com.reasoning.common.grading.repository.GradeSourceRepository.LockedGameSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedTestSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.SourceKind;
 import com.reasoning.common.grading.repository.GradeSourceRepository.TestPreparation;
 import com.reasoning.common.grading.repository.GradeSourceRepository.TestRootEvidence;
 import com.reasoning.common.grading.security.GradeWorkerCredentials;
@@ -70,6 +75,7 @@ public final class GradeCompletionService {
     private final GradeFrozenInputRepository frozen;
     private final GradeEventRepository audit;
     private final PlaytestPolicyGate testPolicy;
+    private final PlaytestPolicyGate friendlyPolicy;
     private final TransactionTemplate transaction;
 
     /** 동일 실제 레지스트리·DataSource 조립인지 예약 전에 확인하며 비밀 getter는 제공하지 않는다. */
@@ -172,6 +178,29 @@ public final class GradeCompletionService {
             String trustedCoordinatorKey,
             PlaytestPolicyGate testPolicy,
             MemberPolicyGate memberPolicy) {
+        this(
+                jdbc,
+                manager,
+                credentials,
+                installations,
+                crypto,
+                trustedCoordinatorKey,
+                testPolicy,
+                null,
+                memberPolicy);
+    }
+
+    /** PUBLIC과 REVIEW는 별도 정책 파일을 검증하되 동일 완료 저장소를 사용한다. */
+    public GradeCompletionService(
+            JdbcTemplate jdbc,
+            PlatformTransactionManager manager,
+            GradeWorkerCredentials credentials,
+            Map<String, InstalledRuntimeManifestVerifier> installations,
+            CryptoService crypto,
+            String trustedCoordinatorKey,
+            PlaytestPolicyGate testPolicy,
+            PlaytestPolicyGate friendlyPolicy,
+            MemberPolicyGate memberPolicy) {
         if ((testPolicy == null) != (memberPolicy == null))
             throw new IllegalArgumentException("INVALID_TEST_COMPLETION_ASSEMBLY");
         if (TransactionSynchronizationManager.isActualTransactionActive()) throw boundary();
@@ -182,6 +211,7 @@ public final class GradeCompletionService {
         this.installations = Map.copyOf(Objects.requireNonNull(installations));
         this.crypto = Objects.requireNonNull(crypto);
         this.testPolicy = testPolicy;
+        this.friendlyPolicy = friendlyPolicy;
         this.installations.forEach(
                 (code, verifier) -> {
                     if (!code.equals(verifier.registrationManifest().path("configId").textValue()))
@@ -263,13 +293,19 @@ public final class GradeCompletionService {
                             jobKey);
             if (codes.size() != 1) throw invalid();
             credentials.requirePermission(worker, Action.COMPLETE, codes.getFirst());
-            var kinds =
-                    jdbc.queryForList(
-                            "SELECT report_id FROM public.grade_job WHERE job_key=?",
-                            Long.class,
-                            jobKey);
-            if (kinds.size() != 1) throw invalid();
-            if (kinds.getFirst() != null) {
+            SourceKind kind = sources.sourceKind(jobKey);
+            if (kind == SourceKind.GAME)
+                return completeGame(
+                        worker,
+                        jobKey,
+                        leaseGen,
+                        attemptNo,
+                        observedProviderVersion,
+                        providerResponseRef,
+                        result,
+                        requestId,
+                        commandHash);
+            if (kind == SourceKind.TEST) {
                 if (testPolicy == null)
                     throw new IllegalStateException("TEST_COMPLETION_NOT_CONFIGURED");
                 CompletionReceipt inspected =
@@ -392,6 +428,532 @@ public final class GradeCompletionService {
                     hash,
                     reason == null ? Reason.SOURCE_REVOKED : reason);
         return null;
+    }
+
+    /** GAME 역사 조회는 정책·복호화 없이 이미 저장된 완료 명령과 원래 임대만 판정한다. */
+    private CompletionReceipt completeGame(
+            VerifiedWorker worker,
+            UUID key,
+            long gen,
+            int number,
+            String observed,
+            String reference,
+            JsonNode result,
+            UUID request,
+            String hash) {
+        CompletionReceipt prior =
+                transaction.execute(
+                        status -> inspectGame(worker, key, gen, number, request, hash, false));
+        if (prior != null) return prior;
+        try {
+            PlaytestPolicyGate policy = gamePolicy(key);
+            GamePreparation prepared = sources.prepareQualificationGame(policy);
+            return transaction.execute(
+                    status ->
+                            applyGame(
+                                    worker, key, gen, number, observed, reference, result, request,
+                                    hash, policy, prepared));
+        } catch (AuthException failure) {
+            return transaction.execute(
+                    status -> inspectGame(worker, key, gen, number, request, hash, true));
+        } catch (IllegalStateException failure) {
+            if (!"SOURCE_NOT_CURRENT".equals(failure.getMessage())) throw failure;
+            return transaction.execute(
+                    status -> inspectGame(worker, key, gen, number, request, hash, true));
+        }
+    }
+
+    private PlaytestPolicyGate gamePolicy(UUID key) {
+        PlaytestPolicyGate gate =
+                switch (sources.gamePurpose(key)) {
+                    case "PUBLIC" -> friendlyPolicy;
+                    case "REVIEW_SOLO_QUALIFICATION" -> testPolicy;
+                    default -> throw new IllegalStateException("SOURCE_NOT_CURRENT");
+                };
+        if (gate == null) throw new IllegalStateException("GAME_COMPLETION_NOT_CONFIGURED");
+        return gate;
+    }
+
+    private CompletionReceipt inspectGame(
+            VerifiedWorker worker,
+            UUID key,
+            long gen,
+            int number,
+            UUID request,
+            String hash,
+            boolean unavailable) {
+        var locked = sources.lockGameRootsForSettlement(key);
+        var root = locked.lockedFacts(jdbc.getDataSource());
+        var rows =
+                jdbc.queryForList(
+                        "SELECT worker_key,lease_gen,state,completion_data::text AS completion FROM"
+                            + " public.grade_attempt WHERE job_id=? AND attempt_no=? FOR UPDATE",
+                        root.jobId(),
+                        number);
+        if (rows.size() != 1) throw invalid();
+        var attempt = rows.getFirst();
+        if (!worker.workerKey().equals(attempt.get("worker_key")))
+            throw new SecurityException("WORKER_NOT_AUTHORIZED");
+        if (attempt.get("completion") != null) {
+            JsonNode envelope = stored((String) attempt.get("completion"));
+            if (!hash.equals(envelope.path("commandHash").textValue()))
+                throw new CallbackConflictException();
+            return receipt(envelope.path("receipt"), key, number);
+        }
+        Job job = job(root.jobId());
+        Reason reason =
+                gen != number(attempt, "lease_gen")
+                        ? Reason.STALE_LEASE
+                        : testRejection(job, attempt, worker, gen, number, now());
+        if (reason == null
+                && !Boolean.TRUE.equals(
+                        jdbc.queryForObject(
+                                "SELECT r.epoch=g.runtime_epoch FROM public.grade_job j"
+                                        + " JOIN public.grade_runtime r ON r.id=j.runtime_id"
+                                        + " JOIN public.game_room g ON g.id=? WHERE j.id=?",
+                                Boolean.class,
+                                root.roomId(),
+                                root.jobId()))) reason = Reason.RUNTIME_EPOCH_CHANGED;
+        if (reason != null || unavailable)
+            return rejectGame(
+                    worker,
+                    key,
+                    root.jobId(),
+                    job,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    reason == null ? Reason.SOURCE_REVOKED : reason);
+        return null;
+    }
+
+    private CompletionReceipt rejectGame(
+            VerifiedWorker worker,
+            UUID key,
+            long id,
+            Job job,
+            Map<String, Object> attempt,
+            long gen,
+            int number,
+            UUID request,
+            String hash,
+            Reason reason) {
+        JobState state = JobState.valueOf(job.state());
+        AttemptState old = AttemptState.valueOf((String) attempt.get("state"));
+        audit.recordWorkerEvent(
+                worker,
+                id,
+                number,
+                EventKind.COMPLETE_REJECTED,
+                UUID.randomUUID(),
+                request,
+                hash,
+                new Detail(gen, state, state, old, old, reason, null, null));
+        return new CompletionReceipt(
+                key, number, false, state.name(), false, null, reason.name(), request);
+    }
+
+    /** GAME의 봉투는 서버 계산값만 기록하고 실제 보고서·방과 작업을 한 거래에서 CAS한다. */
+    private CompletionReceipt applyGame(
+            VerifiedWorker worker,
+            UUID key,
+            long gen,
+            int number,
+            String observed,
+            String reference,
+            JsonNode result,
+            UUID request,
+            String hash,
+            PlaytestPolicyGate policy,
+            GamePreparation prepared) {
+        LockedGameSource locked = sources.lockGameRoots(key, policy, prepared);
+        GameRootEvidence root = locked.requireCurrent(jdbc.getDataSource());
+        credentials.requirePermission(worker, Action.COMPLETE, root.runtimeCode());
+        var rows =
+                jdbc.queryForList(
+                        "SELECT worker_key,lease_gen,state,completion_data::text AS completion FROM"
+                            + " public.grade_attempt WHERE job_id=? AND attempt_no=? FOR UPDATE",
+                        root.jobId(),
+                        number);
+        if (rows.size() != 1) throw invalid();
+        Map<String, Object> attempt = rows.getFirst();
+        if (!worker.workerKey().equals(attempt.get("worker_key")))
+            throw new SecurityException("WORKER_NOT_AUTHORIZED");
+        if (attempt.get("completion") != null) {
+            JsonNode envelope = stored((String) attempt.get("completion"));
+            if (!hash.equals(envelope.path("commandHash").textValue()))
+                throw new CallbackConflictException();
+            return receipt(envelope.path("receipt"), key, number);
+        }
+        Job before = job(root.jobId());
+        Reason rejection =
+                gen != number(attempt, "lease_gen")
+                        ? Reason.STALE_LEASE
+                        : testRejection(before, attempt, worker, gen, number, now());
+        if (rejection != null)
+            return rejectGame(
+                    worker,
+                    key,
+                    root.jobId(),
+                    before,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    rejection);
+        var installation = installations.get(root.runtimeCode());
+        if (installation == null) throw new IllegalStateException("INSTALLED_RUNTIME_MISMATCH");
+        var verified =
+                installation.verify(
+                        runtimes.getRuntimeDetail(root.runtimeId())
+                                .orElseThrow(GradeCompletionService::invalid));
+        GradeFrozenInputRepository.GameGradeInput input;
+        try {
+            input = frozen.verifiedGameInput(locked, verified, crypto);
+        } catch (IllegalStateException failure) {
+            if (!"GAME_INPUT_NOT_CURRENT".equals(failure.getMessage())) throw failure;
+            return rejectGame(
+                    worker,
+                    key,
+                    root.jobId(),
+                    before,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    Reason.INVALID_REPORT);
+        }
+        BaseResult base = null;
+        String error =
+                "COMPLETE".equals(result.path("kind").textValue())
+                        ? null
+                        : result.path("errorCode").textValue();
+        if (error == null) {
+            try {
+                var semantic =
+                        new GradeResultValidator()
+                                .validate(
+                                        text(result.get("semantic")),
+                                        input.report(),
+                                        input.snapshot());
+                base = new GradeCalculator().calculate(input.report(), input.snapshot(), semantic);
+            } catch (IllegalArgumentException failure) {
+                throw invalid();
+            }
+        }
+        ObjectNode privateResult = null;
+        ObjectNode summary = null;
+        if (base != null) {
+            privateResult = object().put("formatNo", 1);
+            privateResult.set("baseResult", INTERNAL.valueToTree(base));
+            summary =
+                    object().put("formatNo", 1)
+                            .put("baseScore", base.baseScore())
+                            .put("success", base.success());
+        }
+        String outputHash = base == null ? null : SnapshotJson.hash(result.get("semantic"));
+        String resultHash = privateResult == null ? null : SnapshotJson.hash(privateResult);
+        byte[] outputCipher =
+                base == null
+                        ? null
+                        : bytes(
+                                crypto.encrypt(
+                                        text(result.get("semantic")),
+                                        "grade_attempt/"
+                                                + root.jobId()
+                                                + "/"
+                                                + number
+                                                + "/output/v1"));
+        byte[] resultCipher =
+                privateResult == null
+                        ? null
+                        : bytes(
+                                crypto.encrypt(
+                                        text(privateResult),
+                                        "grade_job/" + root.jobId() + "/result/v1"));
+        Job current = job(root.jobId());
+        rejection = testRejection(current, attempt, worker, gen, number, now());
+        if (rejection != null)
+            return rejectGame(
+                    worker,
+                    key,
+                    root.jobId(),
+                    current,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    rejection);
+        try {
+            locked.requireCurrent(jdbc.getDataSource());
+            installation.verify(
+                    runtimes.getRuntimeDetail(root.runtimeId())
+                            .orElseThrow(GradeCompletionService::storage));
+            frozen.verifiedGameInput(locked, verified, crypto);
+        } catch (IllegalStateException failure) {
+            if (!"SOURCE_NOT_CURRENT".equals(failure.getMessage())
+                    && !"GAME_INPUT_NOT_CURRENT".equals(failure.getMessage())) throw failure;
+            return rejectGame(
+                    worker,
+                    key,
+                    root.jobId(),
+                    current,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    Reason.SOURCE_REVOKED);
+        }
+        rejection = testTimeRejection(current, now());
+        if (rejection != null)
+            return rejectGame(
+                    worker,
+                    key,
+                    root.jobId(),
+                    current,
+                    attempt,
+                    gen,
+                    number,
+                    request,
+                    hash,
+                    rejection);
+        JobState after =
+                base != null ? JobState.COMPLETED : number < 3 ? JobState.QUEUED : JobState.FAILED;
+        AttemptState attemptState = base != null ? AttemptState.SUCCEEDED : AttemptState.FAILED;
+        Reason reason = error == null ? Reason.NONE : Reason.valueOf(error);
+        String outcome =
+                base != null ? "COMPLETE" : after == JobState.FAILED ? "SYSTEM_ERROR" : null;
+        CompletionReceipt receipt =
+                new CompletionReceipt(
+                        key,
+                        number,
+                        true,
+                        after.name(),
+                        after == JobState.QUEUED,
+                        outcome,
+                        reason.name(),
+                        request);
+        var saved =
+                jdbc.query(
+                        "UPDATE public.grade_attempt a SET state=?,ended_at=clock_timestamp(),"
+                            + "error_code=?,observed_version=?,provider_ref=?,output_hash=?,output_cipher=?"
+                            + " WHERE a.job_id=? AND a.attempt_no=? AND a.worker_key=? AND"
+                            + " a.lease_gen=? AND a.state='RUNNING' AND a.completion_data IS NULL"
+                            + " AND EXISTS(SELECT 1 FROM public.grade_job j WHERE j.id=a.job_id AND"
+                            + " j.game_report_id=? AND j.batch_id IS NULL AND j.report_id IS NULL"
+                            + " AND j.state='RUNNING' AND j.worker_key=? AND j.lease_gen=? AND"
+                            + " j.call_count=? AND clock_timestamp()<j.lease_until AND"
+                            + " clock_timestamp()<j.deadline_at) RETURNING ended_at",
+                        (r, i) -> r.getObject(1, OffsetDateTime.class),
+                        attemptState.name(),
+                        error,
+                        observed,
+                        reference,
+                        outputHash,
+                        outputCipher,
+                        root.jobId(),
+                        number,
+                        worker.workerKey(),
+                        gen,
+                        root.reportId(),
+                        worker.workerKey(),
+                        gen,
+                        number);
+        if (saved.size() != 1
+                || !saved.getFirst().isBefore(current.leaseUntil())
+                || !saved.getFirst().isBefore(current.deadlineAt())) throw storage();
+        OffsetDateTime changedAt = now();
+        if (jdbc.update(
+                        "UPDATE public.grade_job SET state=?,worker_key=NULL,lease_until=NULL,"
+                            + "error_code=?,result_data=?::jsonb,result_hash=?,result_cipher=?,next_run_at=?,updated_at=clock_timestamp()"
+                            + " WHERE id=? AND job_key=? AND game_report_id=? AND batch_id IS NULL"
+                            + " AND report_id IS NULL AND report_hash=? AND snapshot_id=? AND"
+                            + " runtime_id=? AND config_hash=? AND rubric_hash=? AND"
+                            + " state='RUNNING' AND worker_key=? AND lease_gen=? AND call_count=?"
+                            + " AND accepted_at=? AND deadline_at=? AND"
+                            + " clock_timestamp()<lease_until AND clock_timestamp()<deadline_at",
+                        after.name(),
+                        error,
+                        summary == null ? null : text(summary),
+                        resultHash,
+                        resultCipher,
+                        changedAt,
+                        root.jobId(),
+                        key,
+                        root.reportId(),
+                        root.reportHash(),
+                        root.snapshotId(),
+                        root.runtimeId(),
+                        root.configHash(),
+                        root.rubricHash(),
+                        worker.workerKey(),
+                        gen,
+                        number,
+                        current.acceptedAt(),
+                        current.deadlineAt())
+                != 1) throw storage();
+        if (base != null) gradeGame(root, current, base, input, changedAt);
+        else if (after == JobState.FAILED) failGame(root, current, changedAt);
+        long event =
+                audit.recordWorkerEvent(
+                        worker,
+                        root.jobId(),
+                        number,
+                        EventKind.COMPLETE_APPLIED,
+                        UUID.randomUUID(),
+                        request,
+                        hash,
+                        new Detail(
+                                gen,
+                                JobState.RUNNING,
+                                after,
+                                AttemptState.RUNNING,
+                                attemptState,
+                                reason,
+                                outputHash,
+                                resultHash));
+        ObjectNode envelope = object().put("auditEventId", event).put("commandHash", hash);
+        envelope.set("receipt", receiptJson(receipt));
+        if (jdbc.update(
+                        "UPDATE public.grade_attempt SET completion_data=?::jsonb WHERE job_id=?"
+                            + " AND attempt_no=? AND worker_key=? AND lease_gen=? AND state=? AND"
+                            + " completion_data IS NULL AND clock_timestamp()<? AND"
+                            + " clock_timestamp()<?",
+                        text(envelope),
+                        root.jobId(),
+                        number,
+                        worker.workerKey(),
+                        gen,
+                        attemptState.name(),
+                        current.leaseUntil(),
+                        current.deadlineAt())
+                != 1) throw storage();
+        if (!Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                        "SELECT j.state=? AND j.call_count=? AND j.game_report_id=? AND"
+                            + " a.completion_data=?::jsonb AND e.command_hash=? AND"
+                            + " e.event_kind='COMPLETE_APPLIED' FROM public.grade_job j JOIN"
+                            + " public.grade_attempt a ON a.job_id=j.id AND a.attempt_no=? JOIN"
+                            + " public.grade_event e ON e.job_id=j.id AND e.id=? WHERE j.id=?",
+                        Boolean.class,
+                        after.name(),
+                        number,
+                        root.reportId(),
+                        text(envelope),
+                        hash,
+                        number,
+                        event,
+                        root.jobId()))) throw storage();
+        return receipt;
+    }
+
+    /** 성공/오답의 시간 기준과 점수는 저장된 방 상한 및 고정 정책 벌점만 사용한다. */
+    private void gradeGame(
+            GameRootEvidence root,
+            Job job,
+            BaseResult base,
+            GradeFrozenInputRepository.GameGradeInput input,
+            OffsetDateTime clock) {
+        var room =
+                jdbc.queryForMap(
+                        "SELECT graded_count,wrong_count,max_attempts,deadline_at,state"
+                                + " FROM public.game_room WHERE id=?",
+                        root.roomId());
+        int count = ((Number) room.get("graded_count")).intValue();
+        int wrong = ((Number) room.get("wrong_count")).intValue();
+        int limit = ((Number) room.get("max_attempts")).intValue();
+        JsonNode penalty = input.frozenSnapshot().payload().path("policy").path("wrongPenalty");
+        if (!penalty.isIntegralNumber()
+                || !penalty.canConvertToInt()
+                || penalty.intValue() < 0
+                || penalty.intValue() > 100
+                || count >= limit
+                || !"RUNNING".equals(room.get("state"))) throw storage();
+        int next = count + 1;
+        int misses = wrong + (base.success() ? 0 : 1);
+        int score = Math.max(0, base.baseScore() - misses * penalty.intValue());
+        java.sql.Timestamp storedDeadline = (java.sql.Timestamp) room.get("deadline_at");
+        if (storedDeadline == null) throw storage();
+        OffsetDateTime deadline = storedDeadline.toInstant().atOffset(java.time.ZoneOffset.UTC);
+        String outcome =
+                base.success()
+                        ? "SUCCESS"
+                        : !clock.isBefore(deadline)
+                                ? "TIME_LIMIT"
+                                : next >= limit ? "ATTEMPTS_EXHAUSTED" : null;
+        ObjectNode scoreData =
+                object().put("formatNo", 1)
+                        .put("baseScore", base.baseScore())
+                        .put("success", base.success())
+                        .put("score", score);
+        scoreData.set("baseResult", INTERNAL.valueToTree(base));
+        if (jdbc.update(
+                        "UPDATE public.game_report SET"
+                            + " state='GRADED',base_score=?,success_yn=?,score_data=?::jsonb,graded_at=clock_timestamp()"
+                            + " WHERE id=? AND room_id=? AND state='ACCEPTED' AND payload_hash=?"
+                            + " AND accepted_at=? AND purged_at IS NULL",
+                        base.baseScore(),
+                        base.success(),
+                        text(scoreData),
+                        root.reportId(),
+                        root.roomId(),
+                        root.payloadHash(),
+                        job.acceptedAt())
+                != 1) throw storage();
+        OffsetDateTime ended = outcome == null ? null : now();
+        OffsetDateTime basis = "TIME_LIMIT".equals(outcome) ? deadline : ended;
+        if (jdbc.update(
+                        "UPDATE public.game_room SET"
+                            + " graded_count=?,wrong_count=?,last_base_score=?,state=CASE WHEN"
+                            + " ?::text IS NULL THEN 'RUNNING' ELSE 'ENDED'"
+                            + " END,end_reason=?,final_score=CASE WHEN ?::text IS NULL THEN NULL"
+                            + " ELSE ? END,"
+                            + "ended_at=?,time_basis_at=?,updated_at=clock_timestamp(),rev=rev+1"
+                            + " WHERE id=? AND state='RUNNING' AND graded_count=? AND wrong_count=?"
+                            + " AND clock_timestamp()<?",
+                        next,
+                        misses,
+                        base.baseScore(),
+                        outcome,
+                        outcome,
+                        outcome,
+                        score,
+                        ended,
+                        basis,
+                        root.roomId(),
+                        count,
+                        wrong,
+                        job.deadlineAt())
+                != 1) throw storage();
+        if (outcome != null) GameRecordService.snapshotTerminal(jdbc, root.roomId());
+    }
+
+    /** 마지막 모델 실패는 점수 없이 오류 종료하며 재시도 가능한 실패는 방을 유지한다. */
+    private void failGame(GameRootEvidence root, Job job, OffsetDateTime clock) {
+        if (jdbc.update(
+                        "UPDATE public.game_report SET state='UNGRADABLE' WHERE id=? AND room_id=?"
+                            + " AND state='ACCEPTED' AND payload_hash=? AND accepted_at=?",
+                        root.reportId(),
+                        root.roomId(),
+                        root.payloadHash(),
+                        job.acceptedAt())
+                != 1) throw storage();
+        if (jdbc.update(
+                        "UPDATE public.game_room SET state='ENDED',end_reason='SYSTEM_ERROR',"
+                            + "final_score=NULL,ended_at=?,time_basis_at=?,updated_at=clock_timestamp(),rev=rev+1"
+                            + " WHERE id=? AND state='RUNNING' AND clock_timestamp()<?",
+                        clock,
+                        clock,
+                        root.roomId(),
+                        job.deadlineAt())
+                != 1) throw storage();
+        GameRecordService.snapshotTerminal(jdbc, root.roomId());
     }
 
     /**

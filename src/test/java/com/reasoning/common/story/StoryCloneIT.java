@@ -142,7 +142,7 @@ class StoryCloneIT extends DatabaseContextTest {
 
     /** 실제 V1~23 초기화 재실행과 새 버전의 JPA 투영을 검사하며 스키마 대체를 만들지 않는다. */
     @Test
-    void actualV23BootstrapRepeatsZeroAndJpaReadsClonedDraft() {
+    void actualV42BootstrapRepeatsZeroAndJpaReadsClonedDraft() {
         var flyway =
                 Flyway.configure()
                         .resourceProvider(new EmbeddedSqlResourceProvider())
@@ -152,7 +152,7 @@ class StoryCloneIT extends DatabaseContextTest {
                                 postgres.getPassword())
                         .locations("classpath:db/migration")
                         .load();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("42");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
         Fixture f = fixture();
@@ -177,7 +177,7 @@ class StoryCloneIT extends DatabaseContextTest {
                                         + " table_schema='public' AND table_name IN"
                                         + " ('story_release','evidence_set','evidence_item')",
                                 String.class))
-                .containsExactlyInAnyOrder("evidence_set", "evidence_item");
+                .containsExactlyInAnyOrder("story_release", "evidence_set", "evidence_item");
     }
 
     /** 공개 사본만 복제하며 변경된 원본 행·비활성 행·검수 기록을 새 초안으로 승계하지 않는다. */

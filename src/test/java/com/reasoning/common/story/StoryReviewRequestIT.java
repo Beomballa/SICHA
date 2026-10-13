@@ -97,7 +97,7 @@ class StoryReviewRequestIT extends DatabaseContextTest {
 
     /** 실제 최신 V23 앱 초기화·재실행0과 nullable 근거 FK를 포함한 검수13열을 대조한다. */
     @Test
-    void actualV23BootstrapsAndRepeatsZeroWithoutSchemaSubstitutes() {
+    void actualV42BootstrapsAndRepeatsZeroWithoutSchemaSubstitutes() {
         var flyway =
                 Flyway.configure()
                         .resourceProvider(new EmbeddedSqlResourceProvider())
@@ -107,7 +107,7 @@ class StoryReviewRequestIT extends DatabaseContextTest {
                                 postgres.getPassword())
                         .locations("classpath:db/migration")
                         .load();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("42");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
         assertThat(

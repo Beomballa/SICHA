@@ -78,7 +78,17 @@ public final class MemberAuthService {
 
     public record Logout(String state, UUID requestId) {}
 
+    public record GrantView(
+            String reauthGrant, String purpose, Instant expiresAt, UUID requestId) {}
+
     public record Revoked(Logout response, MemberPrincipal principal) {}
+
+    public record ErasureAccepted(
+            String state,
+            UUID eraseKey,
+            String receiptToken,
+            Instant receiptExpiresAt,
+            UUID requestId) {}
 
     private record Flow(
             long id,
@@ -90,7 +100,13 @@ public final class MemberAuthService {
             byte[] proof,
             int attempts,
             Instant expires,
-            Instant verifiedAt) {}
+            Instant verifiedAt,
+            String purpose,
+            Long memberId,
+            Long identityId,
+            Long authRev,
+            Long sessionId,
+            String reauthPurpose) {}
 
     private record LocalIdentity(
             long id,
@@ -150,6 +166,7 @@ public final class MemberAuthService {
     private final BreachedPasswordChecker breached;
     private final MemberPolicyGate gate;
     private final MemberMailTransport mail;
+    private final MemberErasureService erasure;
     private final TransactionTemplate transaction;
     private final TransactionTemplate independent;
     private final Argon2PasswordEncoder passwords =
@@ -159,7 +176,9 @@ public final class MemberAuthService {
     private static final Logger LOG = LoggerFactory.getLogger(MemberAuthService.class);
     private static final String ACCESS = "MEMBER_ACCESS_V1",
             REFRESH = "MEMBER_REFRESH_V1",
-            BINDER = "MEMBER_SIGNUP_BINDER_V1";
+            BINDER = "MEMBER_SIGNUP_BINDER_V1",
+            RESET_BINDER = "MEMBER_RESET_BINDER_V1",
+            REAUTH_BINDER = "MEMBER_REAUTH_BINDER_V1";
 
     public MemberAuthService(
             JdbcTemplate db,
@@ -177,6 +196,7 @@ public final class MemberAuthService {
         this.breached = Objects.requireNonNull(breached);
         this.gate = Objects.requireNonNull(gate);
         this.mail = Objects.requireNonNull(mail);
+        this.erasure = new MemberErasureService(db, manager, crypto);
         transaction = template(manager);
         independent = template(manager);
         independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -190,23 +210,48 @@ public final class MemberAuthService {
         return value;
     }
 
+    /** 이메일 가입 확인을 시작하며 계정 존재 여부와 무관하게 같은 봉투를 반환한다. */
     public FlowStart startSignup(String email, String source, UUID requestId) {
+        return startEmail(email, source, requestId, false);
+    }
+
+    /** 활성 LOCAL 수단과 현재 회수 세대에 복구를 결속하며 기존 자격은 회수하지 않는다. */
+    public FlowStart startReset(String email, String source, UUID requestId) {
+        return startEmail(email, source, requestId, true);
+    }
+
+    private FlowStart startEmail(String email, String source, UUID requestId, boolean reset) {
         return safe(
                 () -> {
                     request(requestId);
                     outside();
                     var evidence = gate.prepare();
-                    limit("SIGNUP_START", email, source, requestId);
+                    String action = reset ? "RESET_START" : "SIGNUP_START";
+                    limit(action, email, source, requestId);
                     String normalized = email(email);
+                    String lookup = hex(crypto.memberEmailHash(normalized));
+                    var identities = identitiesByLookup(lookup);
+                    var before = reset && identities.size() == 1 ? identities.getFirst() : null;
                     StartWork work =
                             committed(
                                     () -> {
                                         var permit = gate.lock(evidence, null);
+                                        if (before != null) account(before.memberId(), true);
+                                        var current =
+                                                before == null ? null : identity(before.id(), true);
+                                        boolean eligible =
+                                                current != null
+                                                        && current.active()
+                                                        && current.memberState().equals("ACTIVE")
+                                                        && current.lookupHash().equals(lookup)
+                                                        && current.proofAt() != null;
                                         Instant now = gate.clock();
                                         UUID key = crypto.randomUuid();
                                         String binder = crypto.randomToken(32);
-                                        String lookup = hex(crypto.memberEmailHash(normalized));
-                                        boolean allowed = identitiesByLookup(lookup).isEmpty();
+                                        boolean allowed =
+                                                reset
+                                                        ? eligible
+                                                        : identitiesByLookup(lookup).isEmpty();
                                         String code =
                                                 String.format(
                                                         Locale.ROOT,
@@ -218,7 +263,8 @@ public final class MemberAuthService {
                                         proof.put("email", normalized);
                                         proof.put("realm", "LOCAL");
                                         proof.put("lookupVer", 1);
-                                        proof.put("signupAllowed", allowed);
+                                        proof.put(
+                                                reset ? "resetAllowed" : "signupAllowed", allowed);
                                         byte[] cipher =
                                                 encrypt(
                                                         MemberPolicyEvidenceRegistry.canonical(
@@ -227,18 +273,22 @@ public final class MemberAuthService {
                                         Instant expires = now.plusSeconds(600);
                                         db.update(
                                                 "INSERT INTO"
-                                                    + " member_flow(id,flow_key,binder_hash,purpose,state,provider,lookup_hash,code_hash,proof_cipher,attempt_count,created_at,expires_at)"
+                                                    + " member_flow(id,flow_key,binder_hash,purpose,state,provider,lookup_hash,code_hash,proof_cipher,attempt_count,created_at,expires_at,member_id,identity_id,auth_rev)"
                                                     + " OVERRIDING SYSTEM VALUE VALUES"
-                                                    + " (?,?,?,'SIGNUP','PENDING','LOCAL',?,?,?,0,?,?)",
+                                                    + " (?,?,?,?,'PENDING','LOCAL',?,?,?,0,?,?,?,?,?)",
                                                 id,
                                                 key,
-                                                hash(BINDER, binder),
+                                                hash(reset ? RESET_BINDER : BINDER, binder),
+                                                reset ? "RESET" : "SIGNUP",
                                                 lookup,
-                                                codeHash(key, code),
+                                                codeHash(key, code, reset ? "RESET" : "SIGNUP"),
                                                 cipher,
                                                 time(now),
-                                                time(expires));
-                                        audit("SIGNUP_START", "STARTED", null, requestId);
+                                                time(expires),
+                                                reset && eligible ? current.memberId() : null,
+                                                reset && eligible ? current.id() : null,
+                                                reset && eligible ? current.authRev() : null);
+                                        audit(action, "STARTED", null, requestId);
                                         gate.check(permit);
                                         if (!gate.clock().isBefore(expires))
                                             throw flowUnavailable();
@@ -250,12 +300,14 @@ public final class MemberAuthService {
                                                         code,
                                                         evidence.mail()));
                                     });
-                    if (work.allowed()) mail.sendSignup(normalized, work.code(), work.boundary());
+                    if (work.allowed())
+                        mail.sendEmailCode(normalized, work.code(), work.boundary(), reset);
                     return work.response();
                 });
     }
 
-    public Verified verifySignup(
+    /** 가입 또는 복구의 기존 binder와 코드를 검사하며 목적과 절대기한을 바꾸지 않는다. */
+    public Verified verifyEmail(
             UUID flowKey, String binder, String code, String source, UUID requestId) {
         return safe(
                 () -> {
@@ -288,7 +340,8 @@ public final class MemberAuthService {
         return committed(
                 () -> {
                     var permit = gate.lock(evidence, null);
-                    Flow flow = boundFlow(key, binder);
+                    Flow flow = boundFlow(key, binder, "SIGNUP", true);
+                    if (flow == null) flow = boundFlow(key, binder, "RESET", true);
                     Instant now = gate.clock();
                     if (flow == null)
                         return denial("EMAIL_VERIFY", "DENIED", null, requestId, flowUnavailable());
@@ -300,7 +353,8 @@ public final class MemberAuthService {
                     if (!flow.state().equals("PENDING"))
                         return denial(
                                 "EMAIL_VERIFY", "FLOW_LOCKED", null, requestId, flowUnavailable());
-                    if (code == null || !equal(codeHash(key, code), flow.codeHash())) {
+                    if (code == null
+                            || !equal(codeHash(key, code, flow.purpose()), flow.codeHash())) {
                         int attempts = flow.attempts() + 1;
                         if (attempts >= 5)
                             db.update(
@@ -359,7 +413,7 @@ public final class MemberAuthService {
                                 () -> {
                                     var permit = gate.lock(evidence, null);
                                     gate.requireNotice(permit, policyCode, noticeHash);
-                                    Flow flow = boundFlow(flowKey, binder);
+                                    Flow flow = boundFlow(flowKey, binder, "SIGNUP", true);
                                     Instant now = gate.clock();
                                     if (flow == null)
                                         return denial(
@@ -466,6 +520,480 @@ public final class MemberAuthService {
                         independentAudit("SIGNUP_COMPLETE", "IDENTITY_CONFLICT", null, requestId);
                         throw AuthException.conflict("IDENTITY_UNAVAILABLE");
                     }
+                });
+    }
+
+    /**
+     * 확인한 RESET을 단회 소비하고 비밀번호·회수 세대·전체 세션·감사를 같은 거래에서 확정한다.
+     *
+     * @param flowKey 복구 목적의 공개 UUID이며 null 불가
+     * @param binder 최초 응답의 32바이트 비밀이며 null 불가
+     * @param newPassword 정규화하지 않는 15~128 코드포인트 비밀번호
+     * @param requestKey 명시 요청의 추적 UUID이며 토큰 재생 키가 아님
+     * @param requestId 서버 요청 UUID
+     * @return 토큰 없는 LOGIN_REQUIRED; 자동 로그인하지 않음
+     * @throws AuthException 목적·코드확인·현재 수단·세대·기한이 맞지 않거나 저장이 실패한 경우
+     */
+    public Logout completeReset(
+            UUID flowKey, String binder, String newPassword, UUID requestKey, UUID requestId) {
+        return safe(
+                () -> {
+                    request(requestId);
+                    request(requestKey);
+                    outside();
+                    flowInput(flowKey, binder);
+                    var evidence = gate.prepare();
+                    Flow before = boundFlow(flowKey, binder, "RESET", false);
+                    if (before == null || before.memberId() == null) throw flowUnavailable();
+                    password(newPassword);
+                    if (breached.isBreached(newPassword))
+                        throw AuthException.unprocessable("INVALID_INPUT");
+                    String passwordHash = passwords.encode(newPassword);
+                    return committed(
+                            () -> {
+                                var permit = gate.lock(evidence, before.memberId());
+                                Account account = account(before.memberId(), true);
+                                LocalIdentity identity = identity(before.identityId(), true);
+                                Flow flow = boundFlow(flowKey, binder, "RESET", true);
+                                if (flow == null)
+                                    return denial(
+                                            "RESET_COMPLETE",
+                                            "DENIED",
+                                            null,
+                                            requestId,
+                                            flowUnavailable());
+                                Instant now = gate.clock();
+                                if (!now.isBefore(flow.expires())) {
+                                    failFlow(flow);
+                                    return denial(
+                                            "RESET_COMPLETE",
+                                            "FLOW_EXPIRED",
+                                            null,
+                                            requestId,
+                                            flowUnavailable());
+                                }
+                                if (!flow.state().equals("VERIFIED")) {
+                                    return denial(
+                                            "RESET_COMPLETE",
+                                            "FLOW_LOCKED",
+                                            null,
+                                            requestId,
+                                            flowUnavailable());
+                                }
+                                JsonNode proof = decodeProof(flow);
+                                if (account == null
+                                        || identity == null
+                                        || !account.state().equals("ACTIVE")
+                                        || account.revision() != flow.authRev()
+                                        || identity.memberId() != account.id()
+                                        || !identity.active()
+                                        || identity.proofAt() == null
+                                        || !identity.lookupHash().equals(flow.lookupHash())
+                                        || !proof.get("resetAllowed").booleanValue()) {
+                                    failFlow(flow);
+                                    return denial(
+                                            "RESET_COMPLETE",
+                                            "DENIED",
+                                            null,
+                                            requestId,
+                                            flowUnavailable());
+                                }
+                                db.update(
+                                        "UPDATE member_identity SET password_hash=?,updated_at=?"
+                                                + " WHERE id=?",
+                                        passwordHash,
+                                        time(now),
+                                        identity.id());
+                                db.update(
+                                        "UPDATE member_account SET auth_rev=auth_rev+1,updated_at=?"
+                                                + " WHERE id=?",
+                                        time(now),
+                                        account.id());
+                                db.update(
+                                        "UPDATE member_flow SET"
+                                            + " state='CONSUMED',consumed_at=?,lookup_hash=NULL,code_hash=NULL,proof_cipher=NULL"
+                                            + " WHERE id=?",
+                                        time(now),
+                                        flow.id());
+                                revokeAll(account.id(), "PASSWORD_RESET");
+                                audit(
+                                        "RESET_COMPLETE",
+                                        "PASSWORD_RESET",
+                                        account.id(),
+                                        account.revision() + 1,
+                                        requestId);
+                                gate.check(permit);
+                                if (!gate.clock().isBefore(flow.expires())) throw flowUnavailable();
+                                return Result.ok(new Logout("LOGIN_REQUIRED", requestId));
+                            });
+                });
+    }
+
+    /**
+     * 현재 접근 토큰에 결속된 LOCAL 수단의 비밀번호를 확인하고 단일 목적의 5분 이하 증명을 발급한다.
+     *
+     * @param accessToken 현재 유효한 canonical 접근 토큰
+     * @param purpose PASSWORD_CHANGE, LOGOUT_ALL 또는 DELETE_ACCOUNT
+     * @param identityKey 현재 세션에 결속된 LOCAL 수단의 UUID
+     * @param password 정규화하지 않는 현재 비밀번호
+     * @param source 제한 창에 사용할 숫자 IP 주소
+     * @param requestId null이 아닌 서버 요청 UUID
+     * @return 원문은 저장하지 않는 목적 결속 증명과 절대 만료 시각
+     * @throws AuthException 현재 자격·정책·제한·입력 검증이 실패한 경우
+     */
+    public GrantView reauthenticate(
+            String accessToken,
+            String purpose,
+            UUID identityKey,
+            String password,
+            String source,
+            UUID requestId) {
+        return safe(
+                () -> {
+                    request(requestId);
+                    outside();
+                    recentPurpose(purpose);
+                    secret(accessToken, "MEMBER_AUTH_REQUIRED");
+                    boolean deletion = purpose.equals("DELETE_ACCOUNT");
+                    MemberPrincipal actor = authenticate(accessToken, deletion);
+                    limit("REAUTH_LOCAL", null, source, requestId, actor.memberId());
+                    Family beforeFamily = family(actor.sessionId(), false);
+                    LocalIdentity before =
+                            beforeFamily == null
+                                    ? null
+                                    : identity(beforeFamily.identityId(), false);
+                    boolean eligible =
+                            before != null
+                                    && beforeFamily.memberId() == actor.memberId()
+                                    && beforeFamily.authRev() == actor.authRev()
+                                    && before.id() == beforeFamily.identityId()
+                                    && before.key().equals(identityKey)
+                                    && before.active()
+                                    && before.proofAt() != null
+                                    && before.memberState().equals("ACTIVE")
+                                    && before.authRev() == actor.authRev();
+                    boolean matched =
+                            passwords.matches(
+                                    validPassword(password) ? password : validDummyInput(password),
+                                    eligible && argon(before.passwordHash())
+                                            ? before.passwordHash()
+                                            : dummyHash);
+                    if (!eligible || !validPassword(password) || !matched) {
+                        independentAudit("REAUTH_LOCAL", "DENIED", actor, requestId);
+                        throw memberRequired();
+                    }
+                    var evidence = deletion ? null : gate.prepare();
+                    return committed(
+                            () -> {
+                                var permit =
+                                        deletion ? null : gate.lock(evidence, actor.memberId());
+                                Bound bound =
+                                        lockBound(
+                                                accessToken,
+                                                "ACCESS",
+                                                actor.memberId(),
+                                                actor.sessionId());
+                                if (!valid(bound, "ACCESS", false)
+                                        || !bound.identity().key().equals(identityKey)
+                                        || !bound.identity()
+                                                .passwordHash()
+                                                .equals(before.passwordHash())
+                                        || !bound.identity()
+                                                .lookupHash()
+                                                .equals(before.lookupHash())
+                                        || bound.identity().authRev() != actor.authRev())
+                                    return denial(
+                                            "REAUTH_LOCAL",
+                                            "DENIED",
+                                            actor,
+                                            requestId,
+                                            memberRequired());
+                                if (permit != null) gate.checkPinned(permit, actor.memberId());
+                                Instant now = gate.clock();
+                                Instant expires =
+                                        minimum(
+                                                minimum(
+                                                        now.plusSeconds(300),
+                                                        bound.family().idle()),
+                                                bound.family().absolute());
+                                if (!now.isBefore(expires)) throw memberRequired();
+                                UUID key = crypto.randomUuid();
+                                String binder = crypto.randomToken(32);
+                                long id = reserve("member_flow");
+                                var proof = new ObjectMapper().createObjectNode();
+                                proof.put("formatNo", 1);
+                                proof.put("passwordHash", bound.identity().passwordHash());
+                                db.update(
+                                        "INSERT INTO member_flow"
+                                            + " (id,flow_key,binder_hash,purpose,state,provider,lookup_hash,code_hash,proof_cipher,attempt_count,created_at,expires_at,verified_at,member_id,identity_id,auth_rev,session_id,reauth_purpose)"
+                                            + " OVERRIDING SYSTEM VALUE VALUES"
+                                            + " (?,?,?,'REAUTH','VERIFIED','LOCAL',?,NULL,?,0,?,?,?,?,?,?,?,?)",
+                                        id,
+                                        key,
+                                        hash(REAUTH_BINDER, binder),
+                                        bound.identity().lookupHash(),
+                                        encrypt(
+                                                MemberPolicyEvidenceRegistry.canonical(proof),
+                                                aad("member_flow", id, "proof_cipher")),
+                                        time(now),
+                                        time(expires),
+                                        time(now),
+                                        actor.memberId(),
+                                        bound.identity().id(),
+                                        actor.authRev(),
+                                        actor.sessionId(),
+                                        purpose);
+                                audit("REAUTH_LOCAL", "VERIFIED", actor, requestId);
+                                if (permit != null) gate.check(permit);
+                                if (!valid(bound, "ACCESS", false)
+                                        || !gate.clock().isBefore(expires)) throw memberRequired();
+                                return Result.ok(
+                                        new GrantView(
+                                                key + "." + binder, purpose, expires, requestId));
+                            });
+                });
+    }
+
+    /**
+     * 목적·세션에 결속된 증명을 단회 소비하여 새 LOCAL 비밀번호와 전체 세션 회수를 원자적으로 확정한다.
+     *
+     * @param accessToken 현재 유효한 canonical 접근 토큰
+     * @param reauthGrant 재인증에서 받은 UUIDv4.32바이트 base64url 증명
+     * @param newPassword 정규화하지 않는 15~128 코드포인트의 비유출 새 비밀번호
+     * @param requestKey null이 아닌 요청 UUID이며 재생 키가 아님
+     * @param requestId null이 아닌 서버 요청 UUID
+     * @return 토큰을 재발급하지 않는 LOGIN_REQUIRED
+     * @throws AuthException 증명·현재성·비밀번호·필수 감사 중 하나라도 실패한 경우
+     */
+    public Logout changePassword(
+            String accessToken,
+            String reauthGrant,
+            String newPassword,
+            UUID requestKey,
+            UUID requestId) {
+        return consumeRecent(
+                accessToken, reauthGrant, newPassword, requestKey, requestId, "PASSWORD_CHANGE");
+    }
+
+    /**
+     * LOGOUT_ALL 증명을 단회 소비하여 회원의 모든 family를 회수하고 현재 자격 세대를 올린다.
+     *
+     * @param accessToken 현재 유효한 canonical 접근 토큰
+     * @param reauthGrant 재인증에서 받은 UUIDv4.32바이트 base64url 증명
+     * @param requestKey null이 아닌 요청 UUID이며 재생 키가 아님
+     * @param requestId null이 아닌 서버 요청 UUID
+     * @return 토큰을 재발급하지 않는 LOGIN_REQUIRED
+     * @throws AuthException 목적·세션·기한·현재성 또는 필수 감사 검증이 실패한 경우
+     */
+    public Logout logoutAll(
+            String accessToken, String reauthGrant, UUID requestKey, UUID requestId) {
+        return consumeRecent(accessToken, reauthGrant, null, requestKey, requestId, "LOGOUT_ALL");
+    }
+
+    /** 현재 접근 자격과 DELETE_ACCOUNT 단회 증명을 결속해 회수, 접수, 필수 감사를 원자 확정한다. */
+    public ErasureAccepted deleteAccount(
+            String accessToken, String reauthGrant, UUID requestKey, UUID requestId) {
+        return safe(
+                () -> {
+                    request(requestKey);
+                    request(requestId);
+                    outside();
+                    secret(accessToken, "MEMBER_AUTH_REQUIRED");
+                    MemberPrincipal actor = authenticate(accessToken, true);
+                    String[] grant = grantParts(reauthGrant);
+                    UUID key = UUID.fromString(grant[0]);
+                    String binder = grant[1];
+                    Flow before = boundFlow(key, binder, "REAUTH", false);
+                    if (before == null
+                            || !before.state().equals("VERIFIED")
+                            || !gate.clock().isBefore(before.expires())
+                            || !"DELETE_ACCOUNT".equals(before.reauthPurpose())
+                            || !actorMatches(before, actor)) throw flowUnavailable();
+                    String proofHash = recentProof(before);
+                    return committed(
+                            () -> {
+                                erasure.lockParticipants(actor.memberId());
+                                Bound bound =
+                                        lockBound(
+                                                accessToken,
+                                                "ACCESS",
+                                                actor.memberId(),
+                                                actor.sessionId());
+                                if (!valid(bound, "ACCESS", true))
+                                    return Result.denied(memberRequired());
+                                Flow flow = boundFlow(key, binder, "REAUTH", true);
+                                Instant now = gate.clock();
+                                if (flow == null
+                                        || !"DELETE_ACCOUNT".equals(flow.reauthPurpose())
+                                        || !actorMatches(flow, actor)
+                                        || !flow.state().equals("VERIFIED")
+                                        || flow.verifiedAt() == null
+                                        || !now.isBefore(flow.expires())
+                                        || bound.identity().id() != flow.identityId()
+                                        || bound.identity().authRev() != flow.authRev()
+                                        || !bound.identity().lookupHash().equals(flow.lookupHash())
+                                        || !bound.identity().passwordHash().equals(proofHash)
+                                        || !recentProof(flow).equals(proofHash))
+                                    return Result.denied(flowUnavailable());
+                                MemberErasureService.Accepted receipt =
+                                        erasure.enqueue(actor.memberId(), actor.memberKey());
+                                db.update(
+                                        "UPDATE member_account SET"
+                                            + " auth_rev=auth_rev+1,state='DELETED',deleted_at=?,updated_at=?"
+                                            + " WHERE id=?",
+                                        time(now),
+                                        time(now),
+                                        actor.memberId());
+                                db.update(
+                                        "UPDATE member_flow SET"
+                                            + " state='CONSUMED',consumed_at=?,lookup_hash=NULL,code_hash=NULL,proof_cipher=NULL"
+                                            + " WHERE id=?",
+                                        time(now),
+                                        flow.id());
+                                revokeAll(actor.memberId(), "DELETE_ACCOUNT");
+                                audit(
+                                        "DELETE_ACCOUNT",
+                                        "ACCOUNT_DELETED",
+                                        actor.memberId(),
+                                        actor.authRev() + 1,
+                                        requestId);
+                                erasure.seal(receipt.eraseId(), actor.memberId());
+                                if (!gate.clock().isBefore(flow.expires())) throw flowUnavailable();
+                                return Result.ok(
+                                        new ErasureAccepted(
+                                                "ACCESS_REVOKED",
+                                                receipt.eraseKey(),
+                                                receipt.receiptToken(),
+                                                receipt.receiptExpiresAt(),
+                                                requestId));
+                            });
+                });
+    }
+
+    /** 스케줄러가 별도로 호출하는 단일 PRIMARY 대상 소비이며 자동 실행하지 않는다. */
+    public boolean processPrimary(UUID eraseKey, UUID requestId) {
+        return safe(
+                () -> {
+                    request(requestId);
+                    outside();
+                    return erasure.processPrimary(eraseKey);
+                });
+    }
+
+    /** 재인증 없이 접수 영수증과 출처 제한 창만 사용하여 안전한 상태를 읽는다. */
+    public MemberErasureService.Status status(
+            UUID eraseKey, String receiptToken, UUID requestId, String source) {
+        return safe(
+                () -> {
+                    request(requestId);
+                    outside();
+                    return erasure.status(eraseKey, receiptToken, requestId, source);
+                });
+    }
+
+    private Logout consumeRecent(
+            String accessToken,
+            String reauthGrant,
+            String newPassword,
+            UUID requestKey,
+            UUID requestId,
+            String purpose) {
+        return safe(
+                () -> {
+                    request(requestKey);
+                    request(requestId);
+                    outside();
+                    secret(accessToken, "MEMBER_AUTH_REQUIRED");
+                    MemberPrincipal actor = authenticate(accessToken, false);
+                    String[] grant = grantParts(reauthGrant);
+                    UUID key = UUID.fromString(grant[0]);
+                    String binder = grant[1];
+                    Flow before = boundFlow(key, binder, "REAUTH", false);
+                    if (before == null
+                            || !before.state().equals("VERIFIED")
+                            || !gate.clock().isBefore(before.expires())
+                            || !purpose.equals(before.reauthPurpose())
+                            || !actorMatches(before, actor)) throw flowUnavailable();
+                    String proofHash = recentProof(before);
+                    if (purpose.equals("PASSWORD_CHANGE")) {
+                        password(newPassword);
+                        if (breached.isBreached(newPassword))
+                            throw AuthException.unprocessable("INVALID_INPUT");
+                    }
+                    String newHash =
+                            purpose.equals("PASSWORD_CHANGE")
+                                    ? passwords.encode(newPassword)
+                                    : null;
+                    var evidence = gate.prepare();
+                    return committed(
+                            () -> {
+                                var permit = gate.lock(evidence, actor.memberId());
+                                Bound bound =
+                                        lockBound(
+                                                accessToken,
+                                                "ACCESS",
+                                                actor.memberId(),
+                                                actor.sessionId());
+                                if (!valid(bound, "ACCESS", false))
+                                    return denial(
+                                            purpose, "DENIED", actor, requestId, memberRequired());
+                                gate.checkPinned(permit, actor.memberId());
+                                Flow flow = boundFlow(key, binder, "REAUTH", true);
+                                if (flow == null
+                                        || !purpose.equals(flow.reauthPurpose())
+                                        || !actorMatches(flow, actor))
+                                    return denial(
+                                            purpose, "DENIED", actor, requestId, flowUnavailable());
+                                Instant now = gate.clock();
+                                if (!now.isBefore(flow.expires())) {
+                                    failFlow(flow);
+                                    return denial(
+                                            purpose,
+                                            "FLOW_EXPIRED",
+                                            actor,
+                                            requestId,
+                                            flowUnavailable());
+                                }
+                                if (!flow.state().equals("VERIFIED")
+                                        || flow.verifiedAt() == null
+                                        || bound.identity().id() != flow.identityId()
+                                        || bound.identity().authRev() != flow.authRev()
+                                        || !bound.identity().lookupHash().equals(flow.lookupHash())
+                                        || !bound.identity().passwordHash().equals(proofHash)
+                                        || !recentProof(flow).equals(proofHash))
+                                    return denial(
+                                            purpose, "DENIED", actor, requestId, flowUnavailable());
+                                if (newHash != null)
+                                    db.update(
+                                            "UPDATE member_identity SET"
+                                                    + " password_hash=?,updated_at=? WHERE id=?",
+                                            newHash,
+                                            time(now),
+                                            flow.identityId());
+                                db.update(
+                                        "UPDATE member_account SET auth_rev=auth_rev+1,updated_at=?"
+                                                + " WHERE id=?",
+                                        time(now),
+                                        actor.memberId());
+                                db.update(
+                                        "UPDATE member_flow SET"
+                                            + " state='CONSUMED',consumed_at=?,lookup_hash=NULL,code_hash=NULL,proof_cipher=NULL"
+                                            + " WHERE id=?",
+                                        time(now),
+                                        flow.id());
+                                revokeAll(actor.memberId(), purpose);
+                                audit(
+                                        purpose,
+                                        purpose.equals("PASSWORD_CHANGE")
+                                                ? "PASSWORD_CHANGED"
+                                                : "LOGGED_OUT",
+                                        actor.memberId(),
+                                        actor.authRev() + 1,
+                                        requestId);
+                                gate.check(permit);
+                                if (!gate.clock().isBefore(flow.expires())) throw flowUnavailable();
+                                return Result.ok(new Logout("LOGIN_REQUIRED", requestId));
+                            });
                 });
     }
 
@@ -949,13 +1477,14 @@ public final class MemberAuthService {
                 && now.isBefore(bound.family().absolute());
     }
 
-    private Flow boundFlow(UUID key, String binder) {
+    private Flow boundFlow(UUID key, String binder, String purpose, boolean lock) {
         List<Flow> values =
                 db.query(
                         "SELECT"
-                            + " id,flow_key,binder_hash,state,lookup_hash,code_hash,proof_cipher,attempt_count,expires_at,verified_at"
-                            + " FROM member_flow WHERE flow_key=? AND binder_hash=? AND"
-                            + " purpose='SIGNUP' AND provider='LOCAL' FOR UPDATE",
+                            + " id,flow_key,binder_hash,state,lookup_hash,code_hash,proof_cipher,attempt_count,expires_at,verified_at,purpose,member_id,identity_id,auth_rev,session_id,reauth_purpose"
+                            + " FROM member_flow WHERE flow_key=? AND binder_hash=? AND purpose=?"
+                            + " AND provider='LOCAL'"
+                                + (lock ? " FOR UPDATE" : ""),
                         (rs, row) ->
                                 new Flow(
                                         rs.getLong(1),
@@ -967,9 +1496,20 @@ public final class MemberAuthService {
                                         rs.getBytes(7),
                                         rs.getInt(8),
                                         instant(rs, 9),
-                                        instant(rs, 10)),
+                                        instant(rs, 10),
+                                        rs.getString(11),
+                                        rs.getObject(12, Long.class),
+                                        rs.getObject(13, Long.class),
+                                        rs.getObject(14, Long.class),
+                                        rs.getObject(15, Long.class),
+                                        rs.getString(16)),
                         key,
-                        hash(BINDER, binder));
+                        hash(
+                                purpose.equals("REAUTH")
+                                        ? REAUTH_BINDER
+                                        : purpose.equals("RESET") ? RESET_BINDER : BINDER,
+                                binder),
+                        purpose);
         return values.size() == 1 ? values.getFirst() : null;
     }
 
@@ -978,17 +1518,66 @@ public final class MemberAuthService {
                 MemberPolicyEvidenceRegistry.parse(
                         decrypt(flow.proof(), aad("member_flow", flow.id(), "proof_cipher"))
                                 .getBytes(StandardCharsets.UTF_8));
+        String allowed = flow.purpose().equals("RESET") ? "resetAllowed" : "signupAllowed";
         MemberPolicyEvidenceRegistry.exact(
-                proof, "formatNo", "email", "realm", "lookupVer", "signupAllowed");
+                proof, "formatNo", "email", "realm", "lookupVer", allowed);
         MemberPolicyEvidenceRegistry.integer(proof, "formatNo", 1);
         MemberPolicyEvidenceRegistry.integer(proof, "lookupVer", 1);
         String email = MemberPolicyEvidenceRegistry.text(proof, "email");
         if (!MemberPolicyEvidenceRegistry.text(proof, "realm").equals("LOCAL")
-                || !proof.get("signupAllowed").isBoolean()
+                || !proof.get(allowed).isBoolean()
                 || !email(email).equals(email)
                 || !equal(hex(crypto.memberEmailHash(email)), flow.lookupHash()))
             throw unavailable();
         return proof;
+    }
+
+    /** 저장된 재인증 증명은 정확한 JSON 구조와 현재 Argon 해시 형식만 허용한다. */
+    private String recentProof(Flow flow) {
+        if (flow.proof() == null) throw flowUnavailable();
+        JsonNode proof =
+                MemberPolicyEvidenceRegistry.parse(
+                        decrypt(flow.proof(), aad("member_flow", flow.id(), "proof_cipher"))
+                                .getBytes(StandardCharsets.UTF_8));
+        MemberPolicyEvidenceRegistry.exact(proof, "formatNo", "passwordHash");
+        MemberPolicyEvidenceRegistry.integer(proof, "formatNo", 1);
+        String value = MemberPolicyEvidenceRegistry.text(proof, "passwordHash");
+        if (!argon(value)) throw unavailable();
+        return value;
+    }
+
+    private static boolean actorMatches(Flow flow, MemberPrincipal actor) {
+        return flow.memberId() != null
+                && flow.identityId() != null
+                && flow.authRev() != null
+                && flow.sessionId() != null
+                && flow.memberId() == actor.memberId()
+                && flow.sessionId() == actor.sessionId()
+                && flow.authRev() == actor.authRev();
+    }
+
+    private static void recentPurpose(String purpose) {
+        if (!"PASSWORD_CHANGE".equals(purpose)
+                && !"LOGOUT_ALL".equals(purpose)
+                && !"DELETE_ACCOUNT".equals(purpose))
+            throw AuthException.badRequest("INVALID_REQUEST");
+    }
+
+    private static String[] grantParts(String grant) {
+        if (grant == null || grant.length() != 80 || grant.charAt(36) != '.')
+            throw flowUnavailable();
+        String uuid = grant.substring(0, 36);
+        UUID key;
+        try {
+            key = UUID.fromString(uuid);
+        } catch (IllegalArgumentException failure) {
+            throw flowUnavailable();
+        }
+        if (key.version() != 4 || key.variant() != 2 || !key.toString().equals(uuid))
+            throw flowUnavailable();
+        String binder = grant.substring(37);
+        secret(binder, "FLOW_UNAVAILABLE");
+        return new String[] {uuid, binder};
     }
 
     private void failFlow(Flow flow) {
@@ -1088,6 +1677,10 @@ public final class MemberAuthService {
     }
 
     private void limit(String action, String email, String source, UUID requestId) {
+        limit(action, email, source, requestId, null);
+    }
+
+    private void limit(String action, String email, String source, UUID requestId, Long memberId) {
         if (source == null || source.length() > 45 || !source.matches("[0-9A-Fa-f:.]+"))
             throw AuthException.badRequest("INVALID_REQUEST");
         List<Bucket> buckets = new ArrayList<>();
@@ -1095,10 +1688,19 @@ public final class MemberAuthService {
             buckets.add(bucket("SIGNUP_EMAIL_15M", bucketEmail(email), 900, 3));
             buckets.add(bucket("SIGNUP_EMAIL_24H", bucketEmail(email), 86400, 10));
             buckets.add(bucket("SIGNUP_SOURCE_15M", source, 900, 30));
+        } else if (action.equals("RESET_START")) {
+            buckets.add(bucket("RESET_EMAIL_15M", bucketEmail(email), 900, 3));
+            buckets.add(bucket("RESET_EMAIL_24H", bucketEmail(email), 86400, 10));
+            buckets.add(bucket("RESET_SOURCE_15M", source, 900, 30));
         } else if (action.equals("LOGIN_LOCAL")) {
             buckets.add(bucket("LOGIN_EMAIL_15M", bucketEmail(email), 900, 5));
             buckets.add(bucket("LOGIN_SOURCE_15M", source, 900, 30));
-        } else buckets.add(bucket("VERIFY_SOURCE_15M", source, 900, 30));
+        } else if (action.equals("EMAIL_VERIFY")) {
+            buckets.add(bucket("VERIFY_SOURCE_15M", source, 900, 30));
+        } else if (action.equals("REAUTH_LOCAL") && memberId != null) {
+            buckets.add(bucket("REAUTH_MEMBER_15M", Long.toString(memberId), 900, 5));
+            buckets.add(bucket("REAUTH_SOURCE_15M", source, 900, 30));
+        } else throw unavailable();
         buckets.sort(Comparator.comparing(Bucket::scope).thenComparing(Bucket::hash));
         Long blockedSeconds =
                 independent.execute(
@@ -1183,6 +1785,21 @@ public final class MemberAuthService {
                 sessionId);
     }
 
+    /** 회원 잠금 아래 모든 세션과 진행 중인 자격 증명을 닫되 소비한 증명은 보존한다. */
+    private void revokeAll(long memberId, String reason) {
+        var sessions =
+                db.query(
+                        "SELECT id FROM member_session WHERE member_id=? ORDER BY id FOR UPDATE",
+                        (rs, row) -> rs.getLong(1),
+                        memberId);
+        for (Long sessionId : sessions) revoke(sessionId, reason);
+        db.update(
+                "UPDATE member_flow SET"
+                        + " state='FAILED',lookup_hash=NULL,code_hash=NULL,proof_cipher=NULL"
+                        + " WHERE member_id=? AND state IN ('PENDING','VERIFIED')",
+                memberId);
+    }
+
     private void revokeIndependently(
             long memberId, long sessionId, String reason, String action, UUID requestId) {
         MemberPrincipal verified =
@@ -1209,19 +1826,29 @@ public final class MemberAuthService {
     }
 
     private void audit(String action, String result, MemberPrincipal principal, UUID requestId) {
+        audit(
+                action,
+                result,
+                principal == null ? null : principal.memberId(),
+                principal == null ? null : principal.authRev(),
+                requestId);
+    }
+
+    /** 이메일 복구도 실제 회원·세대만 기록하며 허구의 로그인 세션을 만들지 않는다. */
+    private void audit(String action, String result, Long memberId, Long revision, UUID requestId) {
         Instant now = gate.clock();
         db.update(
                 "INSERT INTO"
                     + " member_auth_audit(event_key,member_id,request_id,action,result_code,http_status,created_at,purge_at,auth_rev)"
                     + " VALUES (?,?,?,?,?,NULL,?,?,?)",
                 crypto.randomUuid(),
-                principal == null ? null : principal.memberId(),
+                memberId,
                 requestId,
                 action,
                 result,
                 time(now),
                 time(now.plusSeconds(7776000)),
-                principal == null ? null : principal.authRev());
+                revision);
     }
 
     private void independentAudit(
@@ -1324,8 +1951,8 @@ public final class MemberAuthService {
         return hex(crypto.tokenHash(purpose, raw));
     }
 
-    private String codeHash(UUID flow, String code) {
-        return hex(crypto.limitHash("MEMBER_SIGNUP_CODE_V1", flow + ":" + code));
+    private String codeHash(UUID flow, String code, String purpose) {
+        return hex(crypto.limitHash("MEMBER_" + purpose + "_CODE_V1", flow + ":" + code));
     }
 
     private boolean equal(String left, String right) {

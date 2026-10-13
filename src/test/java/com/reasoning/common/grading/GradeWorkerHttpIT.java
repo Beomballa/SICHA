@@ -217,7 +217,7 @@ class GradeWorkerHttpIT extends DatabaseContextTest {
                                 "SELECT version FROM flyway_schema_history WHERE success ORDER BY"
                                         + " installed_rank DESC LIMIT 1",
                                 String.class))
-                .isEqualTo("23");
+                .isEqualTo("42");
         var registered =
                 new GradeRuntimeRepository(db)
                         .registerRuntime(

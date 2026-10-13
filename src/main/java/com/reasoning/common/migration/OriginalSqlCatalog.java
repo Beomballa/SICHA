@@ -90,7 +90,64 @@ public final class OriginalSqlCatalog {
                             "bb1852bf9d9cbe150355f678843a128eb293092224b4f50226c26cd9f07e600b"),
                     Map.entry(
                             "V23__h5_test_job_guard_scope.sql",
-                            "3d793c8cf4b11865af878bc3a31afe7a0e4e060346c255a25efc418cd4288d0d"));
+                            "3d793c8cf4b11865af878bc3a31afe7a0e4e060346c255a25efc418cd4288d0d"),
+                    Map.entry(
+                            "V24__member_password_reset.sql",
+                            "e3d9c4475c95fc3b967b03113ea2300cc085b4a1f003afc11595f9d505874fcb"),
+                    Map.entry(
+                            "V25__member_recent_verification.sql",
+                            "6f3ac02bee8feb2ae8b13388726dc84f7c4057d1a046ad1a46cb5b35032db33b"),
+                    Map.entry(
+                            "V26__member_erasure.sql",
+                            "94b9046b71619e4658fa387a6b4615434a69c2aaebc49f2dadbd46f1808c87a6"),
+                    Map.entry(
+                            "V27__general_execution.sql",
+                            "15f4d8b64ff2379103839fb94cf7bc53885135690050544b87a200dfe5329971"),
+                    Map.entry(
+                            "V28__general_execution_actions.sql",
+                            "42b7fc6fbeea20ed78b0ef30a38bda8f475781f533850eca1da31b024eda9274"),
+                    Map.entry(
+                            "V29__game_grading_source.sql",
+                            "883d489c71b18c4ff5eccaf859266ccda22ee95f035ceafd9541dcbd4b6695f2"),
+                    Map.entry(
+                            "V30__public_game_admission.sql",
+                            "f273e3746bbfc75084c5bdc416ae1102bfa210d37373de6b007cbc64ae5116cc"),
+                    Map.entry(
+                            "V31__game_report_actions.sql",
+                            "3412db1aaf098ad85048c932efcaaf03fa96a4d220882181ce26264e28b34a63"),
+                    Map.entry(
+                            "V32__dual_release_evidence.sql",
+                            "74ee1843f82319721a112dfefe7a7e0591e0fc3f1ee8c53f557c032c5f1f9ce5"),
+                    Map.entry(
+                            "V33__qualification_report_actions.sql",
+                            "f25744f03ef1f0ee9a244de0dda2c643339a72053dca606492bc3462ceff1f4f"),
+                    Map.entry(
+                            "V34__story_release_actions.sql",
+                            "fe6811a1f8821d44b90ee61ef831e4f6590394efb2332b7a3ac1390bc5c712ef"),
+                    Map.entry(
+                            "V35__public_play_records.sql",
+                            "6418890ec0c742701a76e22631d3e7003d4488086fd77a67188e7130438b7bdc"),
+                    Map.entry(
+                            "V36__game_lifecycle_and_hints.sql",
+                            "7d91dbecf364945287508b603d4fa4a713f2915ed97745568925b263a8d5875e"),
+                    Map.entry(
+                            "V37__public_coop_lobby.sql",
+                            "baa0270d176c5bed3c13b76bcf705b430f4ca4a0aa5ee315f23261012a580d2b"),
+                    Map.entry(
+                            "V38__public_coop_reports.sql",
+                            "63f6a249d96edc6ac8667911b717c9b6b7a8fdc6f38f2cd7c65e6d2ec008af76"),
+                    Map.entry(
+                            "V39__blind_eligibility.sql",
+                            "dd0e83649de49ca6d1262ab3e4ba3d89bbf87546b3157cd5b8827d526f771ca2"),
+                    Map.entry(
+                            "V40__exposure_source_erasure.sql",
+                            "a5773a08a2f56802175dc1730d79749e894ce6bdc238ca6de07e99458aee1a8d"),
+                    Map.entry(
+                            "V41__test_retention_deadlines.sql",
+                            "20ec317a4f687bf024f893c8f7fb6ad5e16534639b6080298a69ce78ef9ce6ef"),
+                    Map.entry(
+                            "V42__public_game_erasure.sql",
+                            "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab"));
 
     private static final List<Entry> ENTRIES =
             validate(
@@ -117,12 +174,31 @@ public final class OriginalSqlCatalog {
                             new Entry("V20__h5_playtest_invitations.sql", sql20()),
                             new Entry("V21__h5_test_hints.sql", sql21()),
                             new Entry("V22__h5_report_result.sql", sql22()),
-                            new Entry("V23__h5_test_job_guard_scope.sql", sql23())));
+                            new Entry("V23__h5_test_job_guard_scope.sql", sql23()),
+                            new Entry("V24__member_password_reset.sql", sql24()),
+                            new Entry("V25__member_recent_verification.sql", sql25()),
+                            new Entry("V26__member_erasure.sql", sql26()),
+                            new Entry("V27__general_execution.sql", sql27()),
+                            new Entry("V28__general_execution_actions.sql", sql28()),
+                            new Entry("V29__game_grading_source.sql", sql29()),
+                            new Entry("V30__public_game_admission.sql", sql30()),
+                            new Entry("V31__game_report_actions.sql", sql31()),
+                            new Entry("V32__dual_release_evidence.sql", sql32()),
+                            new Entry("V33__qualification_report_actions.sql", sql33()),
+                            new Entry("V34__story_release_actions.sql", sql34()),
+                            new Entry("V35__public_play_records.sql", sql35()),
+                            new Entry("V36__game_lifecycle_and_hints.sql", sql36()),
+                            new Entry("V37__public_coop_lobby.sql", sql37()),
+                            new Entry("V38__public_coop_reports.sql", sql38()),
+                            new Entry("V39__blind_eligibility.sql", sql39()),
+                            new Entry("V40__exposure_source_erasure.sql", sql40()),
+                            new Entry("V41__test_retention_deadlines.sql", sql41()),
+                            new Entry("V42__public_game_erasure.sql", sql42())));
 
     /**
      * 완전성과 이름·바이트 해시가 검증된 원본 전체를 반환한다.
      *
-     * @return 수정 불가능한 전체 23개 원본 목록
+     * @return 수정 불가능한 전체 42개 원본 목록
      */
     public static List<Entry> entries() {
         return ENTRIES;
@@ -150,6 +226,560 @@ public final class OriginalSqlCatalog {
             }
         }
         return List.copyOf(entries);
+    }
+
+    /** V26 원본의 정확한 UTF-8 본문과 마지막 LF를 반환한다. */
+    private static String sql26() {
+        return """
+        -- 회원 파기 접수와 고정 테이블의 물리 파기. 운영 권한 분리와 생산자 쓰기 울타리는 별도 배포 계약이다.
+        -- 기존 REAUTH 인증의 소유권·시각·불변성 검사는 유지하고 목적·결과의 닫힌 집합만 확장한다.
+        ALTER TABLE public.member_flow DROP CONSTRAINT ck_mf_binding;
+        ALTER TABLE public.member_flow ADD CONSTRAINT ck_mf_binding CHECK (
+          (purpose IN ('SIGNUP','RESET') AND member_id IS NULL AND identity_id IS NULL AND auth_rev IS NULL AND session_id IS NULL AND reauth_purpose IS NULL) OR
+          (purpose='RESET' AND member_id IS NOT NULL AND identity_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0 AND session_id IS NULL AND reauth_purpose IS NULL) OR
+          (purpose='REAUTH' AND member_id IS NOT NULL AND identity_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0 AND session_id IS NOT NULL AND reauth_purpose IS NOT NULL AND reauth_purpose IN ('PASSWORD_CHANGE','LOGOUT_ALL','DELETE_ACCOUNT')));
+        ALTER TABLE public.member_auth_audit DROP CONSTRAINT ck_maa_action;
+        ALTER TABLE public.member_auth_audit ADD CONSTRAINT ck_maa_action CHECK (action IN ('SIGNUP_START','EMAIL_VERIFY','SIGNUP_COMPLETE','LOGIN_LOCAL','REFRESH','LOGOUT','ME_READ','RESET_START','RESET_COMPLETE','REAUTH_LOCAL','PASSWORD_CHANGE','LOGOUT_ALL','DELETE_ACCOUNT'));
+        ALTER TABLE public.member_auth_audit DROP CONSTRAINT ck_maa_result;
+        ALTER TABLE public.member_auth_audit ADD CONSTRAINT ck_maa_result CHECK (result_code IN ('STARTED','VERIFIED','CREATED','AUTHENTICATED','ROTATED','LOGGED_OUT','DENIED','RATE_LIMITED','FLOW_EXPIRED','FLOW_LOCKED','IDENTITY_CONFLICT','REFRESH_REUSED','DEPENDENCY_UNAVAILABLE','PASSWORD_RESET','PASSWORD_CHANGED','ACCOUNT_DELETED'));
+        ALTER TABLE public.member_auth_limit DROP CONSTRAINT ck_mal_scope;
+        ALTER TABLE public.member_auth_limit ADD CONSTRAINT ck_mal_scope CHECK (scope IN ('SIGNUP_EMAIL_15M','SIGNUP_EMAIL_24H','SIGNUP_SOURCE_15M','LOGIN_EMAIL_15M','LOGIN_SOURCE_15M','VERIFY_SOURCE_15M','RESET_EMAIL_15M','RESET_EMAIL_24H','RESET_SOURCE_15M','REAUTH_MEMBER_15M','REAUTH_SOURCE_15M','ERASE_STATUS_SOURCE_15M'));
+
+        CREATE TABLE public.privacy_erase (
+          id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          erase_key uuid NOT NULL UNIQUE,
+          scope varchar(24) NOT NULL DEFAULT 'ACCOUNT' CHECK (scope='ACCOUNT'),
+          member_id bigint REFERENCES public.member_account(id) ON DELETE SET NULL NOT DEFERRABLE,
+          policy_id bigint NOT NULL REFERENCES public.privacy_policy(id) NOT DEFERRABLE,
+          state varchar(24) NOT NULL DEFAULT 'REQUESTED' CHECK (state IN ('REQUESTED','PROCESSING','WAITING','COMPLETE','FAILED')),
+          reason_code varchar(40) NOT NULL CHECK (reason_code ~ '^[A-Z0-9_]{1,40}$'),
+          locator_cipher bytea NOT NULL CHECK (octet_length(locator_cipher) BETWEEN 32 AND 524288),
+          receipt_hash char(64) CHECK (receipt_hash IS NULL OR receipt_hash ~ '^[0-9a-f]{64}$'),
+          receipt_until timestamptz,
+          created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+          blocked_at timestamptz,
+          primary_done_at timestamptz,
+          external_done_at timestamptz,
+          backup_until timestamptz,
+          completed_at timestamptz,
+          sealed_at timestamptz,
+          target_count integer CHECK (target_count IS NULL OR target_count >= 3),
+          CONSTRAINT ck_pe_receipt CHECK ((receipt_hash IS NULL)=(receipt_until IS NULL) AND (receipt_until IS NULL OR receipt_until<=created_at+interval '90 days')),
+          CONSTRAINT ck_pe_backup CHECK (backup_until IS NULL OR (backup_until>=created_at AND backup_until<=created_at+interval '35 days')),
+          CONSTRAINT ck_pe_seal CHECK ((sealed_at IS NULL)=(target_count IS NULL)),
+          CONSTRAINT ck_pe_done CHECK (completed_at IS NULL OR (primary_done_at IS NOT NULL AND external_done_at IS NOT NULL AND backup_until IS NOT NULL AND state='COMPLETE'))
+        );
+        CREATE UNIQUE INDEX uk_pe_live_member ON public.privacy_erase(member_id) WHERE member_id IS NOT NULL;
+
+        CREATE TABLE public.privacy_target (
+          id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          erase_id bigint NOT NULL REFERENCES public.privacy_erase(id) NOT DEFERRABLE,
+          target_key uuid NOT NULL UNIQUE,
+          kind varchar(24) NOT NULL CHECK (kind IN ('PRIMARY','PROCESSOR','BACKUP','RESTORE_GUARD')),
+          state varchar(24) NOT NULL DEFAULT 'PENDING' CHECK (state IN ('PENDING','RUNNING','RETRY','COMPLETE','FAILED')),
+          member_id bigint REFERENCES public.member_account(id) ON DELETE SET NULL NOT DEFERRABLE,
+          test_id bigint REFERENCES public.play_test(id) ON DELETE SET NULL NOT DEFERRABLE,
+          dependency_id bigint REFERENCES public.privacy_target(id) NOT DEFERRABLE,
+          source_job_id bigint,
+          source_attempt_no smallint,
+          locator_cipher bytea CHECK (locator_cipher IS NULL OR octet_length(locator_cipher) BETWEEN 32 AND 524288),
+          lookup_hash char(64) CHECK (lookup_hash IS NULL OR lookup_hash ~ '^[0-9a-f]{64}$'),
+          attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count>=0),
+          lease_gen bigint NOT NULL DEFAULT 0 CHECK (lease_gen>=0),
+          lease_until timestamptz,
+          next_run_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+          result_code varchar(40) CHECK (result_code IS NULL OR result_code ~ '^[A-Z0-9_]{1,40}$'),
+          confirmed_at timestamptz,
+          CONSTRAINT fk_pt_attempt FOREIGN KEY (source_job_id,source_attempt_no)
+            REFERENCES public.grade_attempt(job_id,attempt_no) ON DELETE SET NULL NOT DEFERRABLE,
+          CONSTRAINT ck_pt_live CHECK (kind<>'PRIMARY' OR (member_id IS NULL OR test_id IS NULL)),
+          CONSTRAINT ck_pt_dependency CHECK (dependency_id IS NULL OR (kind='PRIMARY' AND member_id IS NULL)),
+          CONSTRAINT ck_pt_complete CHECK ((state='COMPLETE')=(confirmed_at IS NOT NULL) AND
+            (state<>'COMPLETE' OR (member_id IS NULL AND test_id IS NULL AND locator_cipher IS NULL AND lookup_hash IS NULL))),
+          CONSTRAINT ck_pt_lease CHECK ((state='RUNNING')=(lease_until IS NOT NULL)),
+          CONSTRAINT ck_pt_external CHECK (kind='PRIMARY' OR (member_id IS NULL AND test_id IS NULL)),
+          CONSTRAINT ck_pt_attempt CHECK ((kind='PROCESSOR' AND (source_job_id IS NULL)=(source_attempt_no IS NULL))
+            OR (kind<>'PROCESSOR' AND source_job_id IS NULL AND source_attempt_no IS NULL))
+        );
+        CREATE UNIQUE INDEX uk_pt_primary_member ON public.privacy_target(erase_id) WHERE kind='PRIMARY' AND member_id IS NOT NULL;
+        CREATE UNIQUE INDEX uk_pt_primary_test ON public.privacy_target(erase_id,test_id) WHERE kind='PRIMARY' AND test_id IS NOT NULL;
+        CREATE UNIQUE INDEX uk_pt_canonical_test ON public.privacy_target(test_id)
+          WHERE kind='PRIMARY' AND test_id IS NOT NULL AND dependency_id IS NULL;
+        CREATE UNIQUE INDEX uk_pt_processor_lookup ON public.privacy_target(erase_id,lookup_hash) WHERE kind='PROCESSOR' AND lookup_hash IS NOT NULL;
+        CREATE UNIQUE INDEX uk_pt_processor_attempt ON public.privacy_target(erase_id,source_job_id,source_attempt_no)
+          WHERE kind='PROCESSOR' AND source_job_id IS NOT NULL;
+
+        -- 실재 회원 관계와 봉인된 명세를 확인한다. 봉인 뒤에는 대상 추가와 소유권 변경을 거부한다.
+        CREATE FUNCTION public.guard_privacy_erase() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE n integer;
+        BEGIN
+          IF TG_OP='INSERT' THEN
+            IF NEW.state<>'REQUESTED' OR NEW.primary_done_at IS NOT NULL OR NEW.external_done_at IS NOT NULL
+              OR NEW.completed_at IS NOT NULL OR NEW.sealed_at IS NOT NULL OR NEW.target_count IS NOT NULL
+              OR NEW.member_id IS NULL OR NOT EXISTS
+              (SELECT 1 FROM public.member_profile p JOIN public.privacy_policy policy ON policy.id=p.policy_id
+               WHERE p.member_id=NEW.member_id AND p.policy_id=NEW.policy_id AND policy.scope='MEMBER_AUTH') THEN
+              RAISE EXCEPTION 'invalid erasure owner or policy' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF TG_OP='DELETE' OR TG_OP='TRUNCATE' THEN
+            RAISE EXCEPTION 'erasure receipt immutable' USING ERRCODE='42501';
+          END IF;
+          IF ROW(NEW.id,NEW.erase_key,NEW.scope,NEW.policy_id,NEW.reason_code,NEW.locator_cipher,NEW.created_at)
+             IS DISTINCT FROM ROW(OLD.id,OLD.erase_key,OLD.scope,OLD.policy_id,OLD.reason_code,OLD.locator_cipher,OLD.created_at)
+             OR (OLD.member_id IS NULL AND NEW.member_id IS NOT NULL)
+             OR (OLD.member_id IS NOT NULL AND NEW.member_id IS DISTINCT FROM OLD.member_id AND
+                 (NEW.member_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.member_account WHERE id=OLD.member_id)))
+             OR (OLD.sealed_at IS NOT NULL AND ROW(NEW.sealed_at,NEW.target_count) IS DISTINCT FROM ROW(OLD.sealed_at,OLD.target_count))
+             OR (OLD.blocked_at IS NOT NULL AND NEW.blocked_at IS DISTINCT FROM OLD.blocked_at)
+             OR (OLD.blocked_at IS NULL AND NEW.blocked_at IS NOT NULL AND NEW.blocked_at<OLD.created_at)
+             OR (OLD.primary_done_at IS NOT NULL AND NEW.primary_done_at IS DISTINCT FROM OLD.primary_done_at)
+             OR (OLD.receipt_hash IS NOT NULL AND ROW(NEW.receipt_hash,NEW.receipt_until) IS DISTINCT FROM ROW(OLD.receipt_hash,OLD.receipt_until)) THEN
+            RAISE EXCEPTION 'erasure binding immutable' USING ERRCODE='42501';
+          END IF;
+          IF NEW.state='COMPLETE' OR NEW.external_done_at IS NOT NULL OR NEW.completed_at IS NOT NULL THEN
+            RAISE EXCEPTION 'external completion requires separate proof path' USING ERRCODE='42501';
+          END IF;
+          IF NEW.primary_done_at IS NOT NULL AND OLD.primary_done_at IS NULL AND
+             (NEW.member_id IS NOT NULL OR EXISTS
+               (SELECT 1 FROM public.privacy_target WHERE erase_id=NEW.id AND kind='PRIMARY' AND state<>'COMPLETE')) THEN
+            RAISE EXCEPTION 'primary receipt requires physical completion' USING ERRCODE='23514';
+          END IF;
+          IF OLD.sealed_at IS NULL AND NEW.sealed_at IS NOT NULL THEN
+            SELECT count(*) INTO n FROM public.privacy_target WHERE erase_id=OLD.id;
+            IF NEW.blocked_at IS NULL OR NEW.blocked_at<OLD.created_at OR NOT EXISTS
+               (SELECT 1 FROM public.member_account WHERE id=OLD.member_id AND state='DELETED')
+               OR NEW.target_count IS DISTINCT FROM n OR NEW.target_count<3 OR EXISTS (
+               SELECT 1 FROM public.test_member tm WHERE tm.member_id=OLD.member_id AND NOT EXISTS
+                 (SELECT 1 FROM public.privacy_target pt WHERE pt.erase_id=OLD.id AND pt.kind='PRIMARY' AND pt.test_id=tm.test_id)) OR NOT EXISTS
+               (SELECT 1 FROM public.privacy_target WHERE erase_id=OLD.id AND kind='PRIMARY' AND member_id=OLD.member_id)
+               OR NOT EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=OLD.id AND kind='BACKUP')
+               OR NOT EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=OLD.id AND kind='RESTORE_GUARD') THEN
+              RAISE EXCEPTION 'erasure manifest incomplete' USING ERRCODE='23514';
+            END IF;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER tr_privacy_erase_row BEFORE INSERT OR UPDATE OR DELETE ON public.privacy_erase FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_erase();
+        CREATE TRIGGER tr_privacy_erase_truncate BEFORE TRUNCATE ON public.privacy_erase FOR EACH STATEMENT EXECUTE FUNCTION public.guard_privacy_erase();
+
+        -- 의존 영수증 확인은 소비 함수 소유자의 실제 실행 및 RUNNING 행에만 허용한다.
+        CREATE FUNCTION public.privacy_primary_dependency_allowed(target_id bigint) RETURNS boolean
+        LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+          SELECT current_user=pg_catalog.pg_get_userbyid(p.proowner) AND EXISTS (
+            SELECT 1 FROM public.privacy_target t JOIN public.privacy_erase e ON e.id=t.erase_id
+            JOIN public.privacy_target canonical ON canonical.id=t.dependency_id
+            WHERE t.id=target_id AND t.kind='PRIMARY' AND t.state='RUNNING'
+              AND e.sealed_at IS NOT NULL AND canonical.kind='PRIMARY'
+              AND canonical.dependency_id IS NULL AND canonical.state='COMPLETE'
+              AND canonical.confirmed_at IS NOT NULL AND canonical.test_id IS NULL
+              AND canonical.result_code='PHYSICAL_REMOVED'
+          ) FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)');
+        $$;
+
+        CREATE FUNCTION public.guard_privacy_target() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE owner_id bigint; sealed timestamptz; attempt_test bigint;
+        BEGIN
+          IF TG_OP='DELETE' OR TG_OP='TRUNCATE' THEN
+            RAISE EXCEPTION 'erasure target immutable' USING ERRCODE='42501';
+          END IF;
+          IF TG_OP='INSERT' THEN
+            SELECT member_id,sealed_at INTO owner_id,sealed FROM public.privacy_erase WHERE id=NEW.erase_id FOR UPDATE;
+            IF NOT FOUND OR sealed IS NOT NULL OR owner_id IS NULL OR NEW.state<>'PENDING' OR NEW.confirmed_at IS NOT NULL OR (NEW.kind='PRIMARY' AND
+               ((NEW.member_id IS NULL)=(NEW.test_id IS NULL) OR
+                (NEW.member_id IS NOT NULL AND NEW.member_id<>owner_id) OR
+                (NEW.test_id IS NOT NULL AND NOT EXISTS
+                 (SELECT 1 FROM public.test_member WHERE test_id=NEW.test_id AND member_id=owner_id)))) THEN
+              RAISE EXCEPTION 'erasure target ownership invalid' USING ERRCODE='23514';
+            END IF;
+            IF NEW.kind='PROCESSOR' AND (NEW.source_job_id IS NULL OR NEW.source_attempt_no IS NULL
+              OR NEW.locator_cipher IS NULL OR NOT EXISTS (
+                SELECT 1 FROM public.grade_attempt a JOIN public.grade_job j ON j.id=a.job_id
+                JOIN public.test_report r ON r.id=j.report_id JOIN public.test_member tm ON tm.test_id=r.test_id
+                WHERE a.job_id=NEW.source_job_id AND a.attempt_no=NEW.source_attempt_no
+                  AND j.batch_id IS NULL AND tm.member_id=owner_id)) THEN
+              RAISE EXCEPTION 'processor attempt ownership invalid' USING ERRCODE='23514';
+            END IF;
+            IF NEW.dependency_id IS NOT NULL AND (NEW.kind<>'PRIMARY' OR NEW.test_id IS NULL
+              OR NOT EXISTS (SELECT 1 FROM public.privacy_target canonical
+                JOIN public.privacy_erase original ON original.id=canonical.erase_id
+                JOIN public.test_member original_member ON original_member.test_id=NEW.test_id
+                  AND original_member.member_id=original.member_id
+                WHERE canonical.id=NEW.dependency_id AND canonical.kind='PRIMARY'
+                  AND canonical.dependency_id IS NULL AND canonical.test_id=NEW.test_id
+                  AND canonical.erase_id<>NEW.erase_id AND canonical.member_id IS NULL
+                  AND original.member_id<>owner_id)) THEN
+              RAISE EXCEPTION 'canonical test dependency invalid' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF ROW(NEW.id,NEW.erase_id,NEW.target_key,NEW.kind)
+             IS DISTINCT FROM ROW(OLD.id,OLD.erase_id,OLD.target_key,OLD.kind)
+             OR (NEW.lookup_hash IS DISTINCT FROM OLD.lookup_hash AND
+                 (OLD.lookup_hash IS NULL OR NEW.lookup_hash IS NOT NULL OR NEW.state<>'COMPLETE'))
+             OR (ROW(NEW.source_job_id,NEW.source_attempt_no) IS DISTINCT FROM ROW(OLD.source_job_id,OLD.source_attempt_no)
+               AND (NEW.source_job_id IS NOT NULL OR NEW.source_attempt_no IS NOT NULL OR
+                    OLD.source_job_id IS NULL OR OLD.source_attempt_no IS NULL OR
+                    EXISTS (SELECT 1 FROM public.grade_attempt WHERE job_id=OLD.source_job_id AND attempt_no=OLD.source_attempt_no)))
+             OR (OLD.locator_cipher IS NOT NULL AND NEW.locator_cipher IS DISTINCT FROM OLD.locator_cipher
+                 AND (NEW.locator_cipher IS NOT NULL OR NEW.state<>'COMPLETE'))
+             OR (OLD.member_id IS NULL AND NEW.member_id IS NOT NULL)
+             OR (OLD.test_id IS NULL AND NEW.test_id IS NOT NULL)
+             OR (OLD.member_id IS NOT NULL AND NEW.member_id IS DISTINCT FROM OLD.member_id AND
+                 (NEW.member_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.member_account WHERE id=OLD.member_id)))
+             OR (OLD.test_id IS NOT NULL AND NEW.test_id IS DISTINCT FROM OLD.test_id AND
+                 (NEW.test_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.play_test WHERE id=OLD.test_id)))
+             OR (NEW.dependency_id IS DISTINCT FROM OLD.dependency_id AND
+                 (OLD.dependency_id IS NULL OR NEW.dependency_id IS NOT NULL OR NEW.state<>'COMPLETE'
+                  OR NOT EXISTS (SELECT 1 FROM public.privacy_target canonical
+                                 WHERE canonical.id=OLD.dependency_id AND canonical.state='COMPLETE'
+                                   AND canonical.confirmed_at IS NOT NULL)))
+             OR (OLD.state='COMPLETE' AND NEW IS DISTINCT FROM OLD) THEN
+            RAISE EXCEPTION 'erasure target binding immutable' USING ERRCODE='42501';
+          END IF;
+          IF NEW.kind<>'PRIMARY' AND NEW.state='COMPLETE' THEN
+            RAISE EXCEPTION 'external target confirmation unavailable' USING ERRCODE='42501';
+          END IF;
+          IF NEW.kind='PRIMARY' AND OLD.state<>'COMPLETE' AND NEW.state='COMPLETE' THEN
+            IF current_user<>pg_catalog.pg_get_userbyid(
+                 (SELECT proowner FROM pg_catalog.pg_proc WHERE oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)')))
+              OR OLD.state<>'RUNNING' OR OLD.lease_until IS NULL OR OLD.lease_until<=clock_timestamp()
+              OR NEW.lease_until IS NOT NULL OR NEW.confirmed_at IS NULL
+              OR NOT EXISTS (SELECT 1 FROM public.privacy_erase e WHERE e.id=OLD.erase_id
+                AND e.sealed_at IS NOT NULL AND e.blocked_at IS NOT NULL
+                AND e.state IN ('PROCESSING','WAITING')
+                AND (e.member_id IS NULL OR EXISTS
+                  (SELECT 1 FROM public.member_account m WHERE m.id=e.member_id AND m.state='DELETED')))
+              OR (OLD.dependency_id IS NOT NULL AND (NEW.dependency_id IS NOT NULL
+                  OR NEW.result_code IS DISTINCT FROM 'DEPENDENCY_CONFIRMED'
+                  OR NOT public.privacy_primary_dependency_allowed(OLD.id)))
+              OR (OLD.dependency_id IS NULL AND (NEW.dependency_id IS NOT NULL
+                  OR NEW.result_code IS DISTINCT FROM 'PHYSICAL_REMOVED'
+                  OR OLD.member_id IS NOT NULL OR OLD.test_id IS NOT NULL)) THEN
+              RAISE EXCEPTION 'primary completion unauthorized' USING ERRCODE='42501';
+            END IF;
+          END IF;
+          IF OLD.dependency_id IS NOT NULL AND NEW.dependency_id IS NULL AND
+             (NEW.test_id IS NOT NULL OR NOT public.privacy_primary_dependency_allowed(OLD.id)) THEN
+            RAISE EXCEPTION 'dependent confirmation unauthorized' USING ERRCODE='42501';
+          END IF;
+          IF OLD.source_job_id IS NOT NULL AND NEW.source_job_id IS NULL THEN
+            SELECT r.test_id INTO attempt_test FROM public.grade_job j JOIN public.test_report r ON r.id=j.report_id
+              WHERE j.id=OLD.source_job_id AND j.batch_id IS NULL;
+            IF attempt_test IS NULL OR NOT public.privacy_primary_delete_allowed(NULL,attempt_test) THEN
+              RAISE EXCEPTION 'processor attempt detachment unauthorized' USING ERRCODE='42501';
+            END IF;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER tr_privacy_target_row BEFORE INSERT OR UPDATE OR DELETE ON public.privacy_target FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_target();
+        CREATE TRIGGER tr_privacy_target_truncate BEFORE TRUNCATE ON public.privacy_target FOR EACH STATEMENT EXECUTE FUNCTION public.guard_privacy_target();
+
+        -- 트리거는 호출자 권한으로 실행한다. 소비 함수의 실제 소유자만 실재 RUNNING 대상을 사용할 수 있다.
+        CREATE FUNCTION public.privacy_primary_delete_allowed(owner_member bigint, owner_test bigint) RETURNS boolean
+        LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+          SELECT current_user=pg_catalog.pg_get_userbyid(p.proowner) AND EXISTS (
+            SELECT 1 FROM public.privacy_target t JOIN public.privacy_erase e ON e.id=t.erase_id
+            WHERE t.kind='PRIMARY' AND t.state='RUNNING' AND e.sealed_at IS NOT NULL
+              AND ((owner_test IS NOT NULL AND t.test_id=owner_test)
+                OR (owner_member IS NOT NULL AND t.member_id=owner_member AND e.member_id=owner_member))
+          ) FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)');
+        $$;
+        CREATE FUNCTION public.guard_privacy_primary_delete() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE m bigint; t bigint;
+        BEGIN
+          IF TG_TABLE_NAME='access_history' THEN
+            IF OLD.actor_kind='MEMBER' THEN
+              SELECT id INTO m FROM public.member_account WHERE member_key=OLD.actor_key;
+              SELECT p.id INTO t FROM public.test_audit a JOIN public.play_test p
+                ON a.scope_key IN ('test:'||p.test_key::text,'test:'||p.id::text)
+                WHERE a.request_id=OLD.request_id AND a.scope_kind IN ('TEST','PLAYTEST') LIMIT 1;
+            END IF;
+          ELSIF TG_TABLE_NAME='member_account' THEN
+            m := OLD.id;
+          ELSIF TG_TABLE_NAME IN ('member_auth_audit','test_exposure','member_profile','member_identity','member_session','member_flow') THEN
+            m := OLD.member_id;
+          ELSIF TG_TABLE_NAME='member_token' THEN
+            SELECT member_id INTO m FROM public.member_session WHERE id=OLD.session_id;
+          ELSIF TG_TABLE_NAME='grade_job' THEN
+            SELECT test_id INTO t FROM public.test_report WHERE id=OLD.report_id AND OLD.batch_id IS NULL;
+          ELSIF TG_TABLE_NAME IN ('grade_attempt','grade_event') THEN
+            SELECT r.test_id INTO t FROM public.grade_job j JOIN public.test_report r ON r.id=j.report_id
+              WHERE j.id=OLD.job_id AND j.batch_id IS NULL;
+          ELSIF TG_TABLE_NAME='test_action' THEN
+            m := OLD.member_id;
+            IF OLD.scope_key LIKE 'test:%' THEN
+              SELECT id INTO t FROM public.play_test WHERE OLD.scope_key IN ('test:'||test_key::text,'test:'||id::text);
+            END IF;
+            IF OLD.action='INVITATION_CREATE' THEN
+              SELECT id INTO t FROM public.play_test WHERE test_key::text=OLD.result_data->>'testKey';
+            END IF;
+          ELSIF TG_TABLE_NAME='test_audit' THEN
+            IF OLD.scope_kind IN ('TEST','PLAYTEST') THEN
+              SELECT id INTO t FROM public.play_test WHERE OLD.scope_key IN ('test:'||test_key::text,'test:'||id::text);
+            END IF;
+            IF OLD.actor_kind='MEMBER' THEN
+              SELECT id INTO m FROM public.member_account WHERE member_key::text=OLD.actor_ref;
+            END IF;
+          ELSIF TG_TABLE_NAME='play_test' THEN
+            t := OLD.id;
+          ELSIF TG_TABLE_NAME IN ('test_member','test_hint','test_retention','test_report') THEN
+            t := OLD.test_id;
+          END IF;
+          IF TG_TABLE_NAME IN ('member_profile','member_identity','member_session','member_token','member_flow',
+               'grade_job','grade_attempt','grade_event','access_history','test_hint','test_retention','play_test')
+             AND NOT EXISTS (SELECT 1 FROM public.privacy_target pt JOIN public.privacy_erase pe ON pe.id=pt.erase_id
+               WHERE pt.kind='PRIMARY' AND pe.sealed_at IS NOT NULL AND pt.state='RUNNING'
+                 AND ((m IS NOT NULL AND pt.member_id=m AND pe.member_id=m) OR (t IS NOT NULL AND pt.test_id=t))) THEN
+            RETURN OLD;
+          END IF;
+          IF TG_TABLE_NAME='test_member' THEN
+            IF OLD.accepted_at IS NULL AND NOT EXISTS
+               (SELECT 1 FROM public.privacy_target pt WHERE pt.kind='PRIMARY' AND pt.test_id=t AND pt.state='RUNNING') THEN
+              RETURN OLD;
+            END IF;
+          END IF;
+          IF NOT public.privacy_primary_delete_allowed(m,t) THEN
+            RAISE EXCEPTION 'primary deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+        END;
+        $$;
+
+        -- 기존 문장 단위 거부는 UPDATE/TRUNCATE에만 남기고 DELETE는 행별로 검사한다.
+        DROP TRIGGER tr_test_action_immutable ON public.test_action;
+        DROP TRIGGER tr_test_audit_immutable ON public.test_audit;
+        CREATE TRIGGER tr_test_action_immutable BEFORE UPDATE OR TRUNCATE ON public.test_action FOR EACH STATEMENT EXECUTE FUNCTION public.reject_batch_history_mutation();
+        CREATE TRIGGER tr_test_audit_immutable BEFORE UPDATE OR TRUNCATE ON public.test_audit FOR EACH STATEMENT EXECUTE FUNCTION public.reject_batch_history_mutation();
+        CREATE TRIGGER tr_test_action_erase BEFORE DELETE ON public.test_action FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_test_audit_erase BEFORE DELETE ON public.test_audit FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        DROP TRIGGER trg_local_auth_audit_row ON public.member_auth_audit;
+        CREATE TRIGGER trg_local_auth_audit_row BEFORE UPDATE ON public.member_auth_audit FOR EACH ROW EXECUTE FUNCTION public.guard_local_auth_audit();
+        CREATE TRIGGER tr_member_auth_audit_erase BEFORE DELETE ON public.member_auth_audit FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        DROP TRIGGER trg_test_exposure_row ON public.test_exposure;
+        CREATE TRIGGER trg_test_exposure_row BEFORE UPDATE ON public.test_exposure FOR EACH ROW EXECUTE FUNCTION public.guard_test_exposure();
+        CREATE TRIGGER tr_test_exposure_erase BEFORE DELETE ON public.test_exposure FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        DROP TRIGGER trg_playtest_acceptance ON public.test_member;
+        CREATE TRIGGER trg_playtest_acceptance BEFORE INSERT OR UPDATE ON public.test_member FOR EACH ROW EXECUTE FUNCTION public.guard_playtest_acceptance();
+        CREATE TRIGGER tr_test_member_erase BEFORE DELETE ON public.test_member FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        DROP TRIGGER trg_test_report ON public.test_report;
+        CREATE TRIGGER trg_test_report BEFORE INSERT OR UPDATE ON public.test_report FOR EACH ROW EXECUTE FUNCTION public.guard_test_report();
+        CREATE TRIGGER tr_test_report_erase BEFORE DELETE ON public.test_report FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_test_hint_erase BEFORE DELETE ON public.test_hint FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_test_retention_erase BEFORE DELETE ON public.test_retention FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_play_test_erase BEFORE DELETE ON public.play_test FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_member_account_erase BEFORE DELETE ON public.member_account FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_member_profile_erase BEFORE DELETE ON public.member_profile FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_member_identity_erase BEFORE DELETE ON public.member_identity FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_member_session_erase BEFORE DELETE ON public.member_session FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_member_token_erase BEFORE DELETE ON public.member_token FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_member_flow_erase BEFORE DELETE ON public.member_flow FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_access_history_erase BEFORE DELETE ON public.access_history FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_grade_job_erase BEFORE DELETE ON public.grade_job FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_grade_attempt_erase BEFORE DELETE ON public.grade_attempt FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+        CREATE TRIGGER tr_grade_event_erase BEFORE DELETE ON public.grade_event FOR EACH ROW EXECUTE FUNCTION public.guard_privacy_primary_delete();
+
+        -- 입력은 봉인된 실제 대상 ID 하나다. 실패하면 예외로 전체 트랜잭션을 되돌린다.
+        CREATE FUNCTION public.consume_privacy_primary(target_id bigint) RETURNS boolean
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+        DECLARE target_row public.privacy_target%ROWTYPE; root_row public.privacy_erase%ROWTYPE; source_member bigint; source_test bigint; test_key uuid;
+        BEGIN
+          SELECT e.* INTO root_row FROM public.privacy_erase e JOIN public.privacy_target t ON t.erase_id=e.id
+            WHERE t.id=target_id FOR UPDATE OF e;
+          IF NOT FOUND THEN RETURN false; END IF;
+          SELECT * INTO target_row FROM public.privacy_target WHERE id=target_id AND erase_id=root_row.id FOR UPDATE;
+          IF NOT FOUND OR target_row.kind<>'PRIMARY' THEN RETURN false; END IF;
+          IF target_row.state='COMPLETE' THEN RETURN target_row.confirmed_at IS NOT NULL; END IF;
+          IF target_row.state<>'RUNNING' OR root_row.sealed_at IS NULL OR root_row.state NOT IN ('PROCESSING','WAITING')
+            OR target_row.lease_until IS NULL OR target_row.lease_until<=clock_timestamp() OR root_row.blocked_at IS NULL
+            OR root_row.target_count IS DISTINCT FROM (SELECT count(*) FROM public.privacy_target WHERE erase_id=root_row.id)
+            OR NOT EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=root_row.id AND kind='BACKUP')
+            OR NOT EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=root_row.id AND kind='RESTORE_GUARD') THEN
+            RAISE EXCEPTION 'primary manifest or lease invalid' USING ERRCODE='23514';
+          END IF;
+          source_member:=root_row.member_id;
+          IF source_member IS NULL THEN RAISE EXCEPTION 'source owner unavailable' USING ERRCODE='23514'; END IF;
+          IF target_row.dependency_id IS NOT NULL THEN
+            IF target_row.test_id IS NOT NULL OR NOT public.privacy_primary_dependency_allowed(target_id)
+              OR EXISTS (SELECT 1 FROM public.play_test p JOIN public.privacy_target canonical
+                ON canonical.id=target_row.dependency_id WHERE p.id=canonical.test_id)
+              OR NOT EXISTS (SELECT 1 FROM public.member_account WHERE id=source_member AND state='DELETED') THEN
+              RAISE EXCEPTION 'canonical physical receipt unavailable' USING ERRCODE='23514';
+            END IF;
+            UPDATE public.privacy_target SET state='COMPLETE',dependency_id=NULL,locator_cipher=NULL,
+              lookup_hash=NULL,confirmed_at=clock_timestamp(),result_code='DEPENDENCY_CONFIRMED',lease_until=NULL
+              WHERE id=target_id;
+          ELSIF target_row.test_id IS NOT NULL THEN
+            source_test:=target_row.test_id;
+            PERFORM 1 FROM public.member_account WHERE id IN
+              (SELECT member_id FROM public.test_member WHERE test_id=source_test) ORDER BY id FOR UPDATE;
+            PERFORM 1 FROM public.member_account WHERE id=source_member AND state='DELETED';
+            IF NOT FOUND THEN RAISE EXCEPTION 'source account not deleted' USING ERRCODE='23514'; END IF;
+            PERFORM 1 FROM public.play_test WHERE id=source_test FOR UPDATE;
+            IF NOT FOUND OR NOT EXISTS (SELECT 1 FROM public.test_member WHERE test_id=source_test AND member_id=source_member) THEN
+              RAISE EXCEPTION 'test membership missing' USING ERRCODE='23514';
+            END IF;
+            SELECT p.test_key INTO test_key FROM public.play_test p WHERE p.id=source_test;
+            PERFORM 1 FROM public.test_member WHERE test_id=source_test ORDER BY member_id FOR UPDATE;
+            IF EXISTS (SELECT 1 FROM public.grade_attempt a JOIN public.grade_job j ON j.id=a.job_id
+              JOIN public.test_report r ON r.id=j.report_id WHERE r.test_id=source_test
+              AND NOT EXISTS (SELECT 1 FROM public.privacy_target x WHERE x.erase_id=root_row.id AND x.kind='PROCESSOR'
+                AND x.locator_cipher IS NOT NULL AND x.source_job_id=a.job_id AND x.source_attempt_no=a.attempt_no)) THEN
+              RAISE EXCEPTION 'processor locator not captured' USING ERRCODE='23514';
+            END IF;
+            DELETE FROM public.grade_event e USING public.grade_job j,public.test_report r WHERE e.job_id=j.id AND j.report_id=r.id AND r.test_id=source_test;
+            DELETE FROM public.grade_attempt a USING public.grade_job j,public.test_report r WHERE a.job_id=j.id AND j.report_id=r.id AND r.test_id=source_test;
+            DELETE FROM public.grade_job j USING public.test_report r WHERE j.report_id=r.id AND r.test_id=source_test AND j.batch_id IS NULL;
+            DELETE FROM public.test_report WHERE test_id=source_test;
+            DELETE FROM public.test_hint WHERE test_id=source_test;
+            DELETE FROM public.access_history h WHERE h.actor_kind='MEMBER' AND h.request_id IN
+              (SELECT a.request_id FROM public.test_audit a WHERE a.scope_kind IN ('TEST','PLAYTEST')
+               AND a.scope_key IN ('test:'||test_key::text,'test:'||source_test::text));
+            DELETE FROM public.test_audit WHERE scope_kind IN ('TEST','PLAYTEST') AND scope_key IN ('test:'||test_key::text,'test:'||source_test::text);
+            DELETE FROM public.test_action WHERE scope_key='test:'||test_key::text OR (action='INVITATION_CREATE' AND result_data->>'testKey'=test_key::text);
+            DELETE FROM public.test_member WHERE test_id=source_test;
+            DELETE FROM public.test_retention WHERE test_id=source_test;
+            DELETE FROM public.play_test WHERE id=source_test;
+          ELSIF target_row.member_id=source_member THEN
+            PERFORM 1 FROM public.member_account WHERE id=source_member AND state='DELETED' FOR UPDATE;
+            IF NOT FOUND THEN RAISE EXCEPTION 'source account not deleted' USING ERRCODE='23514'; END IF;
+            IF EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=root_row.id AND kind='PRIMARY'
+              AND (test_id IS NOT NULL OR dependency_id IS NOT NULL) AND state<>'COMPLETE')
+              OR EXISTS (SELECT 1 FROM public.test_member WHERE member_id=source_member) THEN
+              RAISE EXCEPTION 'test primary work outstanding' USING ERRCODE='23514';
+            END IF;
+            DELETE FROM public.member_flow WHERE member_id=source_member;
+            DELETE FROM public.member_token WHERE session_id IN (SELECT id FROM public.member_session WHERE member_id=source_member);
+            DELETE FROM public.member_session WHERE member_id=source_member;
+            DELETE FROM public.member_identity WHERE member_id=source_member;
+            DELETE FROM public.member_profile WHERE member_id=source_member;
+            DELETE FROM public.test_exposure WHERE member_id=source_member;
+            DELETE FROM public.member_auth_audit WHERE member_id=source_member;
+            DELETE FROM public.test_action WHERE member_id=source_member;
+            DELETE FROM public.test_audit WHERE actor_kind='MEMBER' AND actor_ref=(SELECT member_key::text FROM public.member_account WHERE id=source_member);
+            DELETE FROM public.access_history WHERE actor_kind='MEMBER' AND actor_key=(SELECT member_key FROM public.member_account WHERE id=source_member);
+            DELETE FROM public.member_account WHERE id=source_member;
+          ELSE
+            RAISE EXCEPTION 'primary target has no live owner' USING ERRCODE='23514';
+          END IF;
+          IF target_row.dependency_id IS NULL THEN
+            UPDATE public.privacy_target SET state='COMPLETE',locator_cipher=NULL,confirmed_at=clock_timestamp(),result_code='PHYSICAL_REMOVED',lease_until=NULL
+              WHERE id=target_id;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=root_row.id AND kind='PRIMARY' AND state<>'COMPLETE') THEN
+            UPDATE public.privacy_erase SET state='WAITING',primary_done_at=clock_timestamp() WHERE id=root_row.id;
+          END IF;
+          RETURN true;
+        END;
+        $$;
+        REVOKE ALL ON TABLE public.privacy_erase,public.privacy_target FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.consume_privacy_primary(bigint),public.guard_privacy_erase(),public.guard_privacy_target(),public.guard_privacy_primary_delete(),public.privacy_primary_delete_allowed(bigint,bigint),public.privacy_primary_dependency_allowed(bigint) FROM PUBLIC;
+        COMMENT ON FUNCTION public.consume_privacy_primary(bigint) IS '봉인된 RUNNING PRIMARY 대상 ID를 받아 동일 트랜잭션에서 실제 행을 삭제한다. 비회원 실행자에게 별도 EXECUTE를 허가해야 하며 외부·백업 완료는 처리하지 않는다.';
+        """;
+    }
+
+    /** V25 원본의 정확한 UTF-8 본문과 마지막 LF를 반환한다. */
+    private static String sql25() {
+        return """
+        ALTER TABLE public.member_flow
+          ADD COLUMN session_id bigint,
+          ADD COLUMN reauth_purpose varchar(24),
+          ADD CONSTRAINT fk_mf_session FOREIGN KEY (member_id,session_id) REFERENCES public.member_session(member_id,id) NOT DEFERRABLE,
+          DROP CONSTRAINT ck_mf_purpose,
+          ADD CONSTRAINT ck_mf_purpose CHECK (purpose IN ('SIGNUP','RESET','REAUTH')),
+          DROP CONSTRAINT ck_mf_binding,
+          ADD CONSTRAINT ck_mf_binding CHECK (
+            (purpose IN ('SIGNUP','RESET') AND member_id IS NULL AND identity_id IS NULL AND auth_rev IS NULL AND session_id IS NULL AND reauth_purpose IS NULL) OR
+            (purpose='RESET' AND member_id IS NOT NULL AND identity_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0 AND session_id IS NULL AND reauth_purpose IS NULL) OR
+            (purpose='REAUTH' AND member_id IS NOT NULL AND identity_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0 AND session_id IS NOT NULL AND reauth_purpose IS NOT NULL AND reauth_purpose IN ('PASSWORD_CHANGE','LOGOUT_ALL'))),
+          DROP CONSTRAINT ck_mf_clock,
+          ADD CONSTRAINT ck_mf_clock CHECK (attempt_count BETWEEN 0 AND 5 AND
+            ((purpose IN ('SIGNUP','RESET') AND expires_at=created_at+interval '10 minutes') OR
+             (purpose='REAUTH' AND expires_at>created_at AND expires_at<=created_at+interval '5 minutes'))),
+          ADD CONSTRAINT ck_mf_reauth CHECK (purpose<>'REAUTH' OR (state<>'PENDING' AND attempt_count=0 AND verified_at IS NOT NULL AND verified_at=created_at));
+
+        DROP TRIGGER trg_member_email_flow ON public.member_flow;
+        DROP FUNCTION public.guard_member_email_flow();
+        CREATE FUNCTION public.guard_member_flow() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF ROW(NEW.id,NEW.flow_key,NEW.binder_hash,NEW.purpose,NEW.provider,NEW.created_at,NEW.expires_at,NEW.member_id,NEW.identity_id,NEW.auth_rev,NEW.session_id,NEW.reauth_purpose)
+            IS DISTINCT FROM ROW(OLD.id,OLD.flow_key,OLD.binder_hash,OLD.purpose,OLD.provider,OLD.created_at,OLD.expires_at,OLD.member_id,OLD.identity_id,OLD.auth_rev,OLD.session_id,OLD.reauth_purpose)
+            OR NEW.attempt_count<OLD.attempt_count
+            OR NOT (NEW.state=OLD.state OR (OLD.state='PENDING' AND NEW.state IN ('VERIFIED','FAILED')) OR (OLD.state='VERIFIED' AND NEW.state IN ('CONSUMED','FAILED')))
+            OR (OLD.verified_at IS NOT NULL AND NEW.verified_at IS DISTINCT FROM OLD.verified_at)
+            OR (OLD.verified_at IS NULL AND NEW.verified_at IS NOT NULL AND NOT (OLD.state='PENDING' AND NEW.state='VERIFIED'))
+            OR (OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM OLD.consumed_at)
+            OR (NEW.lookup_hash IS NOT NULL AND NEW.lookup_hash IS DISTINCT FROM OLD.lookup_hash)
+            OR (NEW.code_hash IS NOT NULL AND NEW.code_hash IS DISTINCT FROM OLD.code_hash)
+            OR (NEW.proof_cipher IS NOT NULL AND NEW.proof_cipher IS DISTINCT FROM OLD.proof_cipher)
+            OR (OLD.state IN ('FAILED','CONSUMED') AND NEW IS DISTINCT FROM OLD) THEN
+            RAISE EXCEPTION 'member_flow immutable binding and monotonic cleanup' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_member_flow BEFORE UPDATE ON public.member_flow FOR EACH ROW EXECUTE FUNCTION public.guard_member_flow();
+
+        ALTER TABLE public.member_auth_audit
+          DROP CONSTRAINT ck_maa_action,
+          ADD CONSTRAINT ck_maa_action CHECK (action IN ('SIGNUP_START','EMAIL_VERIFY','SIGNUP_COMPLETE','LOGIN_LOCAL','REFRESH','LOGOUT','ME_READ','RESET_START','RESET_COMPLETE','REAUTH_LOCAL','PASSWORD_CHANGE','LOGOUT_ALL')),
+          DROP CONSTRAINT ck_maa_result,
+          ADD CONSTRAINT ck_maa_result CHECK (result_code IN ('STARTED','VERIFIED','CREATED','AUTHENTICATED','ROTATED','LOGGED_OUT','DENIED','RATE_LIMITED','FLOW_EXPIRED','FLOW_LOCKED','IDENTITY_CONFLICT','REFRESH_REUSED','DEPENDENCY_UNAVAILABLE','PASSWORD_RESET','PASSWORD_CHANGED'));
+        ALTER TABLE public.member_auth_limit
+          DROP CONSTRAINT ck_mal_scope,
+          ADD CONSTRAINT ck_mal_scope CHECK (scope IN ('SIGNUP_EMAIL_15M','SIGNUP_EMAIL_24H','SIGNUP_SOURCE_15M','LOGIN_EMAIL_15M','LOGIN_SOURCE_15M','VERIFY_SOURCE_15M','RESET_EMAIL_15M','RESET_EMAIL_24H','RESET_SOURCE_15M','REAUTH_MEMBER_15M','REAUTH_SOURCE_15M'));
+        """;
+    }
+
+    /** V24 원본의 정확한 UTF-8 본문과 마지막 LF를 반환한다. */
+    private static String sql24() {
+        return """
+        ALTER TABLE public.member_flow
+          ADD COLUMN member_id bigint,
+          ADD COLUMN identity_id bigint,
+          ADD COLUMN auth_rev bigint,
+          ADD CONSTRAINT fk_mf_member FOREIGN KEY (member_id) REFERENCES public.member_account(id) NOT DEFERRABLE,
+          ADD CONSTRAINT fk_mf_identity FOREIGN KEY (member_id,identity_id) REFERENCES public.member_identity(member_id,id) NOT DEFERRABLE,
+          DROP CONSTRAINT ck_mf_purpose,
+          ADD CONSTRAINT ck_mf_purpose CHECK (purpose IN ('SIGNUP','RESET')),
+          ADD CONSTRAINT ck_mf_binding CHECK (
+            (member_id IS NULL AND identity_id IS NULL AND auth_rev IS NULL) OR
+            (purpose='RESET' AND member_id IS NOT NULL AND identity_id IS NOT NULL AND auth_rev IS NOT NULL AND auth_rev>=0));
+
+        DROP TRIGGER trg_local_signup_flow ON public.member_flow;
+        DROP FUNCTION public.guard_local_signup_flow();
+        CREATE FUNCTION public.guard_member_email_flow() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF ROW(NEW.id,NEW.flow_key,NEW.binder_hash,NEW.purpose,NEW.provider,NEW.created_at,NEW.expires_at,NEW.member_id,NEW.identity_id,NEW.auth_rev)
+            IS DISTINCT FROM ROW(OLD.id,OLD.flow_key,OLD.binder_hash,OLD.purpose,OLD.provider,OLD.created_at,OLD.expires_at,OLD.member_id,OLD.identity_id,OLD.auth_rev)
+            OR NEW.attempt_count<OLD.attempt_count
+            OR NOT (NEW.state=OLD.state OR (OLD.state='PENDING' AND NEW.state IN ('VERIFIED','FAILED')) OR (OLD.state='VERIFIED' AND NEW.state IN ('CONSUMED','FAILED')))
+            OR (OLD.verified_at IS NOT NULL AND NEW.verified_at IS DISTINCT FROM OLD.verified_at)
+            OR (OLD.verified_at IS NULL AND NEW.verified_at IS NOT NULL AND NOT (OLD.state='PENDING' AND NEW.state='VERIFIED'))
+            OR (OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM OLD.consumed_at)
+            OR (NEW.lookup_hash IS NOT NULL AND NEW.lookup_hash IS DISTINCT FROM OLD.lookup_hash)
+            OR (NEW.code_hash IS NOT NULL AND NEW.code_hash IS DISTINCT FROM OLD.code_hash)
+            OR (NEW.proof_cipher IS NOT NULL AND NEW.proof_cipher IS DISTINCT FROM OLD.proof_cipher)
+            OR (OLD.state IN ('FAILED','CONSUMED') AND NEW IS DISTINCT FROM OLD) THEN
+            RAISE EXCEPTION 'member_flow immutable binding and monotonic cleanup' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_member_email_flow BEFORE UPDATE ON public.member_flow FOR EACH ROW EXECUTE FUNCTION public.guard_member_email_flow();
+
+        ALTER TABLE public.member_auth_audit
+          DROP CONSTRAINT ck_maa_action,
+          ADD CONSTRAINT ck_maa_action CHECK (action IN ('SIGNUP_START','EMAIL_VERIFY','SIGNUP_COMPLETE','LOGIN_LOCAL','REFRESH','LOGOUT','ME_READ','RESET_START','RESET_COMPLETE')),
+          DROP CONSTRAINT ck_maa_result,
+          ADD CONSTRAINT ck_maa_result CHECK (result_code IN ('STARTED','VERIFIED','CREATED','AUTHENTICATED','ROTATED','LOGGED_OUT','DENIED','RATE_LIMITED','FLOW_EXPIRED','FLOW_LOCKED','IDENTITY_CONFLICT','REFRESH_REUSED','DEPENDENCY_UNAVAILABLE','PASSWORD_RESET'));
+        ALTER TABLE public.member_auth_limit
+          DROP CONSTRAINT ck_mal_scope,
+          ADD CONSTRAINT ck_mal_scope CHECK (scope IN ('SIGNUP_EMAIL_15M','SIGNUP_EMAIL_24H','SIGNUP_SOURCE_15M','LOGIN_EMAIL_15M','LOGIN_SOURCE_15M','VERIFY_SOURCE_15M','RESET_EMAIL_15M','RESET_EMAIL_24H','RESET_SOURCE_15M'));
+        """;
     }
 
     /** V1 원본의 공백·이스케이프·마지막 LF를 그대로 반환한다. */
@@ -3404,6 +4034,2873 @@ public final class OriginalSqlCatalog {
           RETURN NEW;
         END;
         $$;
+        """;
+    }
+
+    private static String sql27() {
+        return "-- 일반 실행의 실재 부모 세 개만 설치한다. 공개 진입 및 채점 작업의 권위는 후속 서비스가 검사한다.\n"
+                   + "-- 기존 검수 PLAYTEST 정책은 유지하고 공개 게임 고지만 별도 scope로 받는다.\n"
+                   + "ALTER TABLE public.privacy_policy DROP CONSTRAINT ck_pp_scope;\n"
+                   + "ALTER TABLE public.privacy_policy ADD CONSTRAINT ck_pp_scope CHECK (scope IN"
+                   + " ('MEMBER_AUTH','PLAYTEST','FRIENDLY'));\n"
+                   + "-- 공개 원문은 회원 기록 목적 동안만 보존한다. PLAYTEST 90/365일 보관값을 공개 정책으로 복사하지 않는다.\n"
+                   + "CREATE FUNCTION public.valid_friendly_policy_document(data jsonb, environment"
+                   + " text) RETURNS boolean\n"
+                   + "LANGUAGE plpgsql IMMUTABLE AS $$\n"
+                   + "DECLARE key text; evidence jsonb; normalized jsonb;\n"
+                   + "BEGIN\n"
+                   + "  IF jsonb_typeof(data) IS DISTINCT FROM 'object' OR\n"
+                   + "     data->'retention' IS DISTINCT FROM"
+                   + " '{\"inviteSeconds\":1800,\"lobbySeconds\":1800,\"raw\":\"ACCOUNT_ACTIVE\",\"backupMaxSeconds\":3024000}'::jsonb"
+                   + " OR\n"
+                   + "     jsonb_typeof(data->'evidence') IS DISTINCT FROM 'object' THEN RETURN"
+                   + " false; END IF;\n"
+                   + "  evidence:='{}'::jsonb;\n"
+                   + "  FOR key IN SELECT jsonb_object_keys(data->'evidence') LOOP\n"
+                   + "    IF data->'evidence'->key->>'scope' IS DISTINCT FROM 'FRIENDLY' THEN"
+                   + " RETURN false; END IF;\n"
+                   + "    evidence:=jsonb_set(evidence,ARRAY[key],jsonb_set(data->'evidence'->key,'{scope}','\"PLAYTEST\"'::jsonb));\n"
+                   + "  END LOOP;\n"
+                   + "  normalized:=jsonb_set(jsonb_set(data,'{retention}',\n"
+                   + "    '{\"inviteSeconds\":604800,\"lobbySeconds\":1800,\"resultSeconds\":86400,\"rawSeconds\":7776000,\"selectedSeconds\":31536000,\"backupMaxSeconds\":3024000}'::jsonb),'{evidence}',evidence);\n"
+                   + "  RETURN public.valid_playtest_policy_document(normalized,environment) IS"
+                   + " TRUE;\n"
+                   + "EXCEPTION WHEN invalid_text_representation THEN RETURN false;\n"
+                   + "END; $$;\n"
+                   + "ALTER TABLE public.privacy_policy DROP CONSTRAINT ck_pp_document;\n"
+                   + "ALTER TABLE public.privacy_policy ADD CONSTRAINT ck_pp_document CHECK (\n"
+                   + "  (scope='MEMBER_AUTH' AND"
+                   + " public.valid_local_policy_document(policy_data,env_code) IS TRUE)\n"
+                   + "  OR (scope='PLAYTEST' AND"
+                   + " public.valid_playtest_policy_document(policy_data,env_code) IS TRUE)\n"
+                   + "  OR (scope='FRIENDLY' AND"
+                   + " public.valid_friendly_policy_document(policy_data,env_code) IS TRUE));\n"
+                   + "\n"
+                   + "CREATE TABLE public.game_room (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_game_room PRIMARY"
+                   + " KEY,\n"
+                   + "  room_key uuid NOT NULL CONSTRAINT uk_gr_key UNIQUE,\n"
+                   + "  purpose varchar(32) NOT NULL CHECK (purpose IN"
+                   + " ('PUBLIC','REVIEW_SOLO_QUALIFICATION')),\n"
+                   + "  mode varchar(8) NOT NULL CHECK (mode IN ('SOLO','COOP')),\n"
+                   + "  qualification_kind varchar(12),\n"
+                   + "  reviewer_id bigint REFERENCES public.admin_account(id) NOT DEFERRABLE,\n"
+                   + "  selected_member_id bigint REFERENCES public.member_account(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  story_id bigint NOT NULL,\n"
+                   + "  version_id bigint NOT NULL,\n"
+                   + "  snapshot_id bigint NOT NULL,\n"
+                   + "  runtime_id bigint NOT NULL REFERENCES public.grade_runtime(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  runtime_epoch bigint NOT NULL CHECK (runtime_epoch>=0),\n"
+                   + "  config_hash char(64) NOT NULL CHECK (config_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  rubric_hash char(64) NOT NULL CHECK (rubric_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  policy_id bigint NOT NULL REFERENCES public.privacy_policy(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  play_rev bigint NOT NULL CHECK (play_rev>=0),\n"
+                   + "  rev bigint NOT NULL DEFAULT 0 CHECK (rev>=0),\n"
+                   + "  draft_rev bigint NOT NULL DEFAULT 0 CHECK (draft_rev>=0),\n"
+                   + "  draft_cipher bytea,\n"
+                   + "  draft_hash char(64),\n"
+                   + "  state varchar(12) NOT NULL CHECK (state IN"
+                   + " ('WAITING','RUNNING','ENDED','CANCELLED')),\n"
+                   + "  end_reason varchar(24),\n"
+                   + "  difficulty smallint NOT NULL CHECK (difficulty BETWEEN 1 AND 5),\n"
+                   + "  limit_sec integer NOT NULL CHECK (limit_sec>0),\n"
+                   + "  max_attempts smallint NOT NULL CHECK (max_attempts>0),\n"
+                   + "  max_hints smallint NOT NULL CHECK (max_hints>=0),\n"
+                   + "  role_a varchar(32),\n"
+                   + "  role_b varchar(32),\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  lobby_until timestamptz NOT NULL,\n"
+                   + "  started_at timestamptz,\n"
+                   + "  deadline_at timestamptz,\n"
+                   + "  ended_at timestamptz,\n"
+                   + "  time_basis_at timestamptz,\n"
+                   + "  graded_count smallint NOT NULL DEFAULT 0,\n"
+                   + "  wrong_count smallint NOT NULL DEFAULT 0,\n"
+                   + "  last_base_score smallint,\n"
+                   + "  final_score smallint,\n"
+                   + "  updated_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  CONSTRAINT uk_gr_version UNIQUE (id,version_id),\n"
+                   + "  CONSTRAINT uk_gr_snapshot UNIQUE (id,snapshot_id),\n"
+                   + "  CONSTRAINT fk_gr_story FOREIGN KEY (story_id,version_id) REFERENCES"
+                   + " public.story_version(story_id,id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_gr_snapshot FOREIGN KEY (version_id,snapshot_id) REFERENCES"
+                   + " public.review_snapshot(version_id,id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_gr_pair FOREIGN KEY (version_id,role_a,role_b) REFERENCES"
+                   + " public.story_pair(version_id,role_a,role_b) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_gr_purpose CHECK ((purpose='PUBLIC' AND reviewer_id IS NULL"
+                   + " AND selected_member_id IS NULL AND qualification_kind IS NULL) OR\n"
+                   + "    (purpose='REVIEW_SOLO_QUALIFICATION' AND mode='SOLO' AND reviewer_id IS"
+                   + " NOT NULL AND selected_member_id IS NOT NULL AND qualification_kind IS NOT"
+                   + " NULL AND qualification_kind IN ('BLIND','FUNCTIONAL'))),\n"
+                   + "  CONSTRAINT ck_gr_draft CHECK ((draft_cipher IS NULL AND draft_hash IS NULL)"
+                   + " OR\n"
+                   + "    (draft_cipher IS NOT NULL AND octet_length(draft_cipher) BETWEEN 32 AND"
+                   + " 524288 AND draft_hash IS NOT NULL AND draft_hash ~ '^[0-9a-f]{64}$')),\n"
+                   + "  CONSTRAINT ck_gr_clock CHECK (lobby_until=created_at+interval '30 minutes'"
+                   + " AND\n"
+                   + "    ((state IN ('WAITING','CANCELLED') AND started_at IS NULL AND deadline_at"
+                   + " IS NULL AND role_a IS NULL AND role_b IS NULL) OR\n"
+                   + "     (state IN ('RUNNING','ENDED') AND started_at IS NOT NULL AND"
+                   + " deadline_at=started_at+limit_sec*interval '1 second' AND role_a IS NOT NULL"
+                   + " AND role_b IS NOT NULL))),\n"
+                   + "  CONSTRAINT ck_gr_terminal CHECK (\n"
+                   + "    (state IN ('WAITING','RUNNING') AND end_reason IS NULL AND ended_at IS"
+                   + " NULL AND time_basis_at IS NULL AND final_score IS NULL) OR\n"
+                   + "    (state='CANCELLED' AND end_reason IS NOT NULL AND end_reason IN"
+                   + " ('HOST_LEFT','LOBBY_EXPIRED','ACCOUNT_DELETED') AND ended_at IS NOT NULL AND"
+                   + " time_basis_at IS NULL AND final_score IS NULL) OR\n"
+                   + "    (state='ENDED' AND end_reason IS NOT NULL AND end_reason IN"
+                   + " ('SUCCESS','TIME_LIMIT','ATTEMPTS_EXHAUSTED','FORFEIT','SYSTEM_ERROR','ACCOUNT_DELETED')"
+                   + " AND ended_at IS NOT NULL AND time_basis_at IS NOT NULL AND\n"
+                   + "      ((end_reason IN ('FORFEIT','SYSTEM_ERROR','ACCOUNT_DELETED') AND"
+                   + " final_score IS NULL) OR (end_reason IN"
+                   + " ('SUCCESS','TIME_LIMIT','ATTEMPTS_EXHAUSTED') AND final_score IS NOT NULL"
+                   + " AND final_score BETWEEN 0 AND 100)))),\n"
+                   + "  CONSTRAINT ck_gr_counts CHECK (graded_count BETWEEN 0 AND max_attempts AND"
+                   + " wrong_count BETWEEN 0 AND graded_count AND (last_base_score IS NULL OR"
+                   + " last_base_score BETWEEN 0 AND 100))\n"
+                   + ");\n"
+                   + "CREATE INDEX ix_gr_lobby ON public.game_room(lobby_until,id) WHERE"
+                   + " state='WAITING';\n"
+                   + "CREATE INDEX ix_gr_deadline ON public.game_room(deadline_at,id) WHERE"
+                   + " state='RUNNING';\n"
+                   + "\n"
+                   + "CREATE TABLE public.game_member (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_game_member PRIMARY"
+                   + " KEY,\n"
+                   + "  room_id bigint NOT NULL REFERENCES public.game_room(id) NOT DEFERRABLE,\n"
+                   + "  member_id bigint NOT NULL REFERENCES public.member_account(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  identity_id bigint NOT NULL,\n"
+                   + "  slot smallint NOT NULL CHECK (slot IN (1,2)),\n"
+                   + "  active_yn boolean NOT NULL DEFAULT true,\n"
+                   + "  ready_yn boolean NOT NULL DEFAULT false,\n"
+                   + "  version_id bigint,\n"
+                   + "  role_code varchar(32),\n"
+                   + "  policy_id bigint NOT NULL REFERENCES public.privacy_policy(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  accepted_at timestamptz NOT NULL,\n"
+                   + "  last_seen_at timestamptz,\n"
+                   + "  presence_session_id bigint,\n"
+                   + "  presence_auth_rev bigint,\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  updated_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  CONSTRAINT uk_gm_member UNIQUE (room_id,member_id),\n"
+                   + "  CONSTRAINT fk_gm_identity FOREIGN KEY (member_id,identity_id) REFERENCES"
+                   + " public.member_identity(member_id,id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_gm_version FOREIGN KEY (room_id,version_id) REFERENCES"
+                   + " public.game_room(id,version_id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_gm_role FOREIGN KEY (version_id,role_code) REFERENCES"
+                   + " public.story_role(version_id,code) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_gm_presence FOREIGN KEY (member_id,presence_session_id)"
+                   + " REFERENCES public.member_session(member_id,id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_gm_role CHECK ((version_id IS NULL AND role_code IS NULL) OR"
+                   + " (version_id IS NOT NULL AND role_code IS NOT NULL)),\n"
+                   + "  CONSTRAINT ck_gm_presence CHECK ((last_seen_at IS NULL AND"
+                   + " presence_session_id IS NULL AND presence_auth_rev IS NULL) OR\n"
+                   + "    (last_seen_at IS NOT NULL AND presence_session_id IS NOT NULL AND"
+                   + " presence_auth_rev IS NOT NULL AND presence_auth_rev>=0))\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_gm_active_member ON public.game_member(member_id)"
+                   + " WHERE active_yn;\n"
+                   + "CREATE UNIQUE INDEX uk_gm_active_slot ON public.game_member(room_id,slot)"
+                   + " WHERE active_yn;\n"
+                   + "CREATE UNIQUE INDEX uk_gm_started_slot ON public.game_member(room_id,slot)"
+                   + " WHERE role_code IS NOT NULL;\n"
+                   + "\n"
+                   + "CREATE TABLE public.game_report (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_game_report PRIMARY"
+                   + " KEY,\n"
+                   + "  report_key uuid NOT NULL CONSTRAINT uk_grp_key UNIQUE,\n"
+                   + "  room_id bigint NOT NULL,\n"
+                   + "  snapshot_id bigint NOT NULL,\n"
+                   + "  source_rev bigint NOT NULL CHECK (source_rev>=0),\n"
+                   + "  proposer_id bigint NOT NULL,\n"
+                   + "  accepted_by bigint,\n"
+                   + "  state varchar(16) NOT NULL CHECK (state IN"
+                   + " ('PROPOSED','REJECTED','WITHDRAWN','INVALIDATED','ACCEPTED','GRADED','UNGRADABLE','CANCELLED')),\n"
+                   + "  payload_cipher bytea,\n"
+                   + "  payload_hash char(64),\n"
+                   + "  purged_at timestamptz,\n"
+                   + "  accepted_at timestamptz,\n"
+                   + "  grade_deadline_at timestamptz,\n"
+                   + "  ordinal smallint,\n"
+                   + "  base_score smallint,\n"
+                   + "  success_yn boolean,\n"
+                   + "  score_data jsonb,\n"
+                   + "  graded_at timestamptz,\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  CONSTRAINT uk_grp_snapshot UNIQUE (snapshot_id,id),\n"
+                   + "  CONSTRAINT uk_grp_ordinal UNIQUE (room_id,ordinal),\n"
+                   + "  CONSTRAINT fk_grp_room FOREIGN KEY (room_id,snapshot_id) REFERENCES"
+                   + " public.game_room(id,snapshot_id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_grp_proposer FOREIGN KEY (room_id,proposer_id) REFERENCES"
+                   + " public.game_member(room_id,member_id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_grp_accepter FOREIGN KEY (room_id,accepted_by) REFERENCES"
+                   + " public.game_member(room_id,member_id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT ck_grp_purge CHECK ((payload_cipher IS NOT NULL AND"
+                   + " octet_length(payload_cipher) BETWEEN 32 AND 524288 AND payload_hash IS NOT"
+                   + " NULL AND payload_hash ~ '^[0-9a-f]{64}$' AND purged_at IS NULL) OR\n"
+                   + "    (payload_cipher IS NULL AND payload_hash IS NULL AND purged_at IS NOT"
+                   + " NULL)),\n"
+                   + "  CONSTRAINT ck_grp_accept CHECK (\n"
+                   + "    (state IN ('ACCEPTED','GRADED','UNGRADABLE') AND accepted_at IS NOT NULL"
+                   + " AND grade_deadline_at IS NOT NULL AND grade_deadline_at=accepted_at+interval"
+                   + " '120 seconds' AND accepted_by IS NOT NULL AND ordinal IS NOT NULL AND"
+                   + " ordinal BETWEEN 1 AND 5) OR\n"
+                   + "    (state NOT IN ('ACCEPTED','GRADED','UNGRADABLE') AND accepted_at IS NULL"
+                   + " AND grade_deadline_at IS NULL AND accepted_by IS NULL AND ordinal IS"
+                   + " NULL)),\n"
+                   + "  CONSTRAINT ck_grp_grade CHECK ((state='GRADED' AND base_score IS NOT NULL"
+                   + " AND base_score BETWEEN 0 AND 100 AND success_yn IS NOT NULL AND score_data"
+                   + " IS NOT NULL AND jsonb_typeof(score_data)='object' AND"
+                   + " octet_length(score_data::text)<=131072 AND graded_at IS NOT NULL) OR\n"
+                   + "    (state<>'GRADED' AND base_score IS NULL AND success_yn IS NULL AND"
+                   + " score_data IS NULL AND graded_at IS NULL))\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_grp_pending ON public.game_report(room_id) WHERE state"
+                   + " IN ('PROPOSED','ACCEPTED');\n"
+                   + "\n"
+                   + "-- 쓰기 TX가 잠근 root를 기준으로 부모의 목적·정책·역할/인원수를 검증한다. NULL은 성공으로 취급하지 않는다.\n"
+                   + "CREATE FUNCTION public.guard_general_room() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "DECLARE v public.story_version%ROWTYPE; p public.privacy_policy%ROWTYPE; n"
+                   + " integer; slots integer; roles integer;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'game physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  IF TG_OP='UPDATE' THEN\n"
+                   + "    IF"
+                   + " ROW(NEW.room_key,NEW.purpose,NEW.mode,NEW.qualification_kind,NEW.reviewer_id,NEW.selected_member_id,NEW.story_id,NEW.policy_id,NEW.created_at,\n"
+                   + "     "
+                   + " NEW.runtime_id,NEW.runtime_epoch,NEW.config_hash,NEW.rubric_hash,NEW.difficulty,NEW.limit_sec,NEW.max_attempts,NEW.max_hints)"
+                   + " IS DISTINCT FROM\n"
+                   + "     "
+                   + " ROW(OLD.room_key,OLD.purpose,OLD.mode,OLD.qualification_kind,OLD.reviewer_id,OLD.selected_member_id,OLD.story_id,OLD.policy_id,OLD.created_at,\n"
+                   + "     "
+                   + " OLD.runtime_id,OLD.runtime_epoch,OLD.config_hash,OLD.rubric_hash,OLD.difficulty,OLD.limit_sec,OLD.max_attempts,OLD.max_hints)\n"
+                   + "      OR (OLD.state<>'WAITING' AND"
+                   + " ROW(NEW.version_id,NEW.snapshot_id,NEW.play_rev) IS DISTINCT FROM"
+                   + " ROW(OLD.version_id,OLD.snapshot_id,OLD.play_rev))\n"
+                   + "      OR (OLD.started_at IS NOT NULL AND"
+                   + " ROW(NEW.role_a,NEW.role_b,NEW.started_at,NEW.deadline_at) IS DISTINCT FROM"
+                   + " ROW(OLD.role_a,OLD.role_b,OLD.started_at,OLD.deadline_at))\n"
+                   + "      OR NOT (NEW.state=OLD.state OR (OLD.state='WAITING' AND NEW.state IN"
+                   + " ('RUNNING','CANCELLED')) OR\n"
+                   + "        (OLD.state='RUNNING' AND NEW.state='ENDED')) THEN\n"
+                   + "      RAISE EXCEPTION 'game authority or start pin immutable' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  SELECT * INTO p FROM public.privacy_policy WHERE id=NEW.policy_id;\n"
+                   + "  IF NOT FOUND OR (NEW.purpose='PUBLIC' AND p.scope<>'FRIENDLY') OR\n"
+                   + "    (NEW.purpose='REVIEW_SOLO_QUALIFICATION' AND p.scope<>'PLAYTEST') THEN\n"
+                   + "    RAISE EXCEPTION 'game purpose policy mismatch' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  SELECT * INTO v FROM public.story_version WHERE id=NEW.version_id;\n"
+                   + "  IF NOT FOUND THEN RAISE EXCEPTION 'game version unavailable' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  IF NEW.purpose='REVIEW_SOLO_QUALIFICATION' AND\n"
+                   + "    (v.status<>'REVIEW' OR v.current_snapshot_id IS DISTINCT FROM"
+                   + " NEW.snapshot_id OR\n"
+                   + "     NOT EXISTS (SELECT 1 FROM public.story_access a\n"
+                   + "       JOIN public.admin_account reviewer ON reviewer.id=a.admin_id\n"
+                   + "       JOIN public.admin_credential credential ON"
+                   + " credential.account_id=reviewer.id\n"
+                   + "       WHERE a.story_id=NEW.story_id AND a.admin_id=NEW.reviewer_id AND"
+                   + " a.permission='REVIEW'\n"
+                   + "         AND a.active_yn AND reviewer.active_yn AND reviewer.can_review\n"
+                   + "         AND credential.enrolled_at IS NOT NULL AND"
+                   + " credential.mfa_state='READY')) THEN\n"
+                   + "    RAISE EXCEPTION 'current REVIEW authority required' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF NEW.state IN ('RUNNING','ENDED') AND (TG_OP='INSERT' OR"
+                   + " OLD.state='WAITING') THEN\n"
+                   + "    SELECT count(*),count(DISTINCT slot),count(role_code) INTO n,slots,roles"
+                   + " FROM public.game_member WHERE room_id=NEW.id AND active_yn;\n"
+                   + "    IF n<>(CASE WHEN NEW.mode='SOLO' THEN 1 ELSE 2 END) OR slots<>n OR"
+                   + " roles<>n OR\n"
+                   + "      NOT EXISTS (SELECT 1 FROM public.story_pair WHERE"
+                   + " version_id=NEW.version_id AND role_a=NEW.role_a AND role_b=NEW.role_b AND"
+                   + " active_yn) OR\n"
+                   + "      EXISTS (SELECT 1 FROM public.game_member m WHERE m.room_id=NEW.id AND"
+                   + " m.active_yn AND\n"
+                   + "        (m.version_id IS DISTINCT FROM NEW.version_id OR\n"
+                   + "         (NEW.mode='SOLO' AND (m.slot<>1 OR m.role_code<>NEW.role_a)) OR\n"
+                   + "         (NEW.mode='COOP' AND ((m.slot=1 AND m.role_code<>NEW.role_a) OR"
+                   + " (m.slot=2 AND m.role_code<>NEW.role_b))))) THEN\n"
+                   + "      RAISE EXCEPTION 'game start participants or pair invalid' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_general_room BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.game_room FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_general_room();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_general_member() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "DECLARE r public.game_room%ROWTYPE;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'member physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  SELECT * INTO r FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;\n"
+                   + "  IF NOT FOUND OR (TG_OP='INSERT' AND r.state<>'WAITING') OR\n"
+                   + "    NEW.policy_id IS DISTINCT FROM r.policy_id OR (r.mode='SOLO' AND"
+                   + " NEW.slot<>1) OR\n"
+                   + "    (r.purpose='REVIEW_SOLO_QUALIFICATION' AND NEW.member_id IS DISTINCT FROM"
+                   + " r.selected_member_id) THEN\n"
+                   + "    RAISE EXCEPTION 'member root binding invalid' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  IF TG_OP='UPDATE' AND"
+                   + " (ROW(NEW.room_id,NEW.member_id,NEW.identity_id,NEW.slot,NEW.policy_id,NEW.accepted_at,NEW.created_at)"
+                   + " IS DISTINCT FROM\n"
+                   + "    ROW(OLD.room_id,OLD.member_id,OLD.identity_id,OLD.slot,OLD.policy_id,OLD.accepted_at,OLD.created_at)"
+                   + " OR\n"
+                   + "    (OLD.role_code IS NOT NULL AND ROW(NEW.role_code,NEW.version_id) IS"
+                   + " DISTINCT FROM ROW(OLD.role_code,OLD.version_id))) THEN\n"
+                   + "    RAISE EXCEPTION 'member binding immutable' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  IF NEW.role_code IS NOT NULL AND (NEW.version_id IS DISTINCT FROM"
+                   + " r.version_id OR r.state NOT IN ('WAITING','RUNNING','ENDED')) THEN\n"
+                   + "    RAISE EXCEPTION 'member role pin invalid' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_general_member BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.game_member FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_general_member();\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.guard_general_report() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "DECLARE r public.game_room%ROWTYPE; m public.game_member%ROWTYPE;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'report physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  SELECT * INTO r FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;\n"
+                   + "  IF NOT FOUND OR r.state<>'RUNNING' AND TG_OP='INSERT' OR NEW.snapshot_id IS"
+                   + " DISTINCT FROM r.snapshot_id THEN\n"
+                   + "    RAISE EXCEPTION 'report source pin invalid' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  SELECT * INTO m FROM public.game_member WHERE room_id=NEW.room_id AND"
+                   + " member_id=NEW.proposer_id;\n"
+                   + "  IF NOT FOUND OR m.role_code IS NULL OR (TG_OP='INSERT' AND NOT m.active_yn)"
+                   + " THEN\n"
+                   + "    RAISE EXCEPTION 'report proposer invalid' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  IF TG_OP='UPDATE' AND"
+                   + " (ROW(NEW.room_id,NEW.snapshot_id,NEW.source_rev,NEW.proposer_id,NEW.report_key,NEW.created_at)"
+                   + " IS DISTINCT FROM\n"
+                   + "    ROW(OLD.room_id,OLD.snapshot_id,OLD.source_rev,OLD.proposer_id,OLD.report_key,OLD.created_at)"
+                   + " OR\n"
+                   + "    (OLD.accepted_at IS NOT NULL AND"
+                   + " ROW(NEW.accepted_at,NEW.accepted_by,NEW.grade_deadline_at,NEW.ordinal) IS"
+                   + " DISTINCT FROM\n"
+                   + "      ROW(OLD.accepted_at,OLD.accepted_by,OLD.grade_deadline_at,OLD.ordinal))"
+                   + " OR\n"
+                   + "    (NEW.payload_cipher IS DISTINCT FROM OLD.payload_cipher AND"
+                   + " NEW.payload_cipher IS NOT NULL) OR\n"
+                   + "    (NEW.payload_hash IS DISTINCT FROM OLD.payload_hash AND NEW.payload_hash"
+                   + " IS NOT NULL)) THEN\n"
+                   + "    RAISE EXCEPTION 'report source or acceptance immutable' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  IF NEW.state IN ('ACCEPTED','GRADED','UNGRADABLE') AND\n"
+                   + "    ((r.mode='SOLO' AND NEW.accepted_by IS DISTINCT FROM NEW.proposer_id)"
+                   + " OR\n"
+                   + "     (r.mode='COOP' AND (NEW.accepted_by IS NULL OR"
+                   + " NEW.accepted_by=NEW.proposer_id OR\n"
+                   + "       NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id"
+                   + " AND member_id=NEW.accepted_by AND role_code IS NOT NULL)))) THEN\n"
+                   + "    RAISE EXCEPTION 'mode-specific acceptance invalid' USING ERRCODE='23514';"
+                   + " END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_general_report BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.game_report FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_general_report();\n"
+                   + "\n"
+                   + "-- 새 원문의 임의 TRUNCATE는 보호 경로가 아니다.\n"
+                   + "CREATE FUNCTION public.reject_general_truncate() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN RAISE EXCEPTION 'general execution truncate forbidden' USING"
+                   + " ERRCODE='23514'; END; $$;\n"
+                   + "CREATE TRIGGER tr_general_room_truncate BEFORE TRUNCATE ON public.game_room"
+                   + " FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_truncate();\n"
+                   + "CREATE TRIGGER tr_general_member_truncate BEFORE TRUNCATE ON"
+                   + " public.game_member FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.reject_general_truncate();\n"
+                   + "CREATE TRIGGER tr_general_report_truncate BEFORE TRUNCATE ON"
+                   + " public.game_report FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.reject_general_truncate();\n"
+                   + "COMMENT ON TABLE public.game_room IS '공개 또는 검수 단독 실행의 불변 출처와 시작 고정값';\n"
+                   + "COMMENT ON TABLE public.game_member IS '실재 회원·신원·동의와 시작 역할의 고정 관계';\n"
+                   + "COMMENT ON TABLE public.game_report IS '암호화된 고정 REPORT-1 제안 및 접수·판정';\n"
+                   + "COMMENT ON FUNCTION public.guard_general_room() IS '검수 REVIEW 권위와 모드별 정확한 시작"
+                   + " 인원·역할 검증';\n"
+                   + "COMMENT ON FUNCTION public.guard_general_report() IS '보고서 시작 사본과 모드별 제출 동의"
+                   + " 검증';\n"
+                   + "REVOKE ALL ON TABLE public.game_room,public.game_member,public.game_report"
+                   + " FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION"
+                   + " public.guard_general_room(),public.guard_general_member(),public.guard_general_report(),public.reject_general_truncate()"
+                   + " FROM PUBLIC;\n";
+    }
+
+    private static String sql28() {
+        return "-- 일반 실행의 관리자 생성·실재 회원 수락 영수증과 감사. 게임 원문·채점 작업은 포함하지 않는다.\n"
+                   + "CREATE TABLE public.game_action (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_game_action PRIMARY"
+                   + " KEY,\n"
+                   + "  request_key uuid NOT NULL CONSTRAINT uk_game_action_request UNIQUE,\n"
+                   + "  admin_id bigint REFERENCES public.admin_account(id) NOT DEFERRABLE,\n"
+                   + "  member_id bigint REFERENCES public.member_account(id) NOT DEFERRABLE,\n"
+                   + "  room_id bigint NOT NULL REFERENCES public.game_room(id) NOT DEFERRABLE,\n"
+                   + "  action varchar(32) NOT NULL CHECK (action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START')),\n"
+                   + "  request_hash char(64) NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  result_data jsonb NOT NULL CHECK (jsonb_typeof(result_data)='object' AND"
+                   + " octet_length(result_data::text)<=4096),\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  CONSTRAINT ck_game_action_actor CHECK ((action='QUALIFICATION_CREATE' AND"
+                   + " admin_id IS NOT NULL AND member_id IS NULL) OR\n"
+                   + "    (action IN ('QUALIFICATION_ACCEPT','QUALIFICATION_START') AND admin_id IS"
+                   + " NULL AND member_id IS NOT NULL))\n"
+                   + ");\n"
+                   + "CREATE TABLE public.game_audit (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_game_audit PRIMARY"
+                   + " KEY,\n"
+                   + "  event_key uuid NOT NULL CONSTRAINT uk_game_audit_event UNIQUE,\n"
+                   + "  room_id bigint NOT NULL REFERENCES public.game_room(id) NOT DEFERRABLE,\n"
+                   + "  actor_kind varchar(8) NOT NULL CHECK (actor_kind IN ('ADMIN','MEMBER')),\n"
+                   + "  admin_id bigint REFERENCES public.admin_account(id) NOT DEFERRABLE,\n"
+                   + "  member_id bigint REFERENCES public.member_account(id) NOT DEFERRABLE,\n"
+                   + "  action varchar(32) NOT NULL CHECK (action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','CONTENT_READ')),\n"
+                   + "  request_id uuid NOT NULL,\n"
+                   + "  result varchar(12) NOT NULL CHECK (result IN"
+                   + " ('CREATED','ACCEPTED','STARTED','EXPOSED')),\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  CONSTRAINT ck_game_audit_actor CHECK ((actor_kind='ADMIN' AND admin_id IS"
+                   + " NOT NULL AND member_id IS NULL AND action='QUALIFICATION_CREATE' AND"
+                   + " result='CREATED') OR\n"
+                   + "    (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "      ((action='QUALIFICATION_ACCEPT' AND result='ACCEPTED') OR\n"
+                   + "       (action='QUALIFICATION_START' AND result='STARTED') OR\n"
+                   + "       (action='CONTENT_READ' AND result='EXPOSED'))))\n"
+                   + ");\n"
+                   + "-- 검수 단독 실행은 가짜 TEST 부모 없이 실제 game_audit에 최초 자료 노출을 결속한다.\n"
+                   + "ALTER TABLE public.test_exposure ADD COLUMN first_test_id bigint\n"
+                   + "  REFERENCES public.play_test(id) ON DELETE SET NULL;\n"
+                   + "CREATE FUNCTION public.reject_general_action_change() RETURNS trigger"
+                   + " LANGUAGE plpgsql AS $$\n"
+                   + "BEGIN RAISE EXCEPTION 'general action and audit immutable' USING"
+                   + " ERRCODE='23514'; END; $$;\n"
+                   + "CREATE TRIGGER tr_general_action_immutable BEFORE UPDATE OR DELETE ON"
+                   + " public.game_action FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.reject_general_action_change();\n"
+                   + "CREATE TRIGGER tr_general_audit_immutable BEFORE UPDATE OR DELETE ON"
+                   + " public.game_audit FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.reject_general_action_change();\n"
+                   + "CREATE TRIGGER tr_general_action_truncate BEFORE TRUNCATE ON"
+                   + " public.game_action FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.reject_general_action_change();\n"
+                   + "CREATE TRIGGER tr_general_audit_truncate BEFORE TRUNCATE ON public.game_audit"
+                   + " FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_action_change();\n"
+                   + "COMMENT ON TABLE public.game_action IS '검수 단독 실행 생성·수락의 전역 불변 요청 영수증';\n"
+                   + "COMMENT ON TABLE public.game_audit IS '검수 단독 실행 생성·수락의 원자적 결과 감사';\n"
+                   + "REVOKE ALL ON TABLE public.game_action, public.game_audit FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION public.reject_general_action_change() FROM PUBLIC;\n";
+    }
+
+    private static String sql29() {
+        return "-- 세 가지 실제 출처만 허용하며 GAME은 TEST 부모 및 회귀 fixture를 공유하지 않는다.\n"
+                   + "ALTER TABLE public.grade_job ADD COLUMN game_report_id bigint;\n"
+                   + "ALTER TABLE public.grade_job DROP CONSTRAINT ck_gj_source;\n"
+                   + "ALTER TABLE public.grade_job ADD CONSTRAINT ck_gj_source CHECK (\n"
+                   + "  (batch_id IS NOT NULL AND sample_code IS NOT NULL AND repeat_no IS NOT NULL"
+                   + " AND repeat_no BETWEEN 1 AND 3\n"
+                   + "    AND input_hash IS NOT NULL AND report_id IS NULL AND report_hash IS NULL"
+                   + " AND game_report_id IS NULL)\n"
+                   + "  OR (batch_id IS NULL AND sample_code IS NULL AND repeat_no IS NULL AND"
+                   + " input_hash IS NULL\n"
+                   + "    AND report_id IS NOT NULL AND report_hash IS NOT NULL AND game_report_id"
+                   + " IS NULL)\n"
+                   + "  OR (batch_id IS NULL AND sample_code IS NULL AND repeat_no IS NULL AND"
+                   + " input_hash IS NULL\n"
+                   + "    AND report_id IS NULL AND report_hash IS NOT NULL AND game_report_id IS"
+                   + " NOT NULL)\n"
+                   + ");\n"
+                   + "ALTER TABLE public.grade_job ADD CONSTRAINT fk_gj_game_report\n"
+                   + "  FOREIGN KEY (snapshot_id,game_report_id) REFERENCES"
+                   + " public.game_report(snapshot_id,id) NOT DEFERRABLE;\n"
+                   + "ALTER TABLE public.grade_job ADD CONSTRAINT uk_gj_game_report UNIQUE"
+                   + " (game_report_id);\n"
+                   + "\n"
+                   + "-- 원래 TEST와 BATCH 출처 잠금을 그대로 유지하면서 GAME 실제 방·보고서 목적과 접수 고정값을 추가한다.\n"
+                   + "CREATE OR REPLACE FUNCTION public.guard_test_job_source() RETURNS trigger"
+                   + " LANGUAGE plpgsql AS $$\n"
+                   + "DECLARE pinned record;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='UPDATE' AND"
+                   + " ROW(NEW.snapshot_id,NEW.runtime_id,NEW.batch_id,NEW.sample_code,NEW.repeat_no,\n"
+                   + "     "
+                   + " NEW.report_id,NEW.game_report_id,NEW.report_hash,NEW.input_hash,NEW.config_hash,NEW.rubric_hash,\n"
+                   + "      NEW.accepted_at,NEW.deadline_at) IS DISTINCT FROM\n"
+                   + "     "
+                   + " ROW(OLD.snapshot_id,OLD.runtime_id,OLD.batch_id,OLD.sample_code,OLD.repeat_no,\n"
+                   + "     "
+                   + " OLD.report_id,OLD.game_report_id,OLD.report_hash,OLD.input_hash,OLD.config_hash,OLD.rubric_hash,\n"
+                   + "      OLD.accepted_at,OLD.deadline_at)\n"
+                   + "      AND (OLD.report_id IS NOT NULL OR NEW.report_id IS NOT NULL OR\n"
+                   + "           OLD.game_report_id IS NOT NULL OR NEW.game_report_id IS NOT NULL)"
+                   + " THEN\n"
+                   + "    RAISE EXCEPTION 'accepted grade_job source immutable' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF NEW.report_id IS NOT NULL THEN\n"
+                   + "    SELECT"
+                   + " r.payload_hash,r.config_hash,r.accepted_at,r.state,t.runtime_epoch\n"
+                   + "      INTO pinned FROM public.test_report r JOIN public.play_test t ON"
+                   + " t.id=r.test_id\n"
+                   + "      WHERE r.id=NEW.report_id FOR SHARE OF r,t;\n"
+                   + "    IF NOT FOUND OR pinned.accepted_at IS NULL OR pinned.state NOT IN"
+                   + " ('ACCEPTED','GRADED','UNGRADABLE','CANCELLED')\n"
+                   + "      OR (TG_OP='INSERT' AND (pinned.payload_hash IS NULL OR"
+                   + " NEW.state<>'QUEUED'))\n"
+                   + "      OR NEW.config_hash IS DISTINCT FROM pinned.config_hash\n"
+                   + "      OR NEW.accepted_at IS DISTINCT FROM pinned.accepted_at\n"
+                   + "      OR NEW.deadline_at IS DISTINCT FROM pinned.accepted_at+interval '120"
+                   + " seconds'\n"
+                   + "      OR NEW.state='STAGED' THEN\n"
+                   + "      RAISE EXCEPTION 'grade_job TEST report pin mismatch' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  ELSIF NEW.game_report_id IS NOT NULL THEN\n"
+                   + "    SELECT"
+                   + " g.payload_hash,g.accepted_at,g.grade_deadline_at,g.state,g.snapshot_id,\n"
+                   + "          "
+                   + " r.runtime_id,r.runtime_epoch,r.config_hash,r.rubric_hash,r.purpose,r.state"
+                   + " AS room_state\n"
+                   + "      INTO pinned FROM public.game_report g JOIN public.game_room r ON"
+                   + " r.id=g.room_id\n"
+                   + "      WHERE g.id=NEW.game_report_id FOR SHARE OF g,r;\n"
+                   + "    IF NOT FOUND OR pinned.purpose NOT IN"
+                   + " ('PUBLIC','REVIEW_SOLO_QUALIFICATION')\n"
+                   + "      OR pinned.room_state NOT IN ('RUNNING','ENDED')\n"
+                   + "      OR pinned.accepted_at IS NULL OR pinned.state NOT IN"
+                   + " ('ACCEPTED','GRADED','UNGRADABLE')\n"
+                   + "      OR (TG_OP='INSERT' AND (pinned.payload_hash IS NULL OR"
+                   + " NEW.state<>'QUEUED'))\n"
+                   + "      OR NEW.snapshot_id IS DISTINCT FROM pinned.snapshot_id\n"
+                   + "\n"
+                   + "      OR NEW.runtime_id IS DISTINCT FROM pinned.runtime_id\n"
+                   + "      OR NEW.config_hash IS DISTINCT FROM pinned.config_hash\n"
+                   + "      OR NEW.rubric_hash IS DISTINCT FROM pinned.rubric_hash\n"
+                   + "      OR NEW.accepted_at IS DISTINCT FROM pinned.accepted_at\n"
+                   + "      OR NEW.deadline_at IS DISTINCT FROM pinned.grade_deadline_at\n"
+                   + "      OR NEW.deadline_at IS DISTINCT FROM pinned.accepted_at+interval '120"
+                   + " seconds'\n"
+                   + "      OR NEW.state='STAGED' THEN\n"
+                   + "      RAISE EXCEPTION 'grade_job GAME report pin mismatch' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END;\n"
+                   + "$$;\n"
+                   + "COMMENT ON COLUMN public.grade_job.game_report_id IS '실제 GAME 보고서 출처;"
+                   + " snapshot FK 및 방 목적·런타임·접수 고정값은 출처 트리거에서 검사';\n"
+                   + "COMMENT ON CONSTRAINT ck_gj_source ON public.grade_job IS 'BATCH/TEST/GAME"
+                   + " 출처는 정확히 하나';\n";
+    }
+
+    private static String sql30() {
+        return "-- STORY-RELEASE-01의 서버 발급 봉투. 이 DDL은 READY 발급자나 공개 승인이 아니다.\n"
+                   + "CREATE TABLE public.story_release (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_story_release PRIMARY"
+                   + " KEY,\n"
+                   + "  version_id bigint NOT NULL,\n"
+                   + "  snapshot_id bigint NOT NULL,\n"
+                   + "  source_rev bigint NOT NULL CHECK (source_rev>=0),\n"
+                   + "  runtime_id bigint NOT NULL REFERENCES public.grade_runtime(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  runtime_epoch bigint NOT NULL CHECK (runtime_epoch>=0),\n"
+                   + "  config_hash char(64) NOT NULL CHECK (config_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  evidence_hash char(64) NOT NULL CHECK (evidence_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  bundle_data jsonb NOT NULL CHECK (jsonb_typeof(bundle_data)='object' AND"
+                   + " octet_length(bundle_data::text)<=262144),\n"
+                   + "  blocked_yn boolean NOT NULL DEFAULT false,\n"
+                   + "  blocked_reason varchar(16) CHECK (blocked_reason IS NULL OR"
+                   + " blocked_reason='DEFECT'),\n"
+                   + "  blocked_ref varchar(64),\n"
+                   + "  blocked_by bigint REFERENCES public.admin_account(id) NOT DEFERRABLE,\n"
+                   + "  blocked_at timestamptz,\n"
+                   + "  created_by bigint NOT NULL REFERENCES public.admin_account(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),\n"
+                   + "  CONSTRAINT fk_release_snapshot FOREIGN KEY (version_id,snapshot_id)"
+                   + " REFERENCES public.review_snapshot(version_id,id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT uk_release_snapshot UNIQUE (snapshot_id),\n"
+                   + "  CONSTRAINT ck_release_block CHECK (\n"
+                   + "    (NOT blocked_yn AND blocked_reason IS NULL AND blocked_ref IS NULL AND"
+                   + " blocked_by IS NULL AND blocked_at IS NULL)\n"
+                   + "    OR (blocked_yn AND blocked_reason IS NOT NULL AND"
+                   + " blocked_reason='DEFECT'\n"
+                   + "      AND blocked_ref IS NOT NULL AND blocked_ref ~ '^[A-Za-z0-9_-]{8,64}$'\n"
+                   + "      AND blocked_by IS NOT NULL AND blocked_at IS NOT NULL)),\n"
+                   + "  CONSTRAINT ck_release_bundle CHECK (\n"
+                   + "    (bundle_data->>'formatNo'='1' AND"
+                   + " bundle_data->>'gateVersion'='STORY-RELEASE-01'\n"
+                   + "    AND bundle_data->>'snapshotId'=snapshot_id::text AND"
+                   + " bundle_data->>'sourceRev'=source_rev::text\n"
+                   + "    AND bundle_data->>'evidenceHash'=evidence_hash\n"
+                   + "    AND jsonb_typeof(bundle_data->'recordIds')='object'\n"
+                   + "    AND jsonb_typeof(bundle_data->'resolutionRecordIds')='array'\n"
+                   + "    AND jsonb_typeof(bundle_data->'runtime')='object'\n"
+                   + "    AND jsonb_typeof(bundle_data->'checks')='array') IS TRUE)\n"
+                   + ");\n"
+                   + "CREATE FUNCTION public.guard_story_release() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' OR TG_OP='TRUNCATE' THEN\n"
+                   + "    RAISE EXCEPTION 'release is durable' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF TG_OP='UPDATE' AND (\n"
+                   + "    ROW(NEW.version_id,NEW.snapshot_id,NEW.source_rev,NEW.runtime_id,NEW.runtime_epoch,NEW.config_hash,\n"
+                   + "      NEW.evidence_hash,NEW.bundle_data,NEW.created_by,NEW.created_at)\n"
+                   + "    IS DISTINCT FROM"
+                   + " ROW(OLD.version_id,OLD.snapshot_id,OLD.source_rev,OLD.runtime_id,OLD.runtime_epoch,\n"
+                   + "     "
+                   + " OLD.config_hash,OLD.evidence_hash,OLD.bundle_data,OLD.created_by,OLD.created_at)\n"
+                   + "    OR OLD.blocked_yn OR NOT NEW.blocked_yn OR NEW.blocked_reason<>'DEFECT')"
+                   + " THEN\n"
+                   + "    RAISE EXCEPTION 'release seal immutable' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_story_release_guard BEFORE UPDATE OR DELETE ON"
+                   + " public.story_release FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_story_release();\n"
+                   + "CREATE TRIGGER tr_story_release_truncate BEFORE TRUNCATE ON"
+                   + " public.story_release FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_story_release();\n"
+                   + "\n"
+                   + "-- 검수 영수증은 그대로 두고 실제 PUBLIC 행위만 추가한다.\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT game_action_action_check;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','PUBLIC_CREATE','PUBLIC_START'));\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_actor;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_actor CHECK (\n"
+                   + "  (action='QUALIFICATION_CREATE' AND admin_id IS NOT NULL AND member_id IS"
+                   + " NULL) OR\n"
+                   + "  (action IN"
+                   + " ('QUALIFICATION_ACCEPT','QUALIFICATION_START','PUBLIC_CREATE','PUBLIC_START')"
+                   + " AND admin_id IS NULL AND member_id IS NOT NULL));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT game_audit_action_check;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','PUBLIC_CREATE','PUBLIC_START','CONTENT_READ'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL AND"
+                   + " action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action IN ('QUALIFICATION_ACCEPT') AND result='ACCEPTED') OR\n"
+                   + "     (action='PUBLIC_CREATE' AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED'))));\n"
+                   + "COMMENT ON TABLE public.story_release IS '실제 근거 수집자가 별도로 발급할 불변 공개 사본·실행 설정"
+                   + " 봉투. 임의 JSON은 입장 자격이 아니다';\n"
+                   + "REVOKE ALL ON TABLE public.story_release FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION public.guard_story_release() FROM PUBLIC;\n";
+    }
+
+    private static String sql31() {
+        return "-- 공개 SOLO 보고서 수정·제출 영수증과 해당 결과 감사만 기존 행위 계약에 추가한다.\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_kind;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START',\n"
+                   + "    'PUBLIC_CREATE','PUBLIC_START','PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT'));\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_actor;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_actor CHECK (\n"
+                   + "  (action='QUALIFICATION_CREATE' AND admin_id IS NOT NULL AND member_id IS"
+                   + " NULL) OR\n"
+                   + "  (action IN"
+                   + " ('QUALIFICATION_ACCEPT','QUALIFICATION_START','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "    'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT') AND admin_id IS NULL AND"
+                   + " member_id IS NOT NULL));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_kind;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START',\n"
+                   + "    'PUBLIC_CREATE','PUBLIC_START','CONTENT_READ','PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT game_audit_result_check;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_result CHECK (\n"
+                   + "  result IN"
+                   + " ('CREATED','ACCEPTED','STARTED','EXPOSED','CHANGED','UNCHANGED'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL\n"
+                   + "    AND action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action='QUALIFICATION_ACCEPT' AND result='ACCEPTED') OR\n"
+                   + "     (action='PUBLIC_CREATE' AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED') OR\n"
+                   + "     (action='PUBLIC_REPORT_EDIT' AND result IN ('CHANGED','UNCHANGED')) OR\n"
+                   + "     (action='PUBLIC_REPORT_SUBMIT' AND result='CHANGED'))));\n";
+    }
+
+    private static String sql32() {
+        return "-- 검수 목적 자료만 수집한다. 공개 게임은 BLIND 원본이 아니며 원문은 이 묶음에 복제하지 않는다.\n"
+                   + "CREATE TABLE public.release_solo_feedback (\n"
+                   + "  room_id bigint PRIMARY KEY REFERENCES public.game_room(id) ON DELETE"
+                   + " CASCADE,\n"
+                   + "  member_id bigint NOT NULL REFERENCES public.member_account(id) ON DELETE"
+                   + " CASCADE,\n"
+                   + "  feedback_cipher bytea NOT NULL CHECK (octet_length(feedback_cipher) BETWEEN"
+                   + " 32 AND 524288),\n"
+                   + "  submitted_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  ended_at timestamptz NOT NULL,\n"
+                   + "  raw_until timestamptz NOT NULL,\n"
+                   + "  selected_at timestamptz,\n"
+                   + "  CONSTRAINT ck_rsf_retention CHECK (submitted_at>=ended_at AND"
+                   + " submitted_at<=ended_at+interval '90 days' AND\n"
+                   + "    (raw_until=ended_at+interval '90 days' AND selected_at IS NULL OR\n"
+                   + "    selected_at IS NOT NULL AND selected_at<ended_at+interval '90 days' AND"
+                   + " raw_until=ended_at+interval '365 days')),\n"
+                   + "  CONSTRAINT fk_rsf_member FOREIGN KEY (room_id,member_id) REFERENCES"
+                   + " public.game_member(room_id,member_id) ON DELETE CASCADE\n"
+                   + ");\n"
+                   + "CREATE TABLE public.release_human_review (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n"
+                   + "  snapshot_id bigint NOT NULL REFERENCES public.review_snapshot(id),\n"
+                   + "  test_id bigint REFERENCES public.play_test(id) ON DELETE SET NULL,\n"
+                   + "  room_id bigint REFERENCES public.game_room(id) ON DELETE SET NULL,\n"
+                   + "  reviewer_id bigint NOT NULL REFERENCES public.admin_account(id),\n"
+                   + "  verdict varchar(12) NOT NULL CHECK (verdict IN"
+                   + " ('PASS','FAIL','INCOMPLETE')),\n"
+                   + "  critical_open_count integer NOT NULL CHECK (critical_open_count>=0),\n"
+                   + "  detail varchar(8000) NOT NULL CHECK (length(trim(detail)) BETWEEN 1 AND"
+                   + " 8000),\n"
+                   + "  verification_ref varchar(64) NOT NULL CHECK (verification_ref ~"
+                   + " '^[A-Za-z0-9_-]{8,64}$'),\n"
+                   + "  supersedes_id bigint REFERENCES public.release_human_review(id),\n"
+                   + "  finding_ref varchar(64),\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  CONSTRAINT ck_rhr_source CHECK (test_id IS NULL OR room_id IS NULL),\n"
+                   + "  CONSTRAINT ck_rhr_pass CHECK (verdict<>'PASS' OR critical_open_count=0),\n"
+                   + "  CONSTRAINT ck_rhr_finding CHECK ((supersedes_id IS NULL AND finding_ref IS"
+                   + " NULL) OR\n"
+                   + "    (supersedes_id IS NOT NULL AND finding_ref IS NOT NULL AND finding_ref ~"
+                   + " '^[A-Za-z0-9_-]{8,64}$')),\n"
+                   + "  CONSTRAINT fk_rhr_test FOREIGN KEY (snapshot_id,test_id) REFERENCES"
+                   + " public.play_test(snapshot_id,id) ON DELETE SET NULL (test_id),\n"
+                   + "  CONSTRAINT fk_rhr_room FOREIGN KEY (room_id,snapshot_id) REFERENCES"
+                   + " public.game_room(id,snapshot_id) ON DELETE SET NULL (room_id)\n"
+                   + ");\n"
+                   + "-- FK에 의한 NULL 분리는 원문 파기 허용; 수집 당시의 원래 해시와 영수증은 바뀌지 않는다.\n"
+                   + "CREATE TABLE public.release_evidence (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n"
+                   + "  receipt_key uuid NOT NULL UNIQUE,\n"
+                   + "  snapshot_id bigint NOT NULL REFERENCES public.review_snapshot(id),\n"
+                   + "  runtime_id bigint NOT NULL REFERENCES public.grade_runtime(id),\n"
+                   + "  runtime_epoch bigint NOT NULL CHECK (runtime_epoch>=0),\n"
+                   + "  config_hash char(64) NOT NULL CHECK (config_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  evidence_hash char(64) NOT NULL CHECK (evidence_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  created_by bigint NOT NULL REFERENCES public.admin_account(id),\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT now(),\n"
+                   + "  collection_tx bigint NOT NULL DEFAULT txid_current(),\n"
+                   + "  UNIQUE(snapshot_id,id)\n"
+                   + ");\n"
+                   + "CREATE TABLE public.release_evidence_item (\n"
+                   + "  receipt_id bigint NOT NULL REFERENCES public.release_evidence(id),\n"
+                   + "  source_kind varchar(8) NOT NULL CHECK (source_kind IN ('TEST','SOLO')),\n"
+                   + "  pair_a varchar(32) NOT NULL,\n"
+                   + "  pair_b varchar(32) NOT NULL,\n"
+                   + "  test_id bigint REFERENCES public.play_test(id) ON DELETE SET NULL,\n"
+                   + "  room_id bigint REFERENCES public.game_room(id) ON DELETE SET NULL,\n"
+                   + "  review_id bigint REFERENCES public.release_human_review(id) ON DELETE SET"
+                   + " NULL,\n"
+                   + "  source_hash char(64) NOT NULL CHECK (source_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  PRIMARY KEY(receipt_id,source_kind,pair_a,pair_b,source_hash),\n"
+                   + "  CONSTRAINT ck_rei_source CHECK ((source_kind='TEST' AND room_id IS NULL) OR"
+                   + " (source_kind='SOLO' AND test_id IS NULL))\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_rei_test ON"
+                   + " public.release_evidence_item(receipt_id,test_id) WHERE test_id IS NOT"
+                   + " NULL;\n"
+                   + "CREATE UNIQUE INDEX uk_rei_room ON"
+                   + " public.release_evidence_item(receipt_id,room_id) WHERE room_id IS NOT"
+                   + " NULL;\n"
+                   + "CREATE FUNCTION public.guard_release_feedback() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' OR TG_OP='TRUNCATE' THEN\n"
+                   + "    RAISE EXCEPTION 'qualification feedback deletion requires privacy"
+                   + " erasure' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF TG_OP='UPDATE' THEN\n"
+                   + "    IF"
+                   + " (NEW.room_id,NEW.member_id,NEW.feedback_cipher,NEW.submitted_at,NEW.ended_at)"
+                   + " IS DISTINCT FROM\n"
+                   + "      "
+                   + " (OLD.room_id,OLD.member_id,OLD.feedback_cipher,OLD.submitted_at,OLD.ended_at)"
+                   + " OR\n"
+                   + "       OLD.selected_at IS NOT NULL OR NEW.selected_at IS NULL OR\n"
+                   + "       OLD.raw_until IS DISTINCT FROM OLD.ended_at+interval '90 days' OR\n"
+                   + "       NEW.raw_until IS DISTINCT FROM OLD.ended_at+interval '365 days' OR\n"
+                   + "       NEW.selected_at>=OLD.raw_until OR now()>=OLD.raw_until THEN\n"
+                   + "      RAISE EXCEPTION 'feedback source or retention immutable' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "    RETURN NEW;\n"
+                   + "  END IF;\n"
+                   + "  IF NOT EXISTS(SELECT 1 FROM public.game_room r\n"
+                   + "      JOIN public.game_member m ON m.room_id=r.id AND"
+                   + " m.member_id=NEW.member_id\n"
+                   + "      WHERE r.id=NEW.room_id AND r.selected_member_id=NEW.member_id AND"
+                   + " m.active_yn\n"
+                   + "      AND r.purpose='REVIEW_SOLO_QUALIFICATION' AND"
+                   + " r.qualification_kind='BLIND'\n"
+                   + "      AND r.state='ENDED' AND NEW.ended_at=r.ended_at AND\n"
+                   + "      NEW.submitted_at>=r.ended_at AND NEW.submitted_at<=r.ended_at+interval"
+                   + " '90 days'\n"
+                   + "      AND now()<r.ended_at+interval '90 days') THEN\n"
+                   + "    RAISE EXCEPTION 'feedback source immutable' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END $$;\n"
+                   + "CREATE TRIGGER tr_release_feedback BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.release_solo_feedback FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_release_feedback();\n"
+                   + "CREATE TRIGGER tr_release_feedback_truncate BEFORE TRUNCATE ON"
+                   + " public.release_solo_feedback FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_release_feedback();\n"
+                   + "CREATE FUNCTION public.guard_release_item_insert() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF NOT EXISTS (SELECT 1 FROM public.release_evidence WHERE"
+                   + " id=NEW.receipt_id AND collection_tx=txid_current()) THEN\n"
+                   + "    RAISE EXCEPTION 'release evidence collection sealed' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF (NEW.source_kind='TEST' AND (NEW.test_id IS NULL OR NEW.room_id IS NOT"
+                   + " NULL)) OR\n"
+                   + "     (NEW.source_kind='SOLO' AND (NEW.room_id IS NULL OR NEW.test_id IS NOT"
+                   + " NULL)) OR NEW.review_id IS NULL THEN\n"
+                   + "    RAISE EXCEPTION 'release evidence source required' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END $$;\n"
+                   + "CREATE TRIGGER tr_release_item_insert BEFORE INSERT ON"
+                   + " public.release_evidence_item FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_release_item_insert();\n"
+                   + "CREATE FUNCTION public.guard_release_evidence() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' OR TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'release"
+                   + " evidence immutable' USING ERRCODE='23514'; END IF;\n"
+                   + "  IF TG_TABLE_NAME='release_evidence_item' THEN\n"
+                   + "    IF TG_OP='UPDATE' AND\n"
+                   + "      (NEW.receipt_id,NEW.source_kind,NEW.pair_a,NEW.pair_b,NEW.source_hash)"
+                   + " IS NOT DISTINCT FROM\n"
+                   + "      (OLD.receipt_id,OLD.source_kind,OLD.pair_a,OLD.pair_b,OLD.source_hash)"
+                   + " AND\n"
+                   + "      (NEW.test_id IS NOT DISTINCT FROM OLD.test_id OR\n"
+                   + "        (NEW.test_id IS NULL AND OLD.test_id IS NOT NULL AND NOT EXISTS\n"
+                   + "          (SELECT 1 FROM public.play_test WHERE id=OLD.test_id))) AND\n"
+                   + "      (NEW.room_id IS NOT DISTINCT FROM OLD.room_id OR\n"
+                   + "        (NEW.room_id IS NULL AND OLD.room_id IS NOT NULL AND NOT EXISTS\n"
+                   + "          (SELECT 1 FROM public.game_room WHERE id=OLD.room_id))) AND\n"
+                   + "      (NEW.review_id IS NOT DISTINCT FROM OLD.review_id OR\n"
+                   + "        (NEW.review_id IS NULL AND OLD.review_id IS NOT NULL AND NOT EXISTS\n"
+                   + "          (SELECT 1 FROM public.release_human_review WHERE"
+                   + " id=OLD.review_id))) THEN RETURN NEW; END IF;\n"
+                   + "    RAISE EXCEPTION 'release evidence immutable' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF TG_TABLE_NAME='release_human_review' THEN\n"
+                   + "    IF TG_OP='UPDATE' THEN\n"
+                   + "      IF"
+                   + " (NEW.id,NEW.snapshot_id,NEW.reviewer_id,NEW.verdict,NEW.critical_open_count,NEW.detail,NEW.verification_ref,\n"
+                   + "          NEW.supersedes_id,NEW.finding_ref,NEW.created_at) IS NOT DISTINCT"
+                   + " FROM\n"
+                   + "        "
+                   + " (OLD.id,OLD.snapshot_id,OLD.reviewer_id,OLD.verdict,OLD.critical_open_count,OLD.detail,OLD.verification_ref,\n"
+                   + "          OLD.supersedes_id,OLD.finding_ref,OLD.created_at) AND\n"
+                   + "         (NEW.test_id IS NOT DISTINCT FROM OLD.test_id OR\n"
+                   + "           (NEW.test_id IS NULL AND OLD.test_id IS NOT NULL AND NOT EXISTS\n"
+                   + "             (SELECT 1 FROM public.play_test WHERE id=OLD.test_id))) AND\n"
+                   + "         (NEW.room_id IS NOT DISTINCT FROM OLD.room_id OR\n"
+                   + "           (NEW.room_id IS NULL AND OLD.room_id IS NOT NULL AND NOT EXISTS\n"
+                   + "             (SELECT 1 FROM public.game_room WHERE id=OLD.room_id))) THEN"
+                   + " RETURN NEW; END IF;\n"
+                   + "      RAISE EXCEPTION 'release review immutable' USING ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "    IF (NEW.test_id IS NULL)=(NEW.room_id IS NULL) OR\n"
+                   + "       (NEW.supersedes_id IS NOT NULL AND NOT EXISTS\n"
+                   + "        (SELECT 1 FROM public.release_human_review p WHERE"
+                   + " p.id=NEW.supersedes_id\n"
+                   + "         AND p.snapshot_id=NEW.snapshot_id AND p.test_id IS NOT DISTINCT FROM"
+                   + " NEW.test_id\n"
+                   + "         AND p.room_id IS NOT DISTINCT FROM NEW.room_id AND p.id<NEW.id))"
+                   + " THEN\n"
+                   + "      RAISE EXCEPTION 'review source or closure mismatch' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "    RETURN NEW;\n"
+                   + "  END IF;\n"
+                   + "  RAISE EXCEPTION 'release evidence immutable' USING ERRCODE='23514';\n"
+                   + "END $$;\n"
+                   + "CREATE TRIGGER tr_release_evidence BEFORE UPDATE OR DELETE ON"
+                   + " public.release_evidence FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_release_evidence();\n"
+                   + "CREATE TRIGGER tr_release_item BEFORE UPDATE OR DELETE ON"
+                   + " public.release_evidence_item FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_release_evidence();\n"
+                   + "CREATE TRIGGER tr_release_review BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.release_human_review FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_release_evidence();\n"
+                   + "CREATE TRIGGER tr_release_evidence_truncate BEFORE TRUNCATE ON"
+                   + " public.release_evidence FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_release_evidence();\n"
+                   + "CREATE TRIGGER tr_release_item_truncate BEFORE TRUNCATE ON"
+                   + " public.release_evidence_item FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_release_evidence();\n"
+                   + "CREATE TRIGGER tr_release_review_truncate BEFORE TRUNCATE ON"
+                   + " public.release_human_review FOR EACH STATEMENT EXECUTE FUNCTION"
+                   + " public.guard_release_evidence();\n"
+                   + "-- 검수 회원 본인의 피드백 접수는 별도 Q 권위 거래에서 영수증·감사와 함께 확정한다.\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_kind;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START',\n"
+                   + "             'PUBLIC_CREATE','PUBLIC_START','QUALIFICATION_FEEDBACK'));\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_actor;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_actor CHECK (\n"
+                   + "  (action='QUALIFICATION_CREATE' AND admin_id IS NOT NULL AND member_id IS"
+                   + " NULL) OR\n"
+                   + "  (action IN"
+                   + " ('QUALIFICATION_ACCEPT','QUALIFICATION_START','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "              'QUALIFICATION_FEEDBACK') AND admin_id IS NULL AND member_id IS"
+                   + " NOT NULL));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_kind;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START',\n"
+                   + "            "
+                   + " 'PUBLIC_CREATE','PUBLIC_START','CONTENT_READ','QUALIFICATION_FEEDBACK'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL\n"
+                   + "    AND action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action='QUALIFICATION_ACCEPT' AND result='ACCEPTED') OR\n"
+                   + "     (action='QUALIFICATION_FEEDBACK' AND result='ACCEPTED') OR\n"
+                   + "     (action IN ('PUBLIC_CREATE') AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED'))));\n"
+                   + "REVOKE ALL ON"
+                   + " public.release_solo_feedback,public.release_human_review,public.release_evidence,public.release_evidence_item"
+                   + " FROM PUBLIC;\n";
+    }
+
+    private static String sql33() {
+        return "-- V32 피드백 권위와 V31 공개 보고서 권위를 유지하며 검수 보고서 명령만 추가한다.\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_kind;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START',\n"
+                   + "    'QUALIFICATION_FEEDBACK','QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT',\n"
+                   + "    'PUBLIC_CREATE','PUBLIC_START','PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT'));\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_actor;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_actor CHECK (\n"
+                   + "  (action='QUALIFICATION_CREATE' AND admin_id IS NOT NULL AND member_id IS"
+                   + " NULL) OR\n"
+                   + "  (action IN"
+                   + " ('QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "    'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "    'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT') AND admin_id IS NULL AND"
+                   + " member_id IS NOT NULL));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_kind;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (\n"
+                   + "  action IN"
+                   + " ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START',\n"
+                   + "    'QUALIFICATION_FEEDBACK','QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT',\n"
+                   + "    'PUBLIC_CREATE','PUBLIC_START','PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','CONTENT_READ'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL\n"
+                   + "    AND action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action IN ('QUALIFICATION_ACCEPT','QUALIFICATION_FEEDBACK') AND"
+                   + " result='ACCEPTED') OR\n"
+                   + "     (action='PUBLIC_CREATE' AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED') OR\n"
+                   + "     (action IN ('QUALIFICATION_REPORT_EDIT','PUBLIC_REPORT_EDIT') AND result"
+                   + " IN ('CHANGED','UNCHANGED')) OR\n"
+                   + "     (action IN ('QUALIFICATION_REPORT_SUBMIT','PUBLIC_REPORT_SUBMIT') AND"
+                   + " result='CHANGED'))));\n";
+    }
+
+    private static String sql34() {
+        return "-- 기존 V11 사건 영수증을 재사용한다. 기존 키·행·컬럼·복제/소유권 행동은 유지한다.\n"
+                + "ALTER TABLE public.story_action DROP CONSTRAINT ck_story_action_kind;\n"
+                + "ALTER TABLE public.story_action ADD CONSTRAINT ck_story_action_kind CHECK (\n"
+                + "  action IN"
+                + " ('READY','PUBLISH','SHOW','HIDE','CLONE','OWNER_REQ','OWNER_ACCEPT',\n"
+                + "             'OWNER_CLOSE','OWNER_FORCE','RECOLLECT','HUMAN_REVIEW'));\n"
+                + "\n"
+                + "-- 공개 감사에는 실제 행위자와 잠근 버전 및 변경 전후 번호가 있어야 한다.\n"
+                + "ALTER TABLE public.story_audit ADD CONSTRAINT ck_story_release_audit CHECK"
+                + " (\n"
+                + "  action NOT IN"
+                + " ('READY_GRANTED','PUBLISHED','VISIBILITY_CHANGED','DEFECT_BLOCKED',\n"
+                + "                 'RELEASE_COLLECTED','RELEASE_REVIEWED')\n"
+                + "  OR (actor_id IS NOT NULL AND version_id IS NOT NULL AND before_rev IS NOT"
+                + " NULL AND after_rev IS NOT NULL));\n";
+    }
+
+    private static String sql35() {
+        return "-- 공개 종료 시 잠긴 실제 참가자마다 별도 개인 기록을 확정한다. 원문은 기존 game_report에만 둔다.\n"
+                   + "CREATE TABLE public.play_record (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_play_record PRIMARY"
+                   + " KEY,\n"
+                   + "  record_key uuid NOT NULL CONSTRAINT uk_play_record_key UNIQUE,\n"
+                   + "  member_id bigint NOT NULL REFERENCES public.member_account(id) NOT"
+                   + " DEFERRABLE,\n"
+                   + "  room_id bigint REFERENCES public.game_room(id) NOT DEFERRABLE,\n"
+                   + "  state varchar(8) NOT NULL CHECK (state IN ('RAW','PURGED')),\n"
+                   + "  mode varchar(8) NOT NULL CHECK (mode IN ('SOLO','COOP')),\n"
+                   + "  story_code varchar(40) NOT NULL,\n"
+                   + "  story_title varchar(200) NOT NULL,\n"
+                   + "  difficulty smallint NOT NULL CHECK (difficulty BETWEEN 1 AND 5),\n"
+                   + "  role_a varchar(32),\n"
+                   + "  role_b varchar(32),\n"
+                   + "  own_role varchar(32) NOT NULL,\n"
+                   + "  own_role_name varchar(200) NOT NULL,\n"
+                   + "  result_status varchar(12) NOT NULL CHECK (result_status IN"
+                   + " ('SUCCESS','FAILURE','INCOMPLETE')),\n"
+                   + "  end_reason varchar(24) NOT NULL CHECK (end_reason IN"
+                   + " ('SUCCESS','TIME_LIMIT','ATTEMPTS_EXHAUSTED','FORFEIT','SYSTEM_ERROR','ACCOUNT_DELETED')),\n"
+                   + "  started_at timestamptz,\n"
+                   + "  ended_at timestamptz,\n"
+                   + "  time_basis_at timestamptz,\n"
+                   + "  duration_seconds integer NOT NULL CHECK (duration_seconds>=0),\n"
+                   + "  graded_count smallint,\n"
+                   + "  own_hint_count smallint CHECK (own_hint_count>=0),\n"
+                   + "  final_score smallint CHECK (final_score BETWEEN 0 AND 100),\n"
+                   + "  source_erased_yn boolean NOT NULL DEFAULT false,\n"
+                   + "  rev bigint NOT NULL DEFAULT 0 CHECK (rev IN (0,1)),\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),\n"
+                   + "  CONSTRAINT uk_play_record_owner_room UNIQUE (member_id,room_id),\n"
+                   + "  CONSTRAINT ck_play_record_shape CHECK (\n"
+                   + "    (state='RAW' AND rev=0 AND NOT source_erased_yn AND room_id IS NOT NULL"
+                   + " AND role_a IS NOT NULL AND role_b IS NOT NULL\n"
+                   + "      AND started_at IS NOT NULL AND ended_at IS NOT NULL AND time_basis_at"
+                   + " IS NOT NULL\n"
+                   + "      AND graded_count IS NOT NULL AND graded_count>=0 AND own_hint_count IS"
+                   + " NULL\n"
+                   + "      AND time_basis_at>=started_at AND"
+                   + " duration_seconds=GREATEST(0,EXTRACT(EPOCH FROM"
+                   + " (time_basis_at-started_at))::integer))\n"
+                   + "    OR (state='PURGED' AND rev=1 AND source_erased_yn AND room_id IS NULL AND"
+                   + " role_a IS NULL AND role_b IS NULL\n"
+                   + "      AND started_at IS NULL AND ended_at IS NULL AND time_basis_at IS NULL\n"
+                   + "      AND graded_count IS NULL AND own_hint_count IS NULL)),\n"
+                   + "  CONSTRAINT ck_play_record_score CHECK (\n"
+                   + "    (end_reason IN ('SUCCESS','TIME_LIMIT','ATTEMPTS_EXHAUSTED') AND"
+                   + " final_score IS NOT NULL\n"
+                   + "      AND result_status=(CASE WHEN end_reason='SUCCESS' THEN 'SUCCESS' ELSE"
+                   + " 'FAILURE' END))\n"
+                   + "    OR (end_reason IN ('FORFEIT','SYSTEM_ERROR','ACCOUNT_DELETED') AND"
+                   + " final_score IS NULL\n"
+                   + "      AND result_status='INCOMPLETE'))\n"
+                   + ");\n"
+                   + "CREATE INDEX ix_play_record_member_page ON public.play_record(member_id,id"
+                   + " DESC);\n"
+                   + "CREATE INDEX ix_play_record_room ON public.play_record(room_id) WHERE room_id"
+                   + " IS NOT NULL;\n"
+                   + "CREATE FUNCTION public.guard_play_record() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'record physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  IF TG_OP='UPDATE' THEN\n"
+                   + "    RAISE EXCEPTION 'record privacy transition requires dedicated privacy"
+                   + " path' USING ERRCODE='42501';\n"
+                   + "  END IF;\n"
+                   + "  IF TG_OP='INSERT' AND (NEW.state<>'RAW' OR NOT EXISTS (\n"
+                   + "    SELECT 1 FROM public.game_room r JOIN public.game_member m ON"
+                   + " m.room_id=r.id\n"
+                   + "    WHERE r.id=NEW.room_id AND r.purpose='PUBLIC' AND r.state='ENDED'\n"
+                   + "      AND m.member_id=NEW.member_id AND m.active_yn AND"
+                   + " m.role_code=NEW.own_role)) THEN\n"
+                   + "    RAISE EXCEPTION 'terminal public participant required' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_play_record_guard BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.play_record FOR EACH ROW EXECUTE FUNCTION"
+                   + " public.guard_play_record();\n"
+                   + "CREATE TRIGGER tr_play_record_truncate BEFORE TRUNCATE ON public.play_record"
+                   + " FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_truncate();\n"
+                   + "COMMENT ON TABLE public.play_record IS 'PUBLIC 종료 원자 기록. PURGED 전환과 원문 물리 파기는"
+                   + " 전용 회원 파기 소비자에서만 수행';\n"
+                   + "REVOKE ALL ON TABLE public.play_record FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION public.guard_play_record() FROM PUBLIC;\n";
+    }
+
+    private static String sql36() {
+        return "-- 활성 참가 이력은 보존하고 실제 대기/진행 점유만 전역 유일하게 제한한다.\n"
+                   + "ALTER TABLE public.game_member ADD COLUMN occupying_yn boolean;\n"
+                   + "UPDATE public.game_member m SET occupying_yn=m.active_yn AND r.state IN"
+                   + " ('WAITING','RUNNING')\n"
+                   + "  FROM public.game_room r WHERE r.id=m.room_id;\n"
+                   + "ALTER TABLE public.game_member ALTER COLUMN occupying_yn SET NOT NULL;\n"
+                   + "DROP INDEX public.uk_gm_active_member;\n"
+                   + "CREATE UNIQUE INDEX uk_gm_occupied_member ON public.game_member(member_id)"
+                   + " WHERE occupying_yn;\n"
+                   + "\n"
+                   + "CREATE FUNCTION public.sync_game_member_occupancy() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "DECLARE root_state text; expected boolean;\n"
+                   + "BEGIN\n"
+                   + "  SELECT state INTO root_state FROM public.game_room WHERE id=NEW.room_id FOR"
+                   + " UPDATE;\n"
+                   + "  IF root_state IS NULL THEN RAISE EXCEPTION 'game root required' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  expected:=NEW.active_yn AND root_state IN ('WAITING','RUNNING');\n"
+                   + "  IF TG_OP='INSERT' THEN\n"
+                   + "    IF NEW.occupying_yn IS NOT NULL THEN RAISE EXCEPTION 'occupancy is"
+                   + " derived' USING ERRCODE='23514'; END IF;\n"
+                   + "  ELSIF NEW.occupying_yn IS DISTINCT FROM OLD.occupying_yn AND"
+                   + " NEW.occupying_yn IS DISTINCT FROM expected THEN\n"
+                   + "    RAISE EXCEPTION 'occupancy is derived' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  NEW.occupying_yn:=expected;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_game_member_occupancy BEFORE INSERT OR UPDATE ON"
+                   + " public.game_member\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.sync_game_member_occupancy();\n"
+                   + "CREATE FUNCTION public.release_game_occupancy() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF OLD.state IN ('WAITING','RUNNING') AND NEW.state IN"
+                   + " ('ENDED','CANCELLED') THEN\n"
+                   + "    UPDATE public.game_member SET occupying_yn=false WHERE room_id=NEW.id AND"
+                   + " occupying_yn;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_game_room_release AFTER UPDATE OF state ON"
+                   + " public.game_room\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.release_game_occupancy();\n"
+                   + "\n"
+                   + "-- 힌트 본문은 여기에 저장하지 않고 불변 snapshot의 code/level만 고정한다.\n"
+                   + "CREATE TABLE public.game_hint (\n"
+                   + "  room_id bigint NOT NULL,\n"
+                   + "  member_id bigint NOT NULL,\n"
+                   + "  snapshot_id bigint NOT NULL,\n"
+                   + "  level smallint NOT NULL CHECK (level BETWEEN 1 AND 3),\n"
+                   + "  hint_code varchar(32) NOT NULL,\n"
+                   + "  opened_at timestamptz NOT NULL DEFAULT clock_timestamp(),\n"
+                   + "  CONSTRAINT pk_game_hint PRIMARY KEY (room_id,member_id,level),\n"
+                   + "  CONSTRAINT uk_game_hint_code UNIQUE (room_id,member_id,hint_code),\n"
+                   + "  CONSTRAINT fk_game_hint_member FOREIGN KEY (room_id,member_id) REFERENCES"
+                   + " public.game_member(room_id,member_id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_game_hint_snapshot FOREIGN KEY (room_id,snapshot_id)"
+                   + " REFERENCES public.game_room(id,snapshot_id) NOT DEFERRABLE\n"
+                   + ");\n"
+                   + "CREATE FUNCTION public.guard_game_hint() RETURNS trigger LANGUAGE plpgsql AS"
+                   + " $$\n"
+                   + "DECLARE game public.game_room%ROWTYPE;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'opened hint immutable' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  SELECT * INTO game FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;\n"
+                   + "  IF NOT FOUND OR game.state<>'RUNNING' OR game.snapshot_id<>NEW.snapshot_id"
+                   + " OR\n"
+                   + "    game.deadline_at<=clock_timestamp() OR\n"
+                   + "    (SELECT count(*) FROM public.game_hint WHERE room_id=NEW.room_id AND"
+                   + " member_id=NEW.member_id)>=game.max_hints OR\n"
+                   + "    EXISTS (SELECT 1 FROM public.game_report WHERE room_id=NEW.room_id AND"
+                   + " state='ACCEPTED') OR\n"
+                   + "    NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id"
+                   + " AND member_id=NEW.member_id AND active_yn) OR\n"
+                   + "    NOT EXISTS (SELECT 1 FROM public.review_snapshot s,"
+                   + " jsonb_array_elements(s.payload->'resources'->'hints') hint\n"
+                   + "      WHERE s.id=NEW.snapshot_id AND hint->>'code'=NEW.hint_code AND"
+                   + " hint->>'level'=NEW.level::text\n"
+                   + "        AND jsonb_typeof(hint->'body')='string') THEN\n"
+                   + "    RAISE EXCEPTION 'hint participant or snapshot invalid' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_game_hint_guard BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.game_hint\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.guard_game_hint();\n"
+                   + "CREATE TRIGGER tr_game_hint_truncate BEFORE TRUNCATE ON public.game_hint\n"
+                   + "  FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_truncate();\n"
+                   + "\n"
+                   + "CREATE TABLE public.game_clue_read (\n"
+                   + "  room_id bigint NOT NULL,\n"
+                   + "  member_id bigint NOT NULL,\n"
+                   + "  snapshot_id bigint NOT NULL,\n"
+                   + "  clue_code varchar(32) NOT NULL,\n"
+                   + "  read_at timestamptz NOT NULL DEFAULT clock_timestamp(),\n"
+                   + "  CONSTRAINT pk_game_clue_read PRIMARY KEY (room_id,member_id,clue_code),\n"
+                   + "  CONSTRAINT fk_game_clue_member FOREIGN KEY (room_id,member_id) REFERENCES"
+                   + " public.game_member(room_id,member_id) NOT DEFERRABLE,\n"
+                   + "  CONSTRAINT fk_game_clue_snapshot FOREIGN KEY (room_id,snapshot_id)"
+                   + " REFERENCES public.game_room(id,snapshot_id) NOT DEFERRABLE\n"
+                   + ");\n"
+                   + "CREATE FUNCTION public.guard_game_clue_read() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "DECLARE game public.game_room%ROWTYPE;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'clue read immutable' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  SELECT * INTO game FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;\n"
+                   + "  IF NOT FOUND OR game.state<>'RUNNING' OR game.snapshot_id<>NEW.snapshot_id"
+                   + " OR\n"
+                   + "    NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id"
+                   + " AND member_id=NEW.member_id AND active_yn) THEN\n"
+                   + "    RAISE EXCEPTION 'clue participant or snapshot invalid' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_game_clue_guard BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.game_clue_read\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.guard_game_clue_read();\n"
+                   + "CREATE TRIGGER tr_game_clue_truncate BEFORE TRUNCATE ON"
+                   + " public.game_clue_read\n"
+                   + "  FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_truncate();\n"
+                   + "\n"
+                   + "-- 이전 미구현 기록의 NULL은 알 수 없음으로 남기고 신규 기록만 실제 힌트 행 수를 고정한다.\n"
+                   + "ALTER TABLE public.play_record DROP CONSTRAINT ck_play_record_shape;\n"
+                   + "ALTER TABLE public.play_record ADD CONSTRAINT ck_play_record_shape CHECK (\n"
+                   + "  (state='RAW' AND rev=0 AND NOT source_erased_yn AND room_id IS NOT NULL AND"
+                   + " role_a IS NOT NULL AND role_b IS NOT NULL\n"
+                   + "    AND started_at IS NOT NULL AND ended_at IS NOT NULL AND time_basis_at IS"
+                   + " NOT NULL\n"
+                   + "    AND graded_count IS NOT NULL AND graded_count>=0 AND (own_hint_count IS"
+                   + " NULL OR own_hint_count>=0)\n"
+                   + "    AND time_basis_at>=started_at AND"
+                   + " duration_seconds=GREATEST(0,EXTRACT(EPOCH FROM"
+                   + " (time_basis_at-started_at))::integer))\n"
+                   + "  OR (state='PURGED' AND rev=1 AND source_erased_yn AND room_id IS NULL AND"
+                   + " role_a IS NULL AND role_b IS NULL\n"
+                   + "    AND started_at IS NULL AND ended_at IS NULL AND time_basis_at IS NULL AND"
+                   + " graded_count IS NULL AND own_hint_count IS NULL));\n"
+                   + "CREATE OR REPLACE FUNCTION public.guard_play_record() RETURNS trigger"
+                   + " LANGUAGE plpgsql AS $$\n"
+                   + "DECLARE opened integer;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'record physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  IF TG_OP='UPDATE' THEN RAISE EXCEPTION 'record privacy transition requires"
+                   + " dedicated privacy path' USING ERRCODE='42501'; END IF;\n"
+                   + "  IF NEW.state<>'RAW' OR NOT EXISTS (\n"
+                   + "    SELECT 1 FROM public.game_room r JOIN public.game_member m ON"
+                   + " m.room_id=r.id\n"
+                   + "    WHERE r.id=NEW.room_id AND r.purpose='PUBLIC' AND r.state='ENDED'\n"
+                   + "      AND m.member_id=NEW.member_id AND m.active_yn AND"
+                   + " m.role_code=NEW.own_role) THEN\n"
+                   + "    RAISE EXCEPTION 'terminal public participant required' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  SELECT count(*) INTO opened FROM public.game_hint WHERE room_id=NEW.room_id"
+                   + " AND member_id=NEW.member_id;\n"
+                   + "  IF NEW.own_hint_count IS DISTINCT FROM opened THEN\n"
+                   + "    RAISE EXCEPTION 'record hint count mismatch' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_kind;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK"
+                   + " (action IN\n"
+                   + "  ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "   'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "   'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ','PUBLIC_FORFEIT'));\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_actor;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_actor CHECK (\n"
+                   + "  (action='QUALIFICATION_CREATE' AND admin_id IS NOT NULL AND member_id IS"
+                   + " NULL) OR\n"
+                   + "  (action<>'QUALIFICATION_CREATE' AND admin_id IS NULL AND member_id IS NOT"
+                   + " NULL));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_kind;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (action"
+                   + " IN\n"
+                   + "  ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "   'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "   'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','CONTENT_READ','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ','PUBLIC_FORFEIT',\n"
+                   + "   'PUBLIC_LOBBY_EXPIRED','PUBLIC_TIME_LIMIT','PUBLIC_ACCOUNT_DELETED'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT game_audit_actor_kind_check;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor_kind CHECK"
+                   + " (actor_kind IN ('ADMIN','MEMBER','SYSTEM'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL AND"
+                   + " action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='SYSTEM' AND admin_id IS NULL AND member_id IS NULL AND action"
+                   + " IN ('PUBLIC_LOBBY_EXPIRED','PUBLIC_TIME_LIMIT','PUBLIC_ACCOUNT_DELETED') AND"
+                   + " result='CHANGED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action IN ('QUALIFICATION_ACCEPT','QUALIFICATION_FEEDBACK') AND"
+                   + " result='ACCEPTED') OR\n"
+                   + "     (action='PUBLIC_CREATE' AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED') OR\n"
+                   + "     (action IN"
+                   + " ('QUALIFICATION_REPORT_EDIT','PUBLIC_REPORT_EDIT','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ')"
+                   + " AND result IN ('CHANGED','UNCHANGED')) OR\n"
+                   + "     (action IN"
+                   + " ('QUALIFICATION_REPORT_SUBMIT','PUBLIC_REPORT_SUBMIT','PUBLIC_FORFEIT') AND"
+                   + " result='CHANGED'))));\n"
+                   + "COMMENT ON COLUMN public.game_member.occupying_yn IS '회원 활성 이력과 분리된 대기/진행 중"
+                   + " 전역 점유. DB 트리거에서만 파생';\n"
+                   + "REVOKE ALL ON TABLE public.game_hint,public.game_clue_read FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION"
+                   + " public.sync_game_member_occupancy(),public.release_game_occupancy(),public.guard_game_hint(),public.guard_game_clue_read()"
+                   + " FROM PUBLIC;\n";
+    }
+
+    private static String sql37() {
+        return "-- 초대 비밀은 목적 분리 해시로만 보관하고 방 생성 시각의 상한을 상속한다.\n"
+                   + "CREATE TABLE public.game_invite (\n"
+                   + "  id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_game_invite PRIMARY"
+                   + " KEY,\n"
+                   + "  invite_key uuid NOT NULL CONSTRAINT uk_game_invite_key UNIQUE,\n"
+                   + "  room_id bigint NOT NULL REFERENCES public.game_room(id) NOT DEFERRABLE,\n"
+                   + "  generation integer NOT NULL CHECK (generation>0),\n"
+                   + "  token_hash char(64) NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),\n"
+                   + "  expires_at timestamptz NOT NULL,\n"
+                   + "  revoked_at timestamptz,\n"
+                   + "  consumed_at timestamptz,\n"
+                   + "  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),\n"
+                   + "  CONSTRAINT uk_game_invite_generation UNIQUE (room_id,generation),\n"
+                   + "  CONSTRAINT ck_game_invite_end CHECK (revoked_at IS NULL OR consumed_at IS"
+                   + " NULL)\n"
+                   + ");\n"
+                   + "CREATE UNIQUE INDEX uk_game_invite_open ON public.game_invite(room_id)\n"
+                   + "  WHERE revoked_at IS NULL AND consumed_at IS NULL;\n"
+                   + "CREATE INDEX ix_game_invite_room ON public.game_invite(room_id,id);\n"
+                   + "CREATE FUNCTION public.guard_game_invite() RETURNS trigger LANGUAGE plpgsql"
+                   + " AS $$\n"
+                   + "DECLARE root public.game_room%ROWTYPE;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN\n"
+                   + "    SELECT * INTO root FROM public.game_room WHERE id=OLD.room_id FOR"
+                   + " UPDATE;\n"
+                   + "    IF NOT FOUND OR root.state NOT IN ('ENDED','CANCELLED') THEN\n"
+                   + "      RAISE EXCEPTION 'live invitation physical deletion forbidden' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "    RETURN OLD;\n"
+                   + "  END IF;\n"
+                   + "  SELECT * INTO root FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;\n"
+                   + "  IF NOT FOUND OR root.purpose<>'PUBLIC' OR root.mode<>'COOP' OR\n"
+                   + "     (TG_OP='INSERT' AND (root.state<>'WAITING' OR NEW.revoked_at IS NOT NULL"
+                   + " OR NEW.consumed_at IS NOT NULL)) OR\n"
+                   + "     NEW.expires_at>root.lobby_until OR"
+                   + " NEW.expires_at>NEW.created_at+interval '30 minutes' OR\n"
+                   + "     NEW.expires_at<=NEW.created_at OR\n"
+                   + "     (TG_OP='UPDATE' AND"
+                   + " (ROW(NEW.room_id,NEW.invite_key,NEW.generation,NEW.token_hash,NEW.expires_at,NEW.created_at)\n"
+                   + "       IS DISTINCT FROM"
+                   + " ROW(OLD.room_id,OLD.invite_key,OLD.generation,OLD.token_hash,OLD.expires_at,OLD.created_at)\n"
+                   + "       OR OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM"
+                   + " OLD.revoked_at\n"
+                   + "       OR OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM"
+                   + " OLD.consumed_at)) THEN\n"
+                   + "    RAISE EXCEPTION 'public cooperation invitation invalid' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_game_invite BEFORE INSERT OR UPDATE OR DELETE ON"
+                   + " public.game_invite\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.guard_game_invite();\n"
+                   + "CREATE TRIGGER tr_game_invite_truncate BEFORE TRUNCATE ON"
+                   + " public.game_invite\n"
+                   + "  FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_truncate();\n"
+                   + "-- 종료 후 locator와 해시를 함께 제거한다. 참여·소비 기록은 게임 action에 남는다.\n"
+                   + "CREATE FUNCTION public.clear_terminal_game_invites() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF NEW.state IN ('ENDED','CANCELLED') AND OLD.state IS DISTINCT FROM"
+                   + " NEW.state THEN\n"
+                   + "    UPDATE public.game_member SET"
+                   + " last_seen_at=NULL,presence_session_id=NULL,\n"
+                   + "      presence_auth_rev=NULL,updated_at=clock_timestamp()\n"
+                   + "      WHERE room_id=NEW.id AND last_seen_at IS NOT NULL;\n"
+                   + "    DELETE FROM public.game_invite WHERE room_id=NEW.id;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_game_invite_terminal AFTER UPDATE OF state ON"
+                   + " public.game_room\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.clear_terminal_game_invites();\n"
+                   + "-- 역할쌍은 정렬된 FK를 유지하되 실제 두 참가자의 역할 배정 순서는 독립적인 난수로 선택한다.\n"
+                   + "CREATE OR REPLACE FUNCTION public.guard_general_room() RETURNS trigger"
+                   + " LANGUAGE plpgsql AS $$\n"
+                   + "DECLARE v public.story_version%ROWTYPE; p public.privacy_policy%ROWTYPE; n"
+                   + " integer; slots integer; roles integer;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'game physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  IF TG_OP='UPDATE' THEN\n"
+                   + "    IF"
+                   + " ROW(NEW.room_key,NEW.purpose,NEW.mode,NEW.qualification_kind,NEW.reviewer_id,NEW.selected_member_id,NEW.story_id,NEW.policy_id,NEW.created_at)"
+                   + " IS DISTINCT FROM\n"
+                   + "     "
+                   + " ROW(OLD.room_key,OLD.purpose,OLD.mode,OLD.qualification_kind,OLD.reviewer_id,OLD.selected_member_id,OLD.story_id,OLD.policy_id,OLD.created_at)\n"
+                   + "      OR"
+                   + " (ROW(NEW.runtime_id,NEW.runtime_epoch,NEW.config_hash,NEW.rubric_hash,NEW.difficulty,NEW.limit_sec,NEW.max_attempts,NEW.max_hints)"
+                   + " IS DISTINCT FROM\n"
+                   + "         "
+                   + " ROW(OLD.runtime_id,OLD.runtime_epoch,OLD.config_hash,OLD.rubric_hash,OLD.difficulty,OLD.limit_sec,OLD.max_attempts,OLD.max_hints)\n"
+                   + "          AND NOT (OLD.purpose='PUBLIC' AND OLD.mode='COOP' AND"
+                   + " OLD.state='WAITING' AND NEW.state='WAITING'))\n"
+                   + "      OR (OLD.state<>'WAITING' AND"
+                   + " ROW(NEW.version_id,NEW.snapshot_id,NEW.play_rev) IS DISTINCT FROM"
+                   + " ROW(OLD.version_id,OLD.snapshot_id,OLD.play_rev))\n"
+                   + "      OR (OLD.started_at IS NOT NULL AND"
+                   + " ROW(NEW.role_a,NEW.role_b,NEW.started_at,NEW.deadline_at) IS DISTINCT FROM"
+                   + " ROW(OLD.role_a,OLD.role_b,OLD.started_at,OLD.deadline_at))\n"
+                   + "      OR NOT (NEW.state=OLD.state OR (OLD.state='WAITING' AND NEW.state IN"
+                   + " ('RUNNING','CANCELLED')) OR\n"
+                   + "        (OLD.state='RUNNING' AND NEW.state='ENDED')) THEN\n"
+                   + "      RAISE EXCEPTION 'game authority or start pin immutable' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  SELECT * INTO p FROM public.privacy_policy WHERE id=NEW.policy_id;\n"
+                   + "  IF NOT FOUND OR (NEW.purpose='PUBLIC' AND p.scope<>'FRIENDLY') OR\n"
+                   + "    (NEW.purpose='REVIEW_SOLO_QUALIFICATION' AND p.scope<>'PLAYTEST') THEN\n"
+                   + "    RAISE EXCEPTION 'game purpose policy mismatch' USING ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  SELECT * INTO v FROM public.story_version WHERE id=NEW.version_id;\n"
+                   + "  IF NOT FOUND THEN RAISE EXCEPTION 'game version unavailable' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  IF NEW.purpose='REVIEW_SOLO_QUALIFICATION' AND\n"
+                   + "    (v.status<>'REVIEW' OR v.current_snapshot_id IS DISTINCT FROM"
+                   + " NEW.snapshot_id OR\n"
+                   + "     NOT EXISTS (SELECT 1 FROM public.story_access a\n"
+                   + "       JOIN public.admin_account reviewer ON reviewer.id=a.admin_id\n"
+                   + "       JOIN public.admin_credential credential ON"
+                   + " credential.account_id=reviewer.id\n"
+                   + "       WHERE a.story_id=NEW.story_id AND a.admin_id=NEW.reviewer_id AND"
+                   + " a.permission='REVIEW'\n"
+                   + "         AND a.active_yn AND reviewer.active_yn AND reviewer.can_review\n"
+                   + "         AND credential.enrolled_at IS NOT NULL AND"
+                   + " credential.mfa_state='READY')) THEN\n"
+                   + "    RAISE EXCEPTION 'current REVIEW authority required' USING"
+                   + " ERRCODE='23514';\n"
+                   + "  END IF;\n"
+                   + "  IF NEW.state IN ('RUNNING','ENDED') AND (TG_OP='INSERT' OR"
+                   + " OLD.state='WAITING') THEN\n"
+                   + "    SELECT count(*),count(DISTINCT slot),count(role_code) INTO n,slots,roles"
+                   + " FROM public.game_member WHERE room_id=NEW.id AND active_yn;\n"
+                   + "    IF n<>(CASE WHEN NEW.mode='SOLO' THEN 1 ELSE 2 END) OR slots<>n OR"
+                   + " roles<>n OR\n"
+                   + "      NOT EXISTS (SELECT 1 FROM public.story_pair WHERE"
+                   + " version_id=NEW.version_id AND role_a=NEW.role_a AND role_b=NEW.role_b AND"
+                   + " active_yn) OR\n"
+                   + "      EXISTS (SELECT 1 FROM public.game_member m WHERE m.room_id=NEW.id AND"
+                   + " m.active_yn AND\n"
+                   + "        (m.version_id IS DISTINCT FROM NEW.version_id OR\n"
+                   + "         (NEW.mode='SOLO' AND (m.slot<>1 OR m.role_code<>NEW.role_a)) OR\n"
+                   + "         (NEW.mode='COOP' AND m.role_code NOT IN (NEW.role_a,NEW.role_b))))"
+                   + " OR\n"
+                   + "      (NEW.mode='COOP' AND (NEW.role_a=NEW.role_b OR\n"
+                   + "        (SELECT count(DISTINCT role_code) FROM public.game_member WHERE"
+                   + " room_id=NEW.id AND active_yn)<>2 OR\n"
+                   + "        (SELECT count(DISTINCT identity_id) FROM public.game_member WHERE"
+                   + " room_id=NEW.id AND active_yn)<>2)) THEN\n"
+                   + "      RAISE EXCEPTION 'game start participants or pair invalid' USING"
+                   + " ERRCODE='23514';\n"
+                   + "    END IF;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_kind;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK"
+                   + " (action IN\n"
+                   + "  ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "   'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "   'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ','PUBLIC_FORFEIT',\n"
+                   + "   'PUBLIC_INVITE','PUBLIC_JOIN','PUBLIC_LEAVE','PUBLIC_READY','PUBLIC_SELECTION_REFRESH'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_kind;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (action"
+                   + " IN\n"
+                   + "  ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "   'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "   'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','CONTENT_READ','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ','PUBLIC_FORFEIT',\n"
+                   + "   'PUBLIC_LOBBY_EXPIRED','PUBLIC_TIME_LIMIT','PUBLIC_ACCOUNT_DELETED',\n"
+                   + "   'PUBLIC_INVITE','PUBLIC_JOIN','PUBLIC_LEAVE','PUBLIC_READY','PUBLIC_SELECTION_REFRESH'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL AND"
+                   + " action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='SYSTEM' AND admin_id IS NULL AND member_id IS NULL AND action"
+                   + " IN ('PUBLIC_LOBBY_EXPIRED','PUBLIC_TIME_LIMIT','PUBLIC_ACCOUNT_DELETED') AND"
+                   + " result='CHANGED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action IN ('QUALIFICATION_ACCEPT','QUALIFICATION_FEEDBACK') AND"
+                   + " result='ACCEPTED') OR\n"
+                   + "     (action='PUBLIC_CREATE' AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED') OR\n"
+                   + "     (action IN"
+                   + " ('QUALIFICATION_REPORT_EDIT','PUBLIC_REPORT_EDIT','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ',\n"
+                   + "       'PUBLIC_INVITE','PUBLIC_READY','PUBLIC_SELECTION_REFRESH') AND result"
+                   + " IN ('CHANGED','UNCHANGED')) OR\n"
+                   + "     (action IN"
+                   + " ('QUALIFICATION_REPORT_SUBMIT','PUBLIC_REPORT_SUBMIT','PUBLIC_FORFEIT','PUBLIC_JOIN','PUBLIC_LEAVE')"
+                   + " AND result='CHANGED'))));\n"
+                   + "REVOKE ALL ON TABLE public.game_invite FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION"
+                   + " public.guard_game_invite(),public.clear_terminal_game_invites() FROM"
+                   + " PUBLIC;\n";
+    }
+
+    private static String sql38() {
+        return "-- 기존 game_report의 PROPOSED 원문을 접수시에도 그대로 유지한다. 거절·철회·수정 무효는 즉시 원문을 파기한다.\n"
+                   + "CREATE OR REPLACE FUNCTION public.guard_general_report() RETURNS trigger"
+                   + " LANGUAGE plpgsql AS $$\n"
+                   + "DECLARE r public.game_room%ROWTYPE; m public.game_member%ROWTYPE;\n"
+                   + "BEGIN\n"
+                   + "  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'report physical deletion requires"
+                   + " dedicated privacy path' USING ERRCODE='23514'; END IF;\n"
+                   + "  SELECT * INTO r FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;\n"
+                   + "  IF NOT FOUND OR (r.state<>'RUNNING' AND TG_OP='INSERT') OR NEW.snapshot_id"
+                   + " IS DISTINCT FROM r.snapshot_id THEN\n"
+                   + "    RAISE EXCEPTION 'report source pin invalid' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  SELECT * INTO m FROM public.game_member WHERE room_id=NEW.room_id AND"
+                   + " member_id=NEW.proposer_id;\n"
+                   + "  IF NOT FOUND OR m.role_code IS NULL OR (TG_OP='INSERT' AND NOT m.active_yn)"
+                   + " THEN\n"
+                   + "    RAISE EXCEPTION 'report proposer invalid' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  IF TG_OP='UPDATE' AND"
+                   + " (ROW(NEW.room_id,NEW.snapshot_id,NEW.source_rev,NEW.proposer_id,NEW.report_key,NEW.created_at)"
+                   + " IS DISTINCT FROM\n"
+                   + "    ROW(OLD.room_id,OLD.snapshot_id,OLD.source_rev,OLD.proposer_id,OLD.report_key,OLD.created_at)"
+                   + " OR\n"
+                   + "    (OLD.accepted_at IS NOT NULL AND"
+                   + " ROW(NEW.accepted_at,NEW.accepted_by,NEW.grade_deadline_at,NEW.ordinal) IS"
+                   + " DISTINCT FROM\n"
+                   + "      ROW(OLD.accepted_at,OLD.accepted_by,OLD.grade_deadline_at,OLD.ordinal))"
+                   + " OR\n"
+                   + "    (NEW.payload_cipher IS DISTINCT FROM OLD.payload_cipher AND"
+                   + " NEW.payload_cipher IS NOT NULL) OR\n"
+                   + "    (NEW.payload_hash IS DISTINCT FROM OLD.payload_hash AND NEW.payload_hash"
+                   + " IS NOT NULL) OR\n"
+                   + "    (OLD.state='PROPOSED' AND NEW.state NOT IN"
+                   + " ('ACCEPTED','REJECTED','WITHDRAWN','INVALIDATED','CANCELLED')) OR\n"
+                   + "    (OLD.state<>'PROPOSED' AND NEW.state IN ('PROPOSED','ACCEPTED'))) THEN\n"
+                   + "    RAISE EXCEPTION 'report source or acceptance immutable' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  IF TG_OP='UPDATE' AND OLD.state='PROPOSED' AND NEW.state='ACCEPTED' AND\n"
+                   + "    (OLD.payload_cipher IS DISTINCT FROM NEW.payload_cipher OR"
+                   + " OLD.payload_hash IS DISTINCT FROM NEW.payload_hash OR\n"
+                   + "     OLD.source_rev IS DISTINCT FROM r.draft_rev OR"
+                   + " NEW.accepted_by=NEW.proposer_id) THEN\n"
+                   + "    RAISE EXCEPTION 'fixed proposal mismatch' USING ERRCODE='23514'; END"
+                   + " IF;\n"
+                   + "  IF NEW.state IN ('REJECTED','WITHDRAWN','INVALIDATED','CANCELLED') AND\n"
+                   + "    (NEW.payload_cipher IS NOT NULL OR NEW.payload_hash IS NOT NULL OR"
+                   + " NEW.purged_at IS NULL) THEN\n"
+                   + "    RAISE EXCEPTION 'cancelled proposal body must be erased' USING"
+                   + " ERRCODE='23514'; END IF;\n"
+                   + "  IF NEW.state IN ('ACCEPTED','GRADED','UNGRADABLE') AND\n"
+                   + "    ((r.mode='SOLO' AND NEW.accepted_by IS DISTINCT FROM NEW.proposer_id)"
+                   + " OR\n"
+                   + "     (r.mode='COOP' AND (NEW.accepted_by IS NULL OR"
+                   + " NEW.accepted_by=NEW.proposer_id OR\n"
+                   + "       NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id"
+                   + " AND member_id=NEW.accepted_by\n"
+                   + "         AND role_code IS NOT NULL)))) THEN\n"
+                   + "    RAISE EXCEPTION 'mode-specific acceptance invalid' USING ERRCODE='23514';"
+                   + " END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "ALTER TABLE public.game_action DROP CONSTRAINT ck_game_action_kind;\n"
+                   + "ALTER TABLE public.game_action ADD CONSTRAINT ck_game_action_kind CHECK"
+                   + " (action IN\n"
+                   + "  ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "   'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "   'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ','PUBLIC_FORFEIT',\n"
+                   + "   'PUBLIC_INVITE','PUBLIC_JOIN','PUBLIC_LEAVE','PUBLIC_READY','PUBLIC_SELECTION_REFRESH',\n"
+                   + "   'PUBLIC_REPORT_PROPOSE','PUBLIC_REPORT_ACCEPT','PUBLIC_REPORT_REJECT','PUBLIC_REPORT_WITHDRAW'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_kind;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_kind CHECK (action"
+                   + " IN\n"
+                   + "  ('QUALIFICATION_CREATE','QUALIFICATION_ACCEPT','QUALIFICATION_START','QUALIFICATION_FEEDBACK',\n"
+                   + "   'QUALIFICATION_REPORT_EDIT','QUALIFICATION_REPORT_SUBMIT','PUBLIC_CREATE','PUBLIC_START',\n"
+                   + "   'PUBLIC_REPORT_EDIT','PUBLIC_REPORT_SUBMIT','CONTENT_READ','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ','PUBLIC_FORFEIT',\n"
+                   + "   'PUBLIC_LOBBY_EXPIRED','PUBLIC_TIME_LIMIT','PUBLIC_ACCOUNT_DELETED',\n"
+                   + "   'PUBLIC_INVITE','PUBLIC_JOIN','PUBLIC_LEAVE','PUBLIC_READY','PUBLIC_SELECTION_REFRESH',\n"
+                   + "   'PUBLIC_REPORT_PROPOSE','PUBLIC_REPORT_ACCEPT','PUBLIC_REPORT_REJECT','PUBLIC_REPORT_WITHDRAW'));\n"
+                   + "ALTER TABLE public.game_audit DROP CONSTRAINT ck_game_audit_actor;\n"
+                   + "ALTER TABLE public.game_audit ADD CONSTRAINT ck_game_audit_actor CHECK (\n"
+                   + "  (actor_kind='ADMIN' AND admin_id IS NOT NULL AND member_id IS NULL AND"
+                   + " action='QUALIFICATION_CREATE' AND result='CREATED') OR\n"
+                   + "  (actor_kind='SYSTEM' AND admin_id IS NULL AND member_id IS NULL AND action"
+                   + " IN ('PUBLIC_LOBBY_EXPIRED','PUBLIC_TIME_LIMIT','PUBLIC_ACCOUNT_DELETED') AND"
+                   + " result='CHANGED') OR\n"
+                   + "  (actor_kind='MEMBER' AND member_id IS NOT NULL AND admin_id IS NULL AND\n"
+                   + "    ((action IN ('QUALIFICATION_ACCEPT','QUALIFICATION_FEEDBACK') AND"
+                   + " result='ACCEPTED') OR\n"
+                   + "     (action='PUBLIC_CREATE' AND result='CREATED') OR\n"
+                   + "     (action IN ('QUALIFICATION_START','PUBLIC_START') AND result='STARTED')"
+                   + " OR\n"
+                   + "     (action='CONTENT_READ' AND result='EXPOSED') OR\n"
+                   + "     (action IN"
+                   + " ('QUALIFICATION_REPORT_EDIT','PUBLIC_REPORT_EDIT','PUBLIC_HINT_OPEN','PUBLIC_CLUE_READ',\n"
+                   + "       'PUBLIC_INVITE','PUBLIC_READY','PUBLIC_SELECTION_REFRESH') AND result"
+                   + " IN ('CHANGED','UNCHANGED')) OR\n"
+                   + "     (action IN"
+                   + " ('QUALIFICATION_REPORT_SUBMIT','PUBLIC_REPORT_SUBMIT','PUBLIC_FORFEIT','PUBLIC_JOIN','PUBLIC_LEAVE',\n"
+                   + "      "
+                   + " 'PUBLIC_REPORT_PROPOSE','PUBLIC_REPORT_ACCEPT','PUBLIC_REPORT_REJECT','PUBLIC_REPORT_WITHDRAW')"
+                   + " AND result='CHANGED'))));\n"
+                   + "-- 기한 종료·포기 등에서는 미접수 제안과 공동 초안을 판정 이력으로 남기지 않는다.\n"
+                   + "CREATE FUNCTION public.clear_terminal_coop_report() RETURNS trigger LANGUAGE"
+                   + " plpgsql AS $$\n"
+                   + "BEGIN\n"
+                   + "  IF NEW.mode='COOP' AND NEW.state IN ('ENDED','CANCELLED') AND OLD.state IS"
+                   + " DISTINCT FROM NEW.state THEN\n"
+                   + "    UPDATE public.game_report SET"
+                   + " state='CANCELLED',payload_cipher=NULL,payload_hash=NULL,\n"
+                   + "      purged_at=clock_timestamp() WHERE room_id=NEW.id AND"
+                   + " state='PROPOSED';\n"
+                   + "    UPDATE public.game_room SET draft_cipher=NULL,draft_hash=NULL WHERE"
+                   + " id=NEW.id\n"
+                   + "      AND draft_cipher IS NOT NULL;\n"
+                   + "  END IF;\n"
+                   + "  RETURN NEW;\n"
+                   + "END; $$;\n"
+                   + "CREATE TRIGGER tr_terminal_coop_report AFTER UPDATE OF state ON"
+                   + " public.game_room\n"
+                   + "  FOR EACH ROW EXECUTE FUNCTION public.clear_terminal_coop_report();\n"
+                   + "REVOKE ALL ON FUNCTION public.guard_general_report() FROM PUBLIC;\n"
+                   + "REVOKE ALL ON FUNCTION public.clear_terminal_coop_report() FROM PUBLIC;\n";
+    }
+
+    /** V40 원본의 정확한 UTF-8 본문과 마지막 LF를 반환한다. */
+    private static String sql40() {
+        return """
+        -- 최초 노출 기록은 보존한다. 원본 부모 삭제에 따른 FK의 자동 분리만 허용한다.
+        CREATE OR REPLACE FUNCTION public.guard_test_exposure() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        BEGIN
+          IF TG_OP='UPDATE' AND pg_catalog.pg_trigger_depth()>1
+            AND current_user=pg_catalog.pg_get_userbyid(
+              (SELECT p.proowner FROM pg_catalog.pg_proc p
+               WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)')))
+            AND ROW(NEW.story_id,NEW.member_id,NEW.first_exposed_at)
+              IS NOT DISTINCT FROM ROW(OLD.story_id,OLD.member_id,OLD.first_exposed_at)
+            AND ((OLD.first_test_id IS NOT NULL AND NEW.first_test_id IS NULL
+                  AND NEW.first_room_id IS NOT DISTINCT FROM OLD.first_room_id
+                  AND NOT EXISTS (SELECT 1 FROM public.play_test WHERE id=OLD.first_test_id))
+              OR (OLD.first_room_id IS NOT NULL AND NEW.first_room_id IS NULL
+                  AND NEW.first_test_id IS NOT DISTINCT FROM OLD.first_test_id
+                  AND NOT EXISTS (SELECT 1 FROM public.game_room WHERE id=OLD.first_room_id))) THEN
+            RETURN NEW;
+          END IF;
+          RAISE EXCEPTION 'test_exposure is append only' USING ERRCODE='23514';
+        END;
+        $$;
+        REVOKE ALL ON FUNCTION public.guard_test_exposure() FROM PUBLIC;
+        """;
+    }
+
+    /** V39 원본의 정확한 UTF-8 본문과 마지막 LF를 반환한다. */
+    private static String sql39() {
+        return """
+        -- BLIND 평가의 실제 부모와 영수증을 고정한다. 이 구조만으로 수집이나 BLIND 입장은 열리지 않는다.
+        CREATE TABLE public.blind_assessment (
+          id bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT pk_blind_assessment PRIMARY KEY,
+          assessment_key uuid NOT NULL CONSTRAINT uk_ba_key UNIQUE,
+          story_id bigint NOT NULL REFERENCES public.story(id),
+          version_id bigint NOT NULL,
+          snapshot_id bigint NOT NULL,
+          member_id bigint NOT NULL REFERENCES public.member_account(id),
+          assessed_by bigint NOT NULL REFERENCES public.admin_account(id),
+          decision varchar(12) NOT NULL CHECK (decision IN ('ELIGIBLE','INELIGIBLE')),
+          reason_code varchar(32) NOT NULL CHECK (reason_code IN ('NON_PARTICIPATION_CONFIRMED','PARTICIPATION_FOUND','EVIDENCE_UNVERIFIED')),
+          verification_ref varchar(160) NOT NULL CHECK (verification_ref ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$'),
+          checked_at timestamptz NOT NULL,
+          recorded_at timestamptz NOT NULL DEFAULT now(),
+          valid_until timestamptz NOT NULL,
+          supersedes_id bigint REFERENCES public.blind_assessment(id),
+          action_id bigint NOT NULL UNIQUE REFERENCES public.test_action(id),
+          audit_id bigint NOT NULL UNIQUE REFERENCES public.test_audit(id),
+          revoked_at timestamptz,
+          revoked_by bigint REFERENCES public.admin_account(id),
+          revoke_reason_code varchar(32) CHECK (revoke_reason_code IN ('EVIDENCE_INVALID','PARTICIPATION_FOUND','ASSESSMENT_ERROR')),
+          revoke_verification_ref varchar(160) CHECK (revoke_verification_ref ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$'),
+          revoke_action_id bigint UNIQUE REFERENCES public.test_action(id),
+          revoke_audit_id bigint UNIQUE REFERENCES public.test_audit(id),
+          CONSTRAINT fk_ba_version FOREIGN KEY (story_id,version_id) REFERENCES public.story_version(story_id,id),
+          CONSTRAINT fk_ba_snapshot FOREIGN KEY (version_id,snapshot_id) REFERENCES public.review_snapshot(version_id,id),
+
+          CONSTRAINT ck_ba_reason CHECK ((decision='ELIGIBLE')=(reason_code='NON_PARTICIPATION_CONFIRMED')),
+          CONSTRAINT ck_ba_clock CHECK (checked_at<=recorded_at AND checked_at>=recorded_at-interval '24 hours' AND valid_until=checked_at+interval '7 days'),
+          CONSTRAINT ck_ba_revoke CHECK ((revoked_at IS NULL AND revoked_by IS NULL AND revoke_reason_code IS NULL AND revoke_verification_ref IS NULL AND revoke_action_id IS NULL AND revoke_audit_id IS NULL) OR
+            (revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revoke_reason_code IS NOT NULL AND revoke_verification_ref IS NOT NULL AND revoke_action_id IS NOT NULL AND revoke_audit_id IS NOT NULL AND revoked_at>=recorded_at))
+        );
+        CREATE INDEX ix_ba_member_story_latest ON public.blind_assessment(member_id,story_id,id DESC);
+
+        CREATE FUNCTION public.guard_blind_assessment() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE previous public.blind_assessment%ROWTYPE;
+        BEGIN
+          IF TG_OP='DELETE' THEN RAISE EXCEPTION 'blind assessment erasure requires coordinator' USING ERRCODE='42501'; END IF;
+          IF TG_OP='UPDATE' THEN
+            IF OLD.revoked_at IS NOT NULL OR ROW(NEW.id,NEW.assessment_key,NEW.story_id,NEW.version_id,NEW.snapshot_id,NEW.member_id,
+               NEW.assessed_by,NEW.decision,NEW.reason_code,NEW.verification_ref,NEW.checked_at,NEW.recorded_at,
+               NEW.valid_until,NEW.supersedes_id,NEW.action_id,NEW.audit_id) IS DISTINCT FROM
+               ROW(OLD.id,OLD.assessment_key,OLD.story_id,OLD.version_id,OLD.snapshot_id,OLD.member_id,
+               OLD.assessed_by,OLD.decision,OLD.reason_code,OLD.verification_ref,OLD.checked_at,OLD.recorded_at,
+               OLD.valid_until,OLD.supersedes_id,OLD.action_id,OLD.audit_id)
+               OR NEW.revoked_at IS NULL OR NEW.revoked_at>now() OR
+               NOT EXISTS (SELECT 1 FROM public.test_action a WHERE a.id=NEW.revoke_action_id
+                 AND a.admin_id=NEW.revoked_by AND a.action='BLIND_ASSESSMENT_REVOKE'
+                 AND a.scope_key='assessment:'||NEW.assessment_key::text
+                 AND a.result_data->>'assessmentKey'=NEW.assessment_key::text) OR
+               NOT EXISTS (SELECT 1 FROM public.test_audit a WHERE a.id=NEW.revoke_audit_id
+                 AND a.actor_kind='ADMIN' AND a.actor_ref=NEW.revoked_by::text AND a.action='BLIND_ASSESSMENT_REVOKE'
+                 AND a.scope_kind='ASSESSMENT' AND a.scope_key='assessment:'||NEW.assessment_key::text
+                 AND a.phase='RESULT' AND a.business_result='REVOKED'
+                 AND a.detail->>'reasonCode'=NEW.revoke_reason_code
+                 AND a.detail->>'verificationRef'=NEW.revoke_verification_ref) THEN
+              RAISE EXCEPTION 'blind assessment immutable or revoke receipt invalid' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF NEW.recorded_at>now() OR NEW.supersedes_id=NEW.id OR
+             NOT EXISTS (SELECT 1 FROM public.test_action a WHERE a.id=NEW.action_id
+               AND a.admin_id=NEW.assessed_by AND a.action='BLIND_ASSESSMENT_CREATE'
+               AND a.scope_key='version:'||NEW.version_id::text
+               AND a.result_data->>'assessmentKey'=NEW.assessment_key::text) OR
+             NOT EXISTS (SELECT 1 FROM public.test_audit a WHERE a.id=NEW.audit_id
+               AND a.actor_kind='ADMIN' AND a.actor_ref=NEW.assessed_by::text AND a.action='BLIND_ASSESSMENT_CREATE'
+               AND a.scope_kind='ASSESSMENT' AND a.scope_key='assessment:'||NEW.assessment_key::text
+               AND a.phase='RESULT' AND a.business_result='CREATED'
+               AND a.detail->>'reasonCode'=NEW.reason_code
+               AND a.detail->>'verificationRef'=NEW.verification_ref) THEN
+            RAISE EXCEPTION 'blind assessment receipt invalid' USING ERRCODE='23514';
+          END IF;
+          IF NEW.supersedes_id IS NOT NULL THEN
+            SELECT * INTO previous FROM public.blind_assessment WHERE id=NEW.supersedes_id;
+            IF NOT FOUND OR previous.story_id<>NEW.story_id OR previous.member_id<>NEW.member_id OR
+               previous.id>=NEW.id OR EXISTS (SELECT 1 FROM public.blind_assessment WHERE supersedes_id=previous.id) THEN
+              RAISE EXCEPTION 'blind correction predecessor invalid' USING ERRCODE='23514';
+            END IF;
+          END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER tr_ba_guard BEFORE INSERT OR UPDATE OR DELETE ON public.blind_assessment
+          FOR EACH ROW EXECUTE FUNCTION public.guard_blind_assessment();
+        CREATE TRIGGER tr_ba_truncate BEFORE TRUNCATE ON public.blind_assessment
+          FOR EACH STATEMENT EXECUTE FUNCTION public.reject_batch_history_mutation();
+        CREATE UNIQUE INDEX uk_ba_supersedes ON public.blind_assessment(supersedes_id) WHERE supersedes_id IS NOT NULL;
+
+        -- 참가자의 정확한 평가 연결은 nullable이다. 과거 NULL은 미확인이지 적격이 아니다.
+        ALTER TABLE public.test_member ADD COLUMN assessment_id bigint;
+        ALTER TABLE public.test_member ADD CONSTRAINT fk_tm_assessment FOREIGN KEY (assessment_id)
+          REFERENCES public.blind_assessment(id);
+        CREATE FUNCTION public.guard_test_member_assessment() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF TG_OP='UPDATE' AND OLD.assessment_id IS NOT NULL AND NEW.assessment_id IS DISTINCT FROM OLD.assessment_id THEN
+            RAISE EXCEPTION 'test assessment pin immutable' USING ERRCODE='23514'; END IF;
+          IF NEW.assessment_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM public.play_test t JOIN public.story_version v ON v.id=t.version_id
+            JOIN public.blind_assessment a ON a.id=NEW.assessment_id
+            WHERE t.id=NEW.test_id AND t.mode='BLIND' AND a.story_id=v.story_id
+              AND a.snapshot_id=t.snapshot_id AND a.member_id=NEW.member_id) THEN
+            RAISE EXCEPTION 'test assessment binding mismatch' USING ERRCODE='23514'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER tr_tm_assessment BEFORE INSERT OR UPDATE ON public.test_member
+          FOR EACH ROW EXECUTE FUNCTION public.guard_test_member_assessment();
+
+        ALTER TABLE public.game_room ADD COLUMN assessment_id bigint REFERENCES public.blind_assessment(id);
+        ALTER TABLE public.game_room ADD CONSTRAINT ck_gr_assessment_scope CHECK
+          (assessment_id IS NULL OR (purpose='REVIEW_SOLO_QUALIFICATION' AND qualification_kind='BLIND'));
+        CREATE FUNCTION public.guard_room_assessment() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF TG_OP='UPDATE' AND OLD.assessment_id IS NOT NULL AND NEW.assessment_id IS DISTINCT FROM OLD.assessment_id THEN
+            RAISE EXCEPTION 'room assessment pin immutable' USING ERRCODE='23514'; END IF;
+          IF NEW.assessment_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM public.blind_assessment a WHERE a.id=NEW.assessment_id
+              AND a.story_id=NEW.story_id AND a.snapshot_id=NEW.snapshot_id AND a.member_id=NEW.selected_member_id) THEN
+            RAISE EXCEPTION 'room assessment binding mismatch' USING ERRCODE='23514'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER tr_gr_assessment BEFORE INSERT OR UPDATE ON public.game_room
+          FOR EACH ROW EXECUTE FUNCTION public.guard_room_assessment();
+
+        ALTER TABLE public.game_member ADD COLUMN blind_declared boolean;
+        ALTER TABLE public.game_member ADD CONSTRAINT ck_gm_blind_declaration CHECK (blind_declared IS NULL OR blind_declared=true);
+        CREATE FUNCTION public.guard_game_declaration() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF TG_OP='UPDATE' AND NEW.blind_declared IS DISTINCT FROM OLD.blind_declared THEN
+            RAISE EXCEPTION 'game declaration immutable' USING ERRCODE='23514'; END IF;
+          IF NEW.blind_declared IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.game_room r
+            WHERE r.id=NEW.room_id AND r.purpose='REVIEW_SOLO_QUALIFICATION' AND r.qualification_kind='BLIND'
+              AND r.selected_member_id=NEW.member_id) THEN
+            RAISE EXCEPTION 'game declaration mismatch' USING ERRCODE='23514'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER tr_gm_blind_declaration BEFORE INSERT OR UPDATE ON public.game_member
+          FOR EACH ROW EXECUTE FUNCTION public.guard_game_declaration();
+
+        ALTER TABLE public.test_exposure ADD COLUMN first_room_id bigint REFERENCES public.game_room(id) ON DELETE SET NULL;
+        ALTER TABLE public.test_exposure ADD CONSTRAINT ck_tex_one_source CHECK
+          (first_test_id IS NULL OR first_room_id IS NULL);
+        CREATE FUNCTION public.guard_exposure_source() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.first_test_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM public.play_test t JOIN public.story_version v ON v.id=t.version_id
+            JOIN public.test_member m ON m.test_id=t.id AND m.member_id=NEW.member_id
+            WHERE t.id=NEW.first_test_id AND v.story_id=NEW.story_id) OR
+            NEW.first_room_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM public.game_room r JOIN public.game_member m ON m.room_id=r.id AND m.member_id=NEW.member_id
+            WHERE r.id=NEW.first_room_id AND r.story_id=NEW.story_id) THEN
+            RAISE EXCEPTION 'exposure source binding mismatch' USING ERRCODE='23514'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER tr_tex_source BEFORE INSERT ON public.test_exposure FOR EACH ROW EXECUTE FUNCTION public.guard_exposure_source();
+        REVOKE ALL ON public.blind_assessment FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.guard_blind_assessment(), public.guard_test_member_assessment(),
+          public.guard_room_assessment(), public.guard_game_declaration(), public.guard_exposure_source() FROM PUBLIC;
+        """;
+    }
+
+    /** 실제 TEST 종료와 고정 보관 기한을 연결하는 전진 원본이다. */
+    private static String sql41() {
+        return """
+        -- 실제 TEST 종료 시점으로만 보관 기한을 고정한다. 평가 자격의 7일 시계와 독립적이다.
+        CREATE OR REPLACE FUNCTION public.guard_playtest_retention_policy() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+          source_state text;
+          source_end timestamptz;
+          original_raw timestamptz;
+          original_max timestamptz;
+        BEGIN
+          IF TG_OP='DELETE' THEN
+            IF public.privacy_primary_delete_allowed(NULL,OLD.test_id) IS NOT TRUE THEN
+              RAISE EXCEPTION 'test retention deletion requires erasure coordinator' USING ERRCODE='42501';
+            END IF;
+            RETURN OLD;
+          END IF;
+          IF TG_OP='UPDATE' AND ROW(NEW.test_id,NEW.policy_id) IS DISTINCT FROM ROW(OLD.test_id,OLD.policy_id) THEN
+            RAISE EXCEPTION 'test retention source and policy immutable' USING ERRCODE='23514';
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM public.privacy_policy WHERE id=NEW.policy_id AND scope='PLAYTEST') THEN
+            RAISE EXCEPTION 'PLAYTEST policy required' USING ERRCODE='23514';
+          END IF;
+          -- 부모 잠금은 획득하지 않는다. FK가 고정한 부모의 종료 시계만 읽는다.
+          SELECT state,ended_at INTO source_state,source_end FROM public.play_test WHERE id=NEW.test_id;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'play_test source required' USING ERRCODE='23514';
+          END IF;
+          IF source_state NOT IN ('ENDED','EXPIRED','CANCELLED') OR source_end IS NULL THEN
+            IF NEW.raw_until IS NOT NULL OR NEW.max_until IS NOT NULL OR NEW.selected_at IS NOT NULL THEN
+              RAISE EXCEPTION 'retention requires actual terminal source' USING ERRCODE='23514';
+            END IF;
+            RETURN NEW;
+          END IF;
+          original_raw := source_end + interval '90 days';
+          original_max := source_end + interval '365 days';
+          IF TG_OP='INSERT' AND NEW.raw_until IS NULL AND NEW.max_until IS NULL AND NEW.selected_at IS NULL THEN
+            NEW.raw_until := original_raw;
+            NEW.max_until := original_max;
+          END IF;
+          IF NEW.max_until IS DISTINCT FROM original_max THEN
+            RAISE EXCEPTION 'retention maximum must match original end' USING ERRCODE='23514';
+          END IF;
+          IF TG_OP='UPDATE' AND OLD.raw_until IS NULL AND OLD.max_until IS NULL AND OLD.selected_at IS NULL THEN
+            IF NEW.raw_until IS DISTINCT FROM original_raw OR NEW.selected_at IS NOT NULL THEN
+              RAISE EXCEPTION 'first retention deadlines must match original end' USING ERRCODE='23514';
+            END IF;
+          ELSIF TG_OP='UPDATE' THEN
+            IF OLD.max_until IS DISTINCT FROM original_max OR
+              ((OLD.selected_at IS NULL AND OLD.raw_until=original_raw) OR
+               (OLD.selected_at IS NOT NULL AND OLD.raw_until=original_max AND OLD.selected_at<original_raw)) IS NOT TRUE THEN
+              RAISE EXCEPTION 'invalid retained source clocks' USING ERRCODE='23514';
+            END IF;
+            IF ROW(NEW.raw_until,NEW.max_until,NEW.selected_at) IS DISTINCT FROM
+               ROW(OLD.raw_until,OLD.max_until,OLD.selected_at) AND
+               (OLD.selected_at IS NULL AND OLD.raw_until=original_raw
+                 AND now()>=source_end AND now()<original_raw
+                 AND NEW.raw_until=original_max AND NEW.selected_at=now()) IS NOT TRUE THEN
+              RAISE EXCEPTION 'retention selection cannot renew or reset deadlines' USING ERRCODE='23514';
+            END IF;
+          ELSIF (NEW.selected_at IS NULL AND NEW.raw_until=original_raw) IS NOT TRUE THEN
+            RAISE EXCEPTION 'inserted retention deadlines must match original end' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+
+        -- 부모 행 UPDATE가 보유한 잠금 순서대로 자식 행을 변경한다.
+        CREATE FUNCTION public.set_playtest_retention_on_end() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          UPDATE public.test_retention SET raw_until=NEW.ended_at+interval '90 days',
+            max_until=NEW.ended_at+interval '365 days',selected_at=NULL
+            WHERE test_id=NEW.id AND raw_until IS NULL AND max_until IS NULL AND selected_at IS NULL;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'play_test terminal retention missing or already initialized' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        -- 부모와 자식의 기한 변경은 동일한 종료 트랜잭션에 속한다.
+        CREATE TRIGGER trg_playtest_retention_end AFTER UPDATE ON public.play_test
+          FOR EACH ROW WHEN (OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL)
+          EXECUTE FUNCTION public.set_playtest_retention_on_end();
+
+        -- 종료 시각 재기록은 자식 UPDATE 이전에 거절해야 한다.
+        CREATE FUNCTION public.guard_playtest_terminal_clock() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF OLD.ended_at IS NOT NULL AND
+             (NEW.ended_at IS DISTINCT FROM OLD.ended_at OR NEW.state IS DISTINCT FROM OLD.state) THEN
+            RAISE EXCEPTION 'play_test terminal time and state immutable' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER trg_playtest_terminal_clock BEFORE UPDATE ON public.play_test
+          FOR EACH ROW EXECUTE FUNCTION public.guard_playtest_terminal_clock();
+
+        -- 이전 버전의 NULL 기한만 원래 종료 시각으로 복구하며 만료된 원본은 만료 상태로 둔다.
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM public.test_retention r JOIN public.play_test t ON t.id=r.test_id
+            JOIN public.privacy_policy p ON p.id=r.policy_id
+            WHERE p.scope<>'PLAYTEST' OR
+              (t.ended_at IS NULL AND (r.raw_until IS NOT NULL OR r.max_until IS NOT NULL OR r.selected_at IS NOT NULL)) OR
+              (t.ended_at IS NOT NULL AND r.raw_until IS NOT NULL AND
+               (r.max_until IS DISTINCT FROM t.ended_at+interval '365 days' OR
+                ((r.selected_at IS NULL AND r.raw_until=t.ended_at+interval '90 days') OR
+                     (r.selected_at IS NOT NULL AND r.raw_until=t.ended_at+interval '365 days'
+                      AND r.selected_at>=t.ended_at AND r.selected_at<=now()
+                      AND r.selected_at<t.ended_at+interval '90 days')) IS NOT TRUE))) THEN
+            RAISE EXCEPTION 'malformed existing TEST retention requires source-specific repair' USING ERRCODE='23514';
+          END IF;
+        END;
+        $$;
+        UPDATE public.test_retention r SET raw_until=t.ended_at+interval '90 days',
+          max_until=t.ended_at+interval '365 days',selected_at=NULL
+          FROM public.play_test t WHERE t.id=r.test_id AND t.ended_at IS NOT NULL
+            AND t.state IN ('ENDED','EXPIRED','CANCELLED') AND r.raw_until IS NULL
+            AND r.max_until IS NULL AND r.selected_at IS NULL;
+        CREATE TRIGGER tr_test_retention_truncate BEFORE TRUNCATE ON public.test_retention
+          FOR EACH STATEMENT EXECUTE FUNCTION public.reject_general_truncate();
+        CREATE TRIGGER tr_test_retention_clock_delete BEFORE DELETE ON public.test_retention
+          FOR EACH ROW EXECUTE FUNCTION public.guard_playtest_retention_policy();
+        REVOKE ALL ON FUNCTION public.set_playtest_retention_on_end(),public.guard_playtest_terminal_clock() FROM PUBLIC;
+        """;
+    }
+
+    /** 실제 PUBLIC 공동 원문 파기와 최소 생존자 기록을 연결하는 전진 원본이다. */
+    private static String sql42() {
+        return """
+        -- 기존 TEST 영수증의 사라진 부모는 출처를 추측하지 않는다.
+        ALTER TABLE public.privacy_target ADD COLUMN source_kind varchar(16) NOT NULL DEFAULT 'UNKNOWN';
+        ALTER TABLE public.privacy_target ADD COLUMN room_id bigint REFERENCES public.game_room(id) ON DELETE SET NULL NOT DEFERRABLE;
+        ALTER TABLE public.privacy_target ADD COLUMN game_member_id bigint REFERENCES public.game_member(id) ON DELETE SET NULL NOT DEFERRABLE;
+        UPDATE public.privacy_target SET source_kind=CASE
+          WHEN member_id IS NOT NULL THEN 'MEMBER'
+          ELSE 'TEST' END
+          WHERE kind='PRIMARY' AND state<>'COMPLETE'
+            AND num_nonnulls(member_id,test_id)=1;
+        -- V41의 삭제 완료 canonical 영수증을 가리키는 미완료 의존자는 불변 FK로만 TEST를 증명한다.
+        UPDATE public.privacy_target t SET source_kind='TEST'
+          FROM public.privacy_target c WHERE t.kind='PRIMARY' AND t.state<>'COMPLETE'
+            AND t.source_kind='UNKNOWN' AND t.test_id IS NULL AND t.dependency_id=c.id
+            AND c.kind='PRIMARY' AND c.state='COMPLETE' AND c.dependency_id IS NULL
+            AND c.result_code='PHYSICAL_REMOVED' AND c.confirmed_at IS NOT NULL AND c.test_id IS NULL;
+        UPDATE public.privacy_target SET source_kind='NONE'
+          WHERE kind<>'PRIMARY' AND state<>'COMPLETE';
+        ALTER TABLE public.privacy_target ALTER COLUMN source_kind DROP DEFAULT;
+        ALTER TABLE public.privacy_target ADD CONSTRAINT ck_pt_source_kind CHECK
+          (source_kind IN ('MEMBER','TEST','ROOM','MEMBERSHIP','UNKNOWN','NONE'));
+        CREATE UNIQUE INDEX uk_pt_canonical_room ON public.privacy_target(room_id)
+          WHERE kind='PRIMARY' AND source_kind='ROOM' AND room_id IS NOT NULL AND dependency_id IS NULL;
+        CREATE UNIQUE INDEX uk_pt_membership ON public.privacy_target(erase_id,game_member_id)
+          WHERE kind='PRIMARY' AND source_kind='MEMBERSHIP' AND game_member_id IS NOT NULL;
+        ALTER TABLE public.privacy_target DROP CONSTRAINT ck_pt_live;
+        ALTER TABLE public.privacy_target ADD CONSTRAINT ck_pt_live CHECK
+          (kind<>'PRIMARY' OR num_nonnulls(member_id,test_id,room_id,game_member_id)<=1);
+        ALTER TABLE public.privacy_target DROP CONSTRAINT ck_pt_complete;
+        ALTER TABLE public.privacy_target ADD CONSTRAINT ck_pt_complete CHECK
+          ((state='COMPLETE')=(confirmed_at IS NOT NULL) AND
+           (state<>'COMPLETE' OR (member_id IS NULL AND test_id IS NULL AND room_id IS NULL
+            AND game_member_id IS NULL AND locator_cipher IS NULL AND lookup_hash IS NULL)));
+        ALTER TABLE public.privacy_target DROP CONSTRAINT ck_pt_external;
+        ALTER TABLE public.privacy_target ADD CONSTRAINT ck_pt_external CHECK
+          (kind='PRIMARY' OR (member_id IS NULL AND test_id IS NULL AND room_id IS NULL AND game_member_id IS NULL));
+
+        -- 접수의 실재 관계와 의존 대상은 삭제 전 원본으로 확인하고 봉인 뒤에는 종류를 고정한다.
+        CREATE OR REPLACE FUNCTION public.guard_privacy_target() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE owner_id bigint; sealed timestamptz; attempt_test bigint; attempt_room bigint;
+        BEGIN
+         IF TG_OP='DELETE' OR TG_OP='TRUNCATE' THEN
+          RAISE EXCEPTION 'erasure target immutable' USING ERRCODE='42501';
+         END IF;
+         IF TG_OP='INSERT' THEN
+          SELECT member_id,sealed_at INTO owner_id,sealed FROM public.privacy_erase WHERE id=NEW.erase_id FOR UPDATE;
+          IF NOT FOUND OR sealed IS NOT NULL OR owner_id IS NULL OR NEW.state<>'PENDING'
+            OR NEW.confirmed_at IS NOT NULL OR
+            (NEW.kind='PRIMARY' AND
+              ((NEW.source_kind='MEMBER' AND (NEW.member_id IS DISTINCT FROM owner_id OR
+                num_nonnulls(NEW.member_id,NEW.test_id,NEW.room_id,NEW.game_member_id)<>1))
+               OR (NEW.source_kind='TEST' AND (NEW.test_id IS NULL OR
+                NOT EXISTS (SELECT 1 FROM public.test_member WHERE test_id=NEW.test_id AND member_id=owner_id)))
+               OR (NEW.source_kind='ROOM' AND (NEW.room_id IS NULL OR
+                NOT EXISTS (SELECT 1 FROM public.game_room r JOIN public.game_member m ON m.room_id=r.id
+                  WHERE r.id=NEW.room_id AND r.purpose='PUBLIC' AND m.member_id=owner_id AND m.role_code IS NOT NULL)))
+               OR (NEW.source_kind='MEMBERSHIP' AND (NEW.game_member_id IS NULL OR
+                NOT EXISTS (SELECT 1 FROM public.game_member m JOIN public.game_room r ON r.id=m.room_id
+                  WHERE m.id=NEW.game_member_id AND m.member_id=owner_id AND m.role_code IS NULL AND r.purpose='PUBLIC')))
+               OR NEW.source_kind NOT IN ('MEMBER','TEST','ROOM','MEMBERSHIP')))
+            OR (NEW.kind<>'PRIMARY' AND NEW.source_kind<>'NONE') THEN
+            RAISE EXCEPTION 'erasure target ownership invalid' USING ERRCODE='23514';
+          END IF;
+          IF NEW.kind='PROCESSOR' AND (NEW.source_job_id IS NULL OR NEW.source_attempt_no IS NULL
+            OR NEW.locator_cipher IS NULL OR NOT EXISTS (
+              SELECT 1 FROM public.grade_attempt a JOIN public.grade_job j ON j.id=a.job_id
+              WHERE a.job_id=NEW.source_job_id AND a.attempt_no=NEW.source_attempt_no AND j.batch_id IS NULL
+               AND (EXISTS (SELECT 1 FROM public.test_report tr JOIN public.test_member tm ON tm.test_id=tr.test_id
+                  WHERE tr.id=j.report_id AND tm.member_id=owner_id)
+                OR EXISTS (SELECT 1 FROM public.game_report gr JOIN public.game_member gm ON gm.room_id=gr.room_id
+                  JOIN public.game_room r ON r.id=gr.room_id WHERE gr.id=j.game_report_id AND gm.member_id=owner_id
+                  AND gm.role_code IS NOT NULL AND r.purpose='PUBLIC')))) THEN
+            RAISE EXCEPTION 'processor attempt ownership invalid' USING ERRCODE='23514';
+          END IF;
+          IF NEW.dependency_id IS NOT NULL AND (NEW.kind<>'PRIMARY' OR NEW.source_kind NOT IN ('TEST','ROOM')
+            OR NOT EXISTS (SELECT 1 FROM public.privacy_target c JOIN public.privacy_erase e ON e.id=c.erase_id
+              WHERE c.id=NEW.dependency_id AND c.kind='PRIMARY' AND c.source_kind=NEW.source_kind
+               AND c.dependency_id IS NULL AND c.erase_id<>NEW.erase_id AND e.member_id<>owner_id
+               AND ((NEW.source_kind='TEST' AND c.test_id=NEW.test_id AND EXISTS
+                 (SELECT 1 FROM public.test_member WHERE test_id=NEW.test_id AND member_id=e.member_id))
+                OR (NEW.source_kind='ROOM' AND c.room_id=NEW.room_id AND EXISTS
+                 (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id AND member_id=e.member_id
+                  AND role_code IS NOT NULL))))) THEN
+            RAISE EXCEPTION 'canonical source dependency invalid' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+         END IF;
+         IF ROW(NEW.id,NEW.erase_id,NEW.target_key,NEW.kind,NEW.source_kind)
+            IS DISTINCT FROM ROW(OLD.id,OLD.erase_id,OLD.target_key,OLD.kind,OLD.source_kind)
+           OR (NEW.lookup_hash IS DISTINCT FROM OLD.lookup_hash AND
+             (OLD.lookup_hash IS NULL OR NEW.lookup_hash IS NOT NULL OR NEW.state<>'COMPLETE'))
+           OR (ROW(NEW.source_job_id,NEW.source_attempt_no) IS DISTINCT FROM
+               ROW(OLD.source_job_id,OLD.source_attempt_no) AND
+             (NEW.source_job_id IS NOT NULL OR NEW.source_attempt_no IS NOT NULL OR
+              OLD.source_job_id IS NULL OR OLD.source_attempt_no IS NULL OR
+              EXISTS (SELECT 1 FROM public.grade_attempt WHERE job_id=OLD.source_job_id AND attempt_no=OLD.source_attempt_no)))
+           OR (OLD.locator_cipher IS NOT NULL AND NEW.locator_cipher IS DISTINCT FROM OLD.locator_cipher
+             AND (NEW.locator_cipher IS NOT NULL OR NEW.state<>'COMPLETE'))
+           OR (OLD.member_id IS NULL AND NEW.member_id IS NOT NULL)
+           OR (OLD.test_id IS NULL AND NEW.test_id IS NOT NULL)
+           OR (OLD.room_id IS NULL AND NEW.room_id IS NOT NULL)
+           OR (OLD.game_member_id IS NULL AND NEW.game_member_id IS NOT NULL)
+           OR (OLD.member_id IS NOT NULL AND NEW.member_id IS DISTINCT FROM OLD.member_id AND
+             (NEW.member_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.member_account WHERE id=OLD.member_id)))
+           OR (OLD.test_id IS NOT NULL AND NEW.test_id IS DISTINCT FROM OLD.test_id AND
+             (NEW.test_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.play_test WHERE id=OLD.test_id)))
+           OR (OLD.room_id IS NOT NULL AND NEW.room_id IS DISTINCT FROM OLD.room_id AND
+             (NEW.room_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.game_room WHERE id=OLD.room_id)))
+           OR (OLD.game_member_id IS NOT NULL AND NEW.game_member_id IS DISTINCT FROM OLD.game_member_id AND
+             (NEW.game_member_id IS NOT NULL OR EXISTS (SELECT 1 FROM public.game_member WHERE id=OLD.game_member_id)))
+           OR (NEW.dependency_id IS DISTINCT FROM OLD.dependency_id AND
+             (OLD.dependency_id IS NULL OR NEW.dependency_id IS NOT NULL OR NEW.state<>'COMPLETE'
+              OR NOT public.privacy_primary_dependency_allowed(OLD.id)))
+           OR (OLD.state='COMPLETE' AND NEW IS DISTINCT FROM OLD) THEN
+            RAISE EXCEPTION 'erasure target binding immutable' USING ERRCODE='42501';
+         END IF;
+         IF NEW.kind<>'PRIMARY' AND NEW.state='COMPLETE' THEN
+            RAISE EXCEPTION 'external target confirmation unavailable' USING ERRCODE='42501';
+         END IF;
+         IF NEW.kind='PRIMARY' AND OLD.state<>'COMPLETE' AND NEW.state='COMPLETE' THEN
+           IF current_user<>pg_catalog.pg_get_userbyid(
+             (SELECT proowner FROM pg_catalog.pg_proc WHERE oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)')))
+             OR OLD.state<>'RUNNING' OR OLD.lease_until IS NULL OR OLD.lease_until<=clock_timestamp()
+             OR NEW.lease_until IS NOT NULL OR NEW.confirmed_at IS NULL
+             OR NOT EXISTS (SELECT 1 FROM public.privacy_erase e WHERE e.id=OLD.erase_id
+              AND e.sealed_at IS NOT NULL AND e.blocked_at IS NOT NULL AND e.state IN ('PROCESSING','WAITING'))
+             OR (OLD.dependency_id IS NOT NULL AND (NEW.dependency_id IS NOT NULL
+              OR NEW.result_code IS DISTINCT FROM 'DEPENDENCY_CONFIRMED'
+              OR NOT public.privacy_primary_dependency_allowed(OLD.id)))
+             OR (OLD.dependency_id IS NULL AND (NEW.dependency_id IS NOT NULL
+              OR NEW.result_code IS DISTINCT FROM 'PHYSICAL_REMOVED'
+              OR OLD.member_id IS NOT NULL OR OLD.test_id IS NOT NULL
+              OR OLD.room_id IS NOT NULL OR OLD.game_member_id IS NOT NULL)) THEN
+             RAISE EXCEPTION 'primary completion unauthorized' USING ERRCODE='42501';
+           END IF;
+         END IF;
+         IF OLD.source_job_id IS NOT NULL AND NEW.source_job_id IS NULL THEN
+           SELECT tr.test_id,gr.room_id INTO attempt_test,attempt_room FROM public.grade_job j
+             LEFT JOIN public.test_report tr ON tr.id=j.report_id
+             LEFT JOIN public.game_report gr ON gr.id=j.game_report_id WHERE j.id=OLD.source_job_id;
+           IF NOT (public.privacy_primary_delete_allowed(NULL,attempt_test) OR
+             public.privacy_primary_room_allowed(attempt_room)) THEN
+             RAISE EXCEPTION 'processor attempt detachment unauthorized' USING ERRCODE='42501';
+           END IF;
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+
+        CREATE OR REPLACE FUNCTION public.privacy_primary_dependency_allowed(target_id bigint) RETURNS boolean
+        LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+         SELECT current_user=pg_catalog.pg_get_userbyid(p.proowner) AND EXISTS (
+          SELECT 1 FROM public.privacy_target t JOIN public.privacy_erase e ON e.id=t.erase_id
+           JOIN public.privacy_target c ON c.id=t.dependency_id
+           WHERE t.id=target_id AND t.kind='PRIMARY' AND t.state='RUNNING'
+             AND t.lease_until>clock_timestamp() AND e.sealed_at IS NOT NULL
+             AND c.kind='PRIMARY' AND c.dependency_id IS NULL AND c.state='COMPLETE'
+             AND c.confirmed_at IS NOT NULL AND
+               (c.source_kind=t.source_kind OR
+                (t.source_kind='TEST' AND t.test_id IS NULL AND c.source_kind='UNKNOWN'
+                 AND c.test_id IS NULL))
+             AND c.result_code='PHYSICAL_REMOVED'
+             AND ((t.source_kind='TEST' AND c.test_id IS NULL)
+               OR (t.source_kind='ROOM' AND c.room_id IS NULL)))
+         FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)');
+        $$;
+
+        -- 원래 봉인 검사에 PUBLIC의 빠짐과 잘못 만든 출처 종류를 추가로 검사한다.
+        CREATE FUNCTION public.guard_public_erasure_seal() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        BEGIN
+         IF OLD.sealed_at IS NULL AND NEW.sealed_at IS NOT NULL AND (
+          EXISTS (SELECT 1 FROM public.game_member m JOIN public.game_room r ON r.id=m.room_id
+            WHERE m.member_id=OLD.member_id AND r.purpose='PUBLIC' AND
+              ((m.role_code IS NOT NULL AND NOT EXISTS
+                (SELECT 1 FROM public.privacy_target t WHERE t.erase_id=OLD.id AND t.kind='PRIMARY'
+                  AND t.source_kind='ROOM' AND t.room_id=r.id))
+               OR (m.role_code IS NULL AND NOT EXISTS
+                (SELECT 1 FROM public.privacy_target t WHERE t.erase_id=OLD.id AND t.kind='PRIMARY'
+                  AND t.source_kind='MEMBERSHIP' AND t.game_member_id=m.id))))
+          OR EXISTS (SELECT 1 FROM public.grade_attempt a JOIN public.grade_job j ON j.id=a.job_id
+            JOIN public.game_report gr ON gr.id=j.game_report_id JOIN public.game_member m ON m.room_id=gr.room_id
+            WHERE m.member_id=OLD.member_id AND m.role_code IS NOT NULL AND NOT EXISTS
+              (SELECT 1 FROM public.privacy_target t WHERE t.erase_id=OLD.id AND t.kind='PROCESSOR'
+               AND t.source_job_id=a.job_id AND t.source_attempt_no=a.attempt_no AND t.locator_cipher IS NOT NULL))
+          OR EXISTS (SELECT 1 FROM public.privacy_target t WHERE t.erase_id=OLD.id AND t.kind='PRIMARY'
+            AND t.source_kind IN ('ROOM','MEMBERSHIP') AND
+             ((t.source_kind='ROOM' AND t.room_id IS NULL) OR
+              (t.source_kind='MEMBERSHIP' AND t.game_member_id IS NULL)))) THEN
+            RAISE EXCEPTION 'public erasure manifest incomplete' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER tr_public_erasure_seal BEFORE UPDATE ON public.privacy_erase
+         FOR EACH ROW EXECUTE FUNCTION public.guard_public_erasure_seal();
+
+        -- 보관 요약에는 정확 시각, 게임 구분과 원문 참조도 저장하지 않는다.
+        ALTER TABLE public.play_record ALTER COLUMN created_at DROP NOT NULL;
+        ALTER TABLE public.play_record ALTER COLUMN mode DROP NOT NULL;
+        ALTER TABLE public.play_record ALTER COLUMN result_status DROP NOT NULL;
+        ALTER TABLE public.play_record DROP CONSTRAINT ck_play_record_shape;
+        ALTER TABLE public.play_record ADD CONSTRAINT ck_play_record_shape CHECK (
+         (state='RAW' AND rev=0 AND NOT source_erased_yn AND room_id IS NOT NULL
+          AND mode IS NOT NULL AND result_status IS NOT NULL AND created_at IS NOT NULL
+          AND role_a IS NOT NULL AND role_b IS NOT NULL AND started_at IS NOT NULL
+          AND ended_at IS NOT NULL AND time_basis_at IS NOT NULL AND graded_count IS NOT NULL
+          AND graded_count>=0 AND (own_hint_count IS NULL OR own_hint_count>=0) AND time_basis_at>=started_at
+          AND duration_seconds=GREATEST(0,EXTRACT(EPOCH FROM (time_basis_at-started_at))::integer))
+         OR (state='PURGED' AND rev=1 AND source_erased_yn AND room_id IS NULL
+          AND mode IS NULL AND result_status IS NULL AND created_at IS NULL
+          AND role_a IS NULL AND role_b IS NULL AND started_at IS NULL AND ended_at IS NULL
+          AND time_basis_at IS NULL AND graded_count IS NULL AND own_hint_count IS NULL));
+        ALTER TABLE public.play_record DROP CONSTRAINT ck_play_record_score;
+        ALTER TABLE public.play_record ADD CONSTRAINT ck_play_record_score CHECK (
+         (end_reason IN ('SUCCESS','TIME_LIMIT','ATTEMPTS_EXHAUSTED') AND final_score IS NOT NULL
+          AND (state='PURGED' OR result_status=CASE WHEN end_reason='SUCCESS' THEN 'SUCCESS' ELSE 'FAILURE' END))
+         OR (end_reason IN ('FORFEIT','SYSTEM_ERROR','ACCOUNT_DELETED') AND final_score IS NULL
+          AND (state='PURGED' OR result_status='INCOMPLETE')));
+
+        -- 함수 소유자와 봉인된 실제 살아 있는 임대/출처를 모두 확인한다.
+        CREATE FUNCTION public.privacy_primary_room_allowed(source_room bigint) RETURNS boolean
+        LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+         SELECT current_user=pg_catalog.pg_get_userbyid(p.proowner) AND EXISTS (
+          SELECT 1 FROM public.privacy_target t JOIN public.privacy_erase e ON e.id=t.erase_id
+          JOIN public.game_room r ON r.id=t.room_id
+          JOIN public.member_account a ON a.id=e.member_id
+          WHERE t.room_id=source_room AND t.source_kind='ROOM' AND t.kind='PRIMARY'
+            AND t.dependency_id IS NULL AND t.state='RUNNING' AND t.lease_until>clock_timestamp()
+            AND e.sealed_at IS NOT NULL AND e.blocked_at IS NOT NULL
+            AND e.state IN ('PROCESSING','WAITING') AND a.state='DELETED'
+            AND r.purpose='PUBLIC' AND (EXISTS
+              (SELECT 1 FROM public.game_member m WHERE m.room_id=r.id
+                AND m.member_id=e.member_id AND m.role_code IS NOT NULL)
+              OR NOT EXISTS (SELECT 1 FROM public.game_member
+                WHERE room_id=r.id AND member_id=e.member_id)))
+         FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)');
+        $$;
+        CREATE FUNCTION public.privacy_primary_membership_allowed(source_membership bigint) RETURNS boolean
+        LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+         SELECT current_user=pg_catalog.pg_get_userbyid(p.proowner) AND EXISTS (
+          SELECT 1 FROM public.privacy_target t JOIN public.privacy_erase e ON e.id=t.erase_id
+          JOIN public.game_member m ON m.id=t.game_member_id AND m.member_id=e.member_id
+          JOIN public.game_room r ON r.id=m.room_id
+          JOIN public.member_account a ON a.id=e.member_id
+          WHERE t.game_member_id=source_membership AND t.source_kind='MEMBERSHIP'
+            AND t.kind='PRIMARY' AND t.state='RUNNING' AND t.lease_until>clock_timestamp()
+            AND e.sealed_at IS NOT NULL AND e.blocked_at IS NOT NULL AND a.state='DELETED'
+            AND r.purpose='PUBLIC' AND m.role_code IS NULL)
+         FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)');
+        $$;
+
+        -- 원래 TEST·계정 삭제 행 가드는 유지하고 GAME 작업에만 추가 좁은 가드를 둔다.
+        CREATE FUNCTION public.guard_public_game_erase() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE source_room bigint; source_membership bigint;
+        BEGIN
+         IF TG_TABLE_NAME='game_member' THEN
+           source_room:=OLD.room_id;
+           source_membership:=OLD.id;
+         ELSIF TG_TABLE_NAME IN ('game_report','game_hint','game_clue_read','game_invite','game_action','game_audit','play_record') THEN
+           source_room:=OLD.room_id;
+           IF TG_TABLE_NAME IN ('game_action','game_audit') AND OLD.member_id IS NOT NULL THEN
+             SELECT id INTO source_membership FROM public.game_member
+               WHERE room_id=OLD.room_id AND member_id=OLD.member_id AND role_code IS NULL;
+           END IF;
+         ELSIF TG_TABLE_NAME='grade_job' THEN
+           SELECT room_id INTO source_room FROM public.game_report WHERE id=OLD.game_report_id;
+         ELSIF TG_TABLE_NAME IN ('grade_attempt','grade_event') THEN
+           SELECT gr.room_id INTO source_room FROM public.grade_job j JOIN public.game_report gr
+             ON gr.id=j.game_report_id WHERE j.id=OLD.job_id;
+         END IF;
+         IF source_room IS NOT NULL AND COALESCE(public.privacy_primary_room_allowed(source_room),false) THEN
+           RETURN OLD;
+         END IF;
+         IF source_membership IS NOT NULL AND public.privacy_primary_membership_allowed(source_membership) THEN
+           RETURN OLD;
+         END IF;
+         IF source_room IS NOT NULL THEN
+           RAISE EXCEPTION 'public game erasure unauthorized' USING ERRCODE='42501';
+         END IF;
+         RETURN OLD;
+        END;
+        $$;
+
+        CREATE OR REPLACE FUNCTION public.guard_general_room() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE v public.story_version%ROWTYPE; p public.privacy_policy%ROWTYPE; n integer; slots integer; roles integer;
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          IF NOT public.privacy_primary_room_allowed(OLD.id) THEN
+           RAISE EXCEPTION 'game physical deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+         END IF;
+         IF TG_OP='UPDATE' THEN
+          IF ROW(NEW.room_key,NEW.purpose,NEW.mode,NEW.qualification_kind,NEW.reviewer_id,NEW.selected_member_id,NEW.story_id,NEW.policy_id,NEW.created_at)
+             IS DISTINCT FROM ROW(OLD.room_key,OLD.purpose,OLD.mode,OLD.qualification_kind,OLD.reviewer_id,OLD.selected_member_id,OLD.story_id,OLD.policy_id,OLD.created_at)
+             OR (ROW(NEW.runtime_id,NEW.runtime_epoch,NEW.config_hash,NEW.rubric_hash,NEW.difficulty,NEW.limit_sec,NEW.max_attempts,NEW.max_hints)
+               IS DISTINCT FROM ROW(OLD.runtime_id,OLD.runtime_epoch,OLD.config_hash,OLD.rubric_hash,OLD.difficulty,OLD.limit_sec,OLD.max_attempts,OLD.max_hints)
+               AND NOT (OLD.purpose='PUBLIC' AND OLD.mode='COOP' AND OLD.state='WAITING' AND NEW.state='WAITING'))
+             OR (OLD.state<>'WAITING' AND ROW(NEW.version_id,NEW.snapshot_id,NEW.play_rev)
+               IS DISTINCT FROM ROW(OLD.version_id,OLD.snapshot_id,OLD.play_rev))
+             OR (OLD.started_at IS NOT NULL AND ROW(NEW.role_a,NEW.role_b,NEW.started_at,NEW.deadline_at)
+               IS DISTINCT FROM ROW(OLD.role_a,OLD.role_b,OLD.started_at,OLD.deadline_at))
+             OR NOT (NEW.state=OLD.state OR (OLD.state='WAITING' AND NEW.state IN ('RUNNING','CANCELLED'))
+               OR (OLD.state='RUNNING' AND NEW.state='ENDED')) THEN
+           RAISE EXCEPTION 'game authority or start pin immutable' USING ERRCODE='23514';
+          END IF;
+         END IF;
+         SELECT * INTO p FROM public.privacy_policy WHERE id=NEW.policy_id;
+         IF NOT FOUND OR (NEW.purpose='PUBLIC' AND p.scope<>'FRIENDLY') OR
+           (NEW.purpose='REVIEW_SOLO_QUALIFICATION' AND p.scope<>'PLAYTEST') THEN
+           RAISE EXCEPTION 'game purpose policy mismatch' USING ERRCODE='23514';
+         END IF;
+         SELECT * INTO v FROM public.story_version WHERE id=NEW.version_id;
+         IF NOT FOUND THEN RAISE EXCEPTION 'game version unavailable' USING ERRCODE='23514'; END IF;
+         IF NEW.purpose='REVIEW_SOLO_QUALIFICATION' AND
+           (v.status<>'REVIEW' OR v.current_snapshot_id IS DISTINCT FROM NEW.snapshot_id OR
+             NOT EXISTS (SELECT 1 FROM public.story_access a JOIN public.admin_account reviewer ON reviewer.id=a.admin_id
+               JOIN public.admin_credential credential ON credential.account_id=reviewer.id
+               WHERE a.story_id=NEW.story_id AND a.admin_id=NEW.reviewer_id AND a.permission='REVIEW'
+               AND a.active_yn AND reviewer.active_yn AND reviewer.can_review
+               AND credential.enrolled_at IS NOT NULL AND credential.mfa_state='READY')) THEN
+           RAISE EXCEPTION 'current REVIEW authority required' USING ERRCODE='23514';
+         END IF;
+         IF NEW.state IN ('RUNNING','ENDED') AND (TG_OP='INSERT' OR OLD.state='WAITING') THEN
+           SELECT count(*),count(DISTINCT slot),count(role_code) INTO n,slots,roles
+             FROM public.game_member WHERE room_id=NEW.id AND active_yn;
+           IF n<>(CASE WHEN NEW.mode='SOLO' THEN 1 ELSE 2 END) OR slots<>n OR roles<>n OR
+             NOT EXISTS (SELECT 1 FROM public.story_pair WHERE version_id=NEW.version_id
+               AND role_a=NEW.role_a AND role_b=NEW.role_b AND active_yn) OR
+             EXISTS (SELECT 1 FROM public.game_member m WHERE m.room_id=NEW.id AND m.active_yn AND
+               (m.version_id IS DISTINCT FROM NEW.version_id OR
+                (NEW.mode='SOLO' AND (m.slot<>1 OR m.role_code<>NEW.role_a)) OR
+                (NEW.mode='COOP' AND m.role_code NOT IN (NEW.role_a,NEW.role_b)))) OR
+             (NEW.mode='COOP' AND (NEW.role_a=NEW.role_b OR
+               (SELECT count(DISTINCT role_code) FROM public.game_member WHERE room_id=NEW.id AND active_yn)<>2 OR
+               (SELECT count(DISTINCT identity_id) FROM public.game_member WHERE room_id=NEW.id AND active_yn)<>2)) THEN
+              RAISE EXCEPTION 'game start participants or pair invalid' USING ERRCODE='23514';
+           END IF;
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+
+        CREATE OR REPLACE FUNCTION public.guard_general_member() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE r public.game_room%ROWTYPE;
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          IF NOT public.privacy_primary_room_allowed(OLD.room_id)
+            AND NOT public.privacy_primary_membership_allowed(OLD.id) THEN
+           RAISE EXCEPTION 'member physical deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+         END IF;
+         SELECT * INTO r FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;
+         IF NOT FOUND OR (TG_OP='INSERT' AND r.state<>'WAITING') OR
+           NEW.policy_id IS DISTINCT FROM r.policy_id OR (r.mode='SOLO' AND NEW.slot<>1) OR
+           (r.purpose='REVIEW_SOLO_QUALIFICATION' AND NEW.member_id IS DISTINCT FROM r.selected_member_id) THEN
+           RAISE EXCEPTION 'member root binding invalid' USING ERRCODE='23514';
+         END IF;
+         IF TG_OP='UPDATE' AND
+           (ROW(NEW.room_id,NEW.member_id,NEW.identity_id,NEW.slot,NEW.policy_id,NEW.accepted_at,NEW.created_at)
+            IS DISTINCT FROM ROW(OLD.room_id,OLD.member_id,OLD.identity_id,OLD.slot,OLD.policy_id,OLD.accepted_at,OLD.created_at)
+            OR (OLD.role_code IS NOT NULL AND ROW(NEW.role_code,NEW.version_id)
+              IS DISTINCT FROM ROW(OLD.role_code,OLD.version_id))) THEN
+           RAISE EXCEPTION 'member binding immutable' USING ERRCODE='23514';
+         END IF;
+         IF NEW.role_code IS NOT NULL AND (NEW.version_id IS DISTINCT FROM r.version_id
+           OR r.state NOT IN ('WAITING','RUNNING','ENDED')) THEN
+           RAISE EXCEPTION 'member role pin invalid' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+        CREATE OR REPLACE FUNCTION public.guard_general_report() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE r public.game_room%ROWTYPE; m public.game_member%ROWTYPE;
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          IF NOT public.privacy_primary_room_allowed(OLD.room_id) THEN
+           RAISE EXCEPTION 'report physical deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+         END IF;
+         SELECT * INTO r FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;
+         IF NOT FOUND OR r.state<>'RUNNING' AND TG_OP='INSERT' OR NEW.snapshot_id IS DISTINCT FROM r.snapshot_id THEN
+          RAISE EXCEPTION 'report source pin invalid' USING ERRCODE='23514';
+         END IF;
+         SELECT * INTO m FROM public.game_member WHERE room_id=NEW.room_id AND member_id=NEW.proposer_id;
+         IF NOT FOUND OR m.role_code IS NULL OR (TG_OP='INSERT' AND NOT m.active_yn) THEN
+          RAISE EXCEPTION 'report proposer invalid' USING ERRCODE='23514';
+         END IF;
+         IF TG_OP='UPDATE' AND
+           (ROW(NEW.room_id,NEW.snapshot_id,NEW.source_rev,NEW.proposer_id,NEW.report_key,NEW.created_at)
+            IS DISTINCT FROM ROW(OLD.room_id,OLD.snapshot_id,OLD.source_rev,OLD.proposer_id,OLD.report_key,OLD.created_at)
+            OR (OLD.accepted_at IS NOT NULL AND
+              ROW(NEW.accepted_at,NEW.accepted_by,NEW.grade_deadline_at,NEW.ordinal)
+              IS DISTINCT FROM ROW(OLD.accepted_at,OLD.accepted_by,OLD.grade_deadline_at,OLD.ordinal))
+            OR (NEW.payload_cipher IS DISTINCT FROM OLD.payload_cipher AND NEW.payload_cipher IS NOT NULL)
+            OR (NEW.payload_hash IS DISTINCT FROM OLD.payload_hash AND NEW.payload_hash IS NOT NULL)
+            OR (OLD.state='PROPOSED' AND NEW.state NOT IN ('ACCEPTED','REJECTED','WITHDRAWN','INVALIDATED','CANCELLED'))
+            OR (OLD.state<>'PROPOSED' AND NEW.state IN ('PROPOSED','ACCEPTED'))) THEN
+          RAISE EXCEPTION 'report source or acceptance immutable' USING ERRCODE='23514';
+         END IF;
+         IF TG_OP='UPDATE' AND OLD.state='PROPOSED' AND NEW.state='ACCEPTED' AND
+           (OLD.payload_cipher IS DISTINCT FROM NEW.payload_cipher OR OLD.payload_hash IS DISTINCT FROM NEW.payload_hash OR
+            OLD.source_rev IS DISTINCT FROM r.draft_rev OR NEW.accepted_by=NEW.proposer_id) THEN
+           RAISE EXCEPTION 'fixed proposal mismatch' USING ERRCODE='23514';
+         END IF;
+         IF NEW.state IN ('REJECTED','WITHDRAWN','INVALIDATED','CANCELLED') AND
+           (NEW.payload_cipher IS NOT NULL OR NEW.payload_hash IS NOT NULL OR NEW.purged_at IS NULL) THEN
+           RAISE EXCEPTION 'cancelled proposal body must be erased' USING ERRCODE='23514';
+         END IF;
+         IF NEW.state IN ('ACCEPTED','GRADED','UNGRADABLE') AND
+           ((r.mode='SOLO' AND NEW.accepted_by IS DISTINCT FROM NEW.proposer_id) OR
+            (r.mode='COOP' AND (NEW.accepted_by IS NULL OR NEW.accepted_by=NEW.proposer_id OR
+             NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id
+               AND member_id=NEW.accepted_by AND role_code IS NOT NULL)))) THEN
+           RAISE EXCEPTION 'mode-specific acceptance invalid' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+
+        CREATE OR REPLACE FUNCTION public.guard_game_hint() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE game public.game_room%ROWTYPE;
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          IF NOT public.privacy_primary_room_allowed(OLD.room_id) THEN
+           RAISE EXCEPTION 'opened hint immutable' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+         END IF;
+         IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'opened hint immutable' USING ERRCODE='23514'; END IF;
+         SELECT * INTO game FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;
+         IF NOT FOUND OR game.state<>'RUNNING' OR game.snapshot_id<>NEW.snapshot_id OR
+           game.deadline_at<=clock_timestamp() OR
+           (SELECT count(*) FROM public.game_hint WHERE room_id=NEW.room_id AND member_id=NEW.member_id)>=game.max_hints OR
+           EXISTS (SELECT 1 FROM public.game_report WHERE room_id=NEW.room_id AND state='ACCEPTED') OR
+           NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id AND member_id=NEW.member_id AND active_yn) OR
+           NOT EXISTS (SELECT 1 FROM public.review_snapshot s,jsonb_array_elements(s.payload->'resources'->'hints') hint
+             WHERE s.id=NEW.snapshot_id AND hint->>'code'=NEW.hint_code AND hint->>'level'=NEW.level::text
+               AND jsonb_typeof(hint->'body')='string') THEN
+           RAISE EXCEPTION 'hint participant or snapshot invalid' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+        CREATE OR REPLACE FUNCTION public.guard_game_clue_read() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE game public.game_room%ROWTYPE;
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          IF NOT public.privacy_primary_room_allowed(OLD.room_id) THEN
+           RAISE EXCEPTION 'clue read immutable' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+         END IF;
+         IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'clue read immutable' USING ERRCODE='23514'; END IF;
+         SELECT * INTO game FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;
+         IF NOT FOUND OR game.state<>'RUNNING' OR game.snapshot_id<>NEW.snapshot_id OR
+           NOT EXISTS (SELECT 1 FROM public.game_member WHERE room_id=NEW.room_id AND member_id=NEW.member_id AND active_yn) THEN
+          RAISE EXCEPTION 'clue participant or snapshot invalid' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+        CREATE OR REPLACE FUNCTION public.guard_game_invite() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        DECLARE root public.game_room%ROWTYPE;
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          SELECT * INTO root FROM public.game_room WHERE id=OLD.room_id FOR UPDATE;
+          IF NOT FOUND OR (root.state NOT IN ('ENDED','CANCELLED')
+            AND NOT public.privacy_primary_room_allowed(OLD.room_id)
+            AND NOT EXISTS (SELECT 1 FROM public.game_member m WHERE m.room_id=OLD.room_id
+              AND public.privacy_primary_membership_allowed(m.id) AND m.active_yn)) THEN
+           RAISE EXCEPTION 'live invitation physical deletion forbidden' USING ERRCODE='23514';
+          END IF;
+          RETURN OLD;
+         END IF;
+         SELECT * INTO root FROM public.game_room WHERE id=NEW.room_id FOR UPDATE;
+         IF NOT FOUND OR root.purpose<>'PUBLIC' OR root.mode<>'COOP' OR
+           (TG_OP='INSERT' AND (root.state<>'WAITING' OR NEW.revoked_at IS NOT NULL OR NEW.consumed_at IS NOT NULL)) OR
+           NEW.expires_at>root.lobby_until OR NEW.expires_at>NEW.created_at+interval '30 minutes' OR
+           NEW.expires_at<=NEW.created_at OR
+           (TG_OP='UPDATE' AND
+            (ROW(NEW.room_id,NEW.invite_key,NEW.generation,NEW.token_hash,NEW.expires_at,NEW.created_at)
+              IS DISTINCT FROM ROW(OLD.room_id,OLD.invite_key,OLD.generation,OLD.token_hash,OLD.expires_at,OLD.created_at)
+             OR OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
+             OR OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM OLD.consumed_at)) THEN
+           RAISE EXCEPTION 'public cooperation invitation invalid' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+
+        CREATE OR REPLACE FUNCTION public.guard_play_record() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+        BEGIN
+         IF TG_OP='DELETE' THEN
+          IF NOT (COALESCE(public.privacy_primary_room_allowed(OLD.room_id),false) OR
+            (OLD.state='PURGED' AND public.privacy_primary_delete_allowed(OLD.member_id,NULL))) THEN
+           RAISE EXCEPTION 'record deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+         END IF;
+         IF TG_OP='UPDATE' THEN
+          IF OLD.state<>'RAW' OR NEW.state<>'PURGED' OR NOT public.privacy_primary_room_allowed(OLD.room_id)
+            OR NOT EXISTS (SELECT 1 FROM public.game_room r JOIN public.game_member m
+               ON m.room_id=r.id AND m.member_id=OLD.member_id AND m.role_code=OLD.own_role
+               JOIN public.member_account a ON a.id=m.member_id AND a.state<>'DELETED'
+               WHERE r.id=OLD.room_id AND r.purpose='PUBLIC' AND r.mode='COOP')
+            OR NEW.member_id IS DISTINCT FROM OLD.member_id OR NEW.id<>OLD.id
+            OR NEW.record_key=OLD.record_key OR
+            ROW(NEW.story_code,NEW.story_title,NEW.difficulty,NEW.own_role,NEW.own_role_name,
+              NEW.duration_seconds,NEW.end_reason,NEW.final_score)
+              IS DISTINCT FROM ROW(OLD.story_code,OLD.story_title,OLD.difficulty,OLD.own_role,OLD.own_role_name,
+                OLD.duration_seconds,OLD.end_reason,OLD.final_score) THEN
+           RAISE EXCEPTION 'record privacy transition unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN NEW;
+         END IF;
+         IF NEW.state='PURGED' THEN
+          IF NOT EXISTS (SELECT 1 FROM public.game_room r JOIN public.game_member m
+            ON m.room_id=r.id JOIN public.privacy_target t ON t.room_id=r.id
+            JOIN public.privacy_erase e ON e.id=t.erase_id
+            WHERE t.source_kind='ROOM' AND t.kind='PRIMARY' AND t.state='RUNNING'
+              AND r.purpose='PUBLIC' AND r.mode='COOP' AND r.started_at IS NOT NULL
+              AND e.member_id<>NEW.member_id AND m.member_id=NEW.member_id AND m.role_code=NEW.own_role
+              AND public.privacy_primary_room_allowed(r.id)) THEN
+           RAISE EXCEPTION 'terminal public participant required' USING ERRCODE='23514';
+          END IF;
+          RETURN NEW;
+         END IF;
+         IF NOT EXISTS (SELECT 1 FROM public.game_room r JOIN public.game_member m ON m.room_id=r.id
+            WHERE r.id=NEW.room_id AND r.purpose='PUBLIC' AND r.state='ENDED'
+              AND m.member_id=NEW.member_id AND m.active_yn AND m.role_code=NEW.own_role)
+            OR NEW.own_hint_count IS DISTINCT FROM
+              (SELECT count(*) FROM public.game_hint WHERE room_id=NEW.room_id AND member_id=NEW.member_id) THEN
+          RAISE EXCEPTION 'terminal public participant or hint count invalid' USING ERRCODE='23514';
+         END IF;
+         RETURN NEW;
+        END;
+        $$;
+
+        -- 기존 immutable 영수증의 UPDATE/TRUNCATE 거부는 유지한다.
+        DROP TRIGGER tr_general_action_immutable ON public.game_action;
+        DROP TRIGGER tr_general_audit_immutable ON public.game_audit;
+        CREATE TRIGGER tr_general_action_immutable BEFORE UPDATE ON public.game_action
+         FOR EACH ROW EXECUTE FUNCTION public.reject_general_action_change();
+        CREATE TRIGGER tr_general_audit_immutable BEFORE UPDATE ON public.game_audit
+         FOR EACH ROW EXECUTE FUNCTION public.reject_general_action_change();
+        CREATE TRIGGER tr_game_action_erase BEFORE DELETE ON public.game_action
+         FOR EACH ROW EXECUTE FUNCTION public.guard_public_game_erase();
+        CREATE TRIGGER tr_game_audit_erase BEFORE DELETE ON public.game_audit
+         FOR EACH ROW EXECUTE FUNCTION public.guard_public_game_erase();
+        CREATE TRIGGER tr_game_job_erase BEFORE DELETE ON public.grade_job
+         FOR EACH ROW EXECUTE FUNCTION public.guard_public_game_erase();
+        CREATE TRIGGER tr_game_attempt_erase BEFORE DELETE ON public.grade_attempt
+         FOR EACH ROW EXECUTE FUNCTION public.guard_public_game_erase();
+        CREATE TRIGGER tr_game_event_erase BEFORE DELETE ON public.grade_event
+         FOR EACH ROW EXECUTE FUNCTION public.guard_public_game_erase();
+
+        -- 기존 소비자를 TEST/회원 경로로 보존하고 동일 서명에 계정 우선 잠금/공개 출처를 추가한다.
+        -- 기존 명시 EXECUTE는 원래 OID에 남으므로 이전 대상과 grant option을 먼저 정확히 저장한다.
+        CREATE TEMP TABLE privacy_consumer_executor_acl ON COMMIT DROP AS
+         SELECT grant_entry.grantee, bool_or(grant_entry.is_grantable) AS grantable
+         FROM pg_catalog.pg_proc p CROSS JOIN LATERAL
+           pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) grant_entry
+         WHERE p.oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)')
+           AND grant_entry.privilege_type='EXECUTE' AND grant_entry.grantee<>p.proowner
+         GROUP BY grant_entry.grantee;
+        DO $$ BEGIN
+         IF EXISTS (SELECT 1 FROM privacy_consumer_executor_acl WHERE grantee=0) THEN
+           RAISE EXCEPTION 'PUBLIC erasure consumer execution cannot be transferred' USING ERRCODE='42501';
+         END IF;
+        END $$;
+        ALTER FUNCTION public.consume_privacy_primary(bigint) RENAME TO consume_privacy_primary_test_account;
+        CREATE FUNCTION public.consume_privacy_primary(target_id bigint) RETURNS boolean
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+        DECLARE target_row public.privacy_target%ROWTYPE; root_row public.privacy_erase%ROWTYPE;
+         source_member bigint; source_room bigint; member_row public.game_member%ROWTYPE;
+         canonical public.privacy_target%ROWTYPE; survivor bigint; deletion_time timestamptz;
+         participants bigint[]; locked_participants bigint[]; source_closure text[]; locked_closure text[];
+         room_row public.game_room%ROWTYPE; reason text; settled_score integer; basis_time timestamptz;
+         normal_count integer; latest_base integer; penalty integer;
+        BEGIN
+         SELECT * INTO target_row FROM public.privacy_target WHERE id=target_id;
+         IF NOT FOUND OR target_row.kind<>'PRIMARY' THEN RETURN false; END IF;
+         IF target_row.state='COMPLETE' THEN RETURN target_row.confirmed_at IS NOT NULL; END IF;
+         SELECT * INTO root_row FROM public.privacy_erase WHERE id=target_row.erase_id;
+         IF NOT FOUND OR root_row.member_id IS NULL THEN RETURN false; END IF;
+         -- 선행 잠금 없이 루트를 먼저 잠그는 직접 SQL 호출도 같은 순서로 직렬화한다.
+         SELECT array_agg(id ORDER BY id) INTO participants FROM public.member_account WHERE
+           id=root_row.member_id OR id IN (SELECT tm2.member_id FROM public.test_member tm1
+             JOIN public.test_member tm2 ON tm2.test_id=tm1.test_id WHERE tm1.member_id=root_row.member_id)
+           OR id IN (SELECT gm2.member_id FROM public.game_member gm1 JOIN public.game_member gm2
+             ON gm2.room_id=gm1.room_id
+             JOIN public.game_room r ON r.id=gm1.room_id AND r.purpose='PUBLIC'
+             WHERE gm1.member_id=root_row.member_id AND
+               (gm1.role_code IS NOT NULL
+                OR (r.state='WAITING' AND gm1.role_code IS NULL
+                  AND gm1.active_yn AND gm2.active_yn)));
+         SELECT array_agg(item ORDER BY item) INTO source_closure FROM (
+           SELECT 'TEST:'||tm1.test_id::text||':'||tm2.member_id::text AS item FROM public.test_member tm1
+             JOIN public.test_member tm2 ON tm2.test_id=tm1.test_id WHERE tm1.member_id=root_row.member_id
+           UNION ALL SELECT 'ROOM:'||gm1.room_id::text||':'||gm2.id::text||':'||gm2.member_id::text
+             FROM public.game_member gm1 JOIN public.game_member gm2 ON gm2.room_id=gm1.room_id
+             JOIN public.game_room r ON r.id=gm1.room_id WHERE gm1.member_id=root_row.member_id
+               AND r.purpose='PUBLIC' AND gm1.role_code IS NOT NULL
+           UNION ALL SELECT 'WAITING:'||gm1.room_id::text||':'||gm2.id::text||':'||gm2.member_id::text
+             FROM public.game_member gm1 JOIN public.game_member gm2 ON gm2.room_id=gm1.room_id
+             JOIN public.game_room r ON r.id=gm1.room_id WHERE gm1.member_id=root_row.member_id
+               AND r.purpose='PUBLIC' AND r.state='WAITING' AND gm1.role_code IS NULL
+               AND gm1.active_yn AND gm2.active_yn
+           UNION ALL SELECT 'MEMBERSHIP:'||gm.id::text||':'||gm.room_id::text
+             FROM public.game_member gm JOIN public.game_room r ON r.id=gm.room_id
+             WHERE gm.member_id=root_row.member_id AND r.purpose='PUBLIC' AND gm.role_code IS NULL) edges;
+         PERFORM id FROM public.member_account WHERE id=ANY(participants) ORDER BY id FOR UPDATE;
+         SELECT array_agg(id ORDER BY id) INTO locked_participants FROM public.member_account WHERE
+           id=root_row.member_id OR id IN (SELECT tm2.member_id FROM public.test_member tm1
+             JOIN public.test_member tm2 ON tm2.test_id=tm1.test_id WHERE tm1.member_id=root_row.member_id)
+           OR id IN (SELECT gm2.member_id FROM public.game_member gm1 JOIN public.game_member gm2
+             ON gm2.room_id=gm1.room_id
+             JOIN public.game_room r ON r.id=gm1.room_id AND r.purpose='PUBLIC'
+             WHERE gm1.member_id=root_row.member_id AND
+               (gm1.role_code IS NOT NULL
+                OR (r.state='WAITING' AND gm1.role_code IS NULL
+                  AND gm1.active_yn AND gm2.active_yn)));
+         SELECT array_agg(item ORDER BY item) INTO locked_closure FROM (
+           SELECT 'TEST:'||tm1.test_id::text||':'||tm2.member_id::text AS item FROM public.test_member tm1
+             JOIN public.test_member tm2 ON tm2.test_id=tm1.test_id WHERE tm1.member_id=root_row.member_id
+           UNION ALL SELECT 'ROOM:'||gm1.room_id::text||':'||gm2.id::text||':'||gm2.member_id::text
+             FROM public.game_member gm1 JOIN public.game_member gm2 ON gm2.room_id=gm1.room_id
+             JOIN public.game_room r ON r.id=gm1.room_id WHERE gm1.member_id=root_row.member_id
+               AND r.purpose='PUBLIC' AND gm1.role_code IS NOT NULL
+           UNION ALL SELECT 'WAITING:'||gm1.room_id::text||':'||gm2.id::text||':'||gm2.member_id::text
+             FROM public.game_member gm1 JOIN public.game_member gm2 ON gm2.room_id=gm1.room_id
+             JOIN public.game_room r ON r.id=gm1.room_id WHERE gm1.member_id=root_row.member_id
+               AND r.purpose='PUBLIC' AND r.state='WAITING' AND gm1.role_code IS NULL
+               AND gm1.active_yn AND gm2.active_yn
+           UNION ALL SELECT 'MEMBERSHIP:'||gm.id::text||':'||gm.room_id::text
+             FROM public.game_member gm JOIN public.game_room r ON r.id=gm.room_id
+             WHERE gm.member_id=root_row.member_id AND r.purpose='PUBLIC' AND gm.role_code IS NULL) edges;
+         IF participants IS DISTINCT FROM locked_participants OR source_closure IS DISTINCT FROM locked_closure THEN
+          RAISE EXCEPTION 'account-first closure changed' USING ERRCODE='23514';
+         END IF;
+         IF EXISTS (SELECT 1 FROM public.game_member gm JOIN public.game_room r ON r.id=gm.room_id
+            WHERE gm.member_id=root_row.member_id AND r.purpose='PUBLIC' AND
+              ((gm.role_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.privacy_target t
+                WHERE t.erase_id=root_row.id AND t.source_kind='ROOM' AND t.room_id=r.id))
+               OR (gm.role_code IS NULL AND NOT EXISTS (SELECT 1 FROM public.privacy_target t
+                WHERE t.erase_id=root_row.id AND t.source_kind='MEMBERSHIP' AND t.game_member_id=gm.id)))) THEN
+          RAISE EXCEPTION 'public closure changed' USING ERRCODE='23514';
+         END IF;
+         SELECT * INTO root_row FROM public.privacy_erase WHERE id=target_row.erase_id FOR UPDATE;
+         SELECT * INTO target_row FROM public.privacy_target WHERE id=target_id FOR UPDATE;
+         IF target_row.state='COMPLETE' THEN RETURN target_row.confirmed_at IS NOT NULL; END IF;
+         IF target_row.state<>'RUNNING' OR target_row.lease_until<=clock_timestamp()
+           OR root_row.sealed_at IS NULL OR root_row.blocked_at IS NULL
+           OR root_row.target_count IS DISTINCT FROM (SELECT count(*) FROM public.privacy_target WHERE erase_id=root_row.id)
+           OR NOT EXISTS (SELECT 1 FROM public.member_account WHERE id=root_row.member_id AND state='DELETED') THEN
+           RAISE EXCEPTION 'primary manifest or lease invalid' USING ERRCODE='23514';
+         END IF;
+         IF target_row.source_kind='MEMBER' THEN
+           IF EXISTS (SELECT 1 FROM public.privacy_target t WHERE t.erase_id=root_row.id AND t.kind='PRIMARY'
+             AND t.source_kind IN ('ROOM','MEMBERSHIP','UNKNOWN') AND t.state<>'COMPLETE')
+              OR EXISTS (SELECT 1 FROM public.game_member WHERE member_id=root_row.member_id) THEN
+             RAISE EXCEPTION 'public primary work outstanding' USING ERRCODE='23514';
+           END IF;
+           DELETE FROM public.play_record WHERE member_id=root_row.member_id AND state='PURGED';
+           RETURN public.consume_privacy_primary_test_account(target_id);
+         ELSIF target_row.source_kind='TEST' THEN
+           RETURN public.consume_privacy_primary_test_account(target_id);
+         ELSIF target_row.source_kind='UNKNOWN' THEN
+           RAISE EXCEPTION 'historical source cannot be inferred' USING ERRCODE='23514';
+         ELSIF target_row.source_kind='ROOM' AND target_row.dependency_id IS NOT NULL THEN
+           SELECT * INTO canonical FROM public.privacy_target WHERE id=target_row.dependency_id;
+           IF canonical.source_kind<>'ROOM' OR canonical.kind<>'PRIMARY' OR canonical.state<>'COMPLETE'
+             OR canonical.result_code<>'PHYSICAL_REMOVED' OR canonical.confirmed_at IS NULL
+             OR canonical.room_id IS NOT NULL OR target_row.room_id IS NOT NULL THEN
+            RAISE EXCEPTION 'canonical room receipt unavailable' USING ERRCODE='23514';
+           END IF;
+           UPDATE public.privacy_target SET state='COMPLETE',dependency_id=NULL,locator_cipher=NULL,
+            confirmed_at=clock_timestamp(),result_code='DEPENDENCY_CONFIRMED',lease_until=NULL WHERE id=target_id;
+         ELSIF target_row.source_kind='MEMBERSHIP' THEN
+           SELECT r.id INTO source_room FROM public.game_member m JOIN public.game_room r ON r.id=m.room_id
+             WHERE m.id=target_row.game_member_id AND r.purpose='PUBLIC';
+           IF source_room IS NULL THEN RAISE EXCEPTION 'public membership unavailable' USING ERRCODE='23514'; END IF;
+           PERFORM 1 FROM public.game_room WHERE id=source_room AND purpose='PUBLIC' FOR UPDATE;
+           IF NOT FOUND THEN RAISE EXCEPTION 'public membership unavailable' USING ERRCODE='23514'; END IF;
+           SELECT * INTO member_row FROM public.game_member WHERE id=target_row.game_member_id FOR UPDATE;
+           IF NOT FOUND OR member_row.room_id<>source_room OR member_row.member_id<>root_row.member_id
+             OR member_row.role_code IS NOT NULL THEN
+             RAISE EXCEPTION 'historical membership unavailable' USING ERRCODE='23514';
+           END IF;
+           IF EXISTS (SELECT 1 FROM public.game_report WHERE room_id=source_room
+             AND (proposer_id=root_row.member_id OR accepted_by=root_row.member_id)) THEN
+             RAISE EXCEPTION 'membership still references report' USING ERRCODE='23514';
+           END IF;
+           DELETE FROM public.game_action WHERE room_id=source_room AND member_id=root_row.member_id;
+           DELETE FROM public.game_audit WHERE room_id=source_room AND member_id=root_row.member_id;
+           IF member_row.active_yn AND EXISTS (SELECT 1 FROM public.game_room
+             WHERE id=source_room AND state='WAITING') THEN
+             DELETE FROM public.game_invite WHERE room_id=source_room;
+             IF member_row.slot=1 THEN
+               UPDATE public.game_room SET state='CANCELLED',end_reason='ACCOUNT_DELETED',ended_at=clock_timestamp()
+                WHERE id=source_room;
+             ELSE
+               UPDATE public.game_member SET ready_yn=false,updated_at=clock_timestamp()
+                WHERE room_id=source_room AND id<>member_row.id AND ready_yn;
+             END IF;
+           END IF;
+           DELETE FROM public.game_member WHERE id=member_row.id;
+           UPDATE public.privacy_target SET state='COMPLETE',locator_cipher=NULL,confirmed_at=clock_timestamp(),
+            result_code='PHYSICAL_REMOVED',lease_until=NULL WHERE id=target_id;
+         ELSIF target_row.source_kind='ROOM' AND target_row.room_id IS NOT NULL THEN
+           source_room:=target_row.room_id;
+           IF NOT public.privacy_primary_room_allowed(source_room) THEN
+              RAISE EXCEPTION 'public room target unauthorized' USING ERRCODE='42501';
+           END IF;
+           PERFORM 1 FROM public.game_room WHERE id=source_room FOR UPDATE;
+           IF EXISTS (SELECT 1 FROM public.game_member m JOIN public.privacy_target t
+              ON t.game_member_id=m.id AND t.source_kind='MEMBERSHIP' AND t.kind='PRIMARY'
+              WHERE m.room_id=source_room AND t.state<>'COMPLETE') THEN
+             RAISE EXCEPTION 'historical member receipt outstanding' USING ERRCODE='23514';
+           END IF;
+           IF EXISTS (SELECT 1 FROM public.grade_attempt a JOIN public.grade_job j ON j.id=a.job_id
+               JOIN public.game_report gr ON gr.id=j.game_report_id WHERE gr.room_id=source_room
+               AND NOT EXISTS (SELECT 1 FROM public.privacy_target t WHERE t.erase_id=root_row.id
+                 AND t.kind='PROCESSOR' AND t.locator_cipher IS NOT NULL
+                 AND t.source_job_id=a.job_id AND t.source_attempt_no=a.attempt_no)) THEN
+              RAISE EXCEPTION 'game attempt locator missing' USING ERRCODE='23514';
+           END IF;
+           SELECT * INTO room_row FROM public.game_room WHERE id=source_room;
+           SELECT min(a.deleted_at) INTO deletion_time FROM public.game_member m
+             JOIN public.member_account a ON a.id=m.member_id
+             WHERE m.room_id=source_room AND m.role_code IS NOT NULL AND a.state='DELETED';
+           IF deletion_time IS NULL THEN RAISE EXCEPTION 'fixed participant deletion time unavailable' USING ERRCODE='23514'; END IF;
+           SELECT m.member_id INTO survivor FROM public.game_member m JOIN public.member_account a ON a.id=m.member_id
+            JOIN public.game_room r ON r.id=m.room_id WHERE m.room_id=source_room AND m.role_code IS NOT NULL
+              AND m.member_id<>root_row.member_id AND a.state<>'DELETED' AND r.mode='COOP';
+           DELETE FROM public.play_record WHERE room_id=source_room
+             AND (survivor IS NULL OR member_id<>survivor);
+           IF survivor IS NOT NULL THEN
+             IF room_row.started_at IS NOT NULL THEN
+               IF room_row.state='ENDED' THEN
+                 reason:=room_row.end_reason;
+                 settled_score:=room_row.final_score;
+                 basis_time:=room_row.time_basis_at;
+               ELSIF room_row.state='RUNNING' THEN
+                 IF room_row.deadline_at<=deletion_time AND NOT EXISTS
+                   (SELECT 1 FROM public.game_report gr WHERE gr.room_id=source_room AND gr.state='ACCEPTED') THEN
+                   reason:='TIME_LIMIT';
+                   basis_time:=room_row.deadline_at;
+                   SELECT count(*),max(base_score) FILTER (WHERE ordinal=last_ordinal) INTO normal_count,latest_base
+                     FROM (SELECT base_score,ordinal,max(ordinal) OVER () AS last_ordinal
+                       FROM public.game_report WHERE room_id=source_room AND state='GRADED') graded;
+                   IF normal_count<>room_row.graded_count OR
+                     (normal_count=0 AND room_row.last_base_score IS NOT NULL) OR
+                     (normal_count>0 AND room_row.last_base_score IS DISTINCT FROM latest_base) THEN
+                     RAISE EXCEPTION 'timeout grade source mismatch' USING ERRCODE='23514';
+                   END IF;
+                   SELECT (snap.payload->'policy'->>'wrongPenalty')::integer INTO penalty
+                     FROM public.review_snapshot snap WHERE snap.id=room_row.snapshot_id;
+                   IF penalty IS NULL OR penalty<0 OR penalty>100 THEN
+                     RAISE EXCEPTION 'timeout penalty unavailable' USING ERRCODE='23514';
+                   END IF;
+                   settled_score:=GREATEST(0,COALESCE(latest_base,0)-room_row.wrong_count*penalty);
+                 ELSIF EXISTS (SELECT 1 FROM public.game_report gr JOIN public.grade_job j
+                   ON j.game_report_id=gr.id WHERE gr.room_id=source_room AND gr.state='ACCEPTED'
+                   AND (j.deadline_at<=deletion_time OR (j.state IN ('FAILED','CANCELLED') AND j.call_count>=3))) THEN
+                   reason:='SYSTEM_ERROR';
+                   settled_score:=NULL;
+                   SELECT max(accepted_at) INTO basis_time FROM public.game_report
+                     WHERE room_id=source_room AND state='ACCEPTED';
+                 ELSE
+                   reason:='ACCOUNT_DELETED';
+                   settled_score:=NULL;
+                   basis_time:=LEAST(deletion_time,room_row.deadline_at);
+                 END IF;
+               ELSE
+                 RAISE EXCEPTION 'started public room state invalid' USING ERRCODE='23514';
+               END IF;
+               IF basis_time IS NULL OR basis_time<room_row.started_at THEN
+                 RAISE EXCEPTION 'public result basis unavailable' USING ERRCODE='23514';
+               END IF;
+             END IF;
+             UPDATE public.play_record SET record_key=gen_random_uuid(),state='PURGED',source_erased_yn=true,rev=1,
+               mode=NULL,result_status=NULL,room_id=NULL,role_a=NULL,role_b=NULL,started_at=NULL,
+               ended_at=NULL,time_basis_at=NULL,graded_count=NULL,own_hint_count=NULL,created_at=NULL
+               WHERE room_id=source_room AND member_id=survivor AND state='RAW';
+             IF NOT FOUND THEN
+               INSERT INTO public.play_record(record_key,member_id,room_id,state,mode,story_code,story_title,
+                difficulty,role_a,role_b,own_role,own_role_name,result_status,end_reason,
+                started_at,ended_at,time_basis_at,duration_seconds,graded_count,own_hint_count,
+                final_score,source_erased_yn,rev,created_at)
+               SELECT gen_random_uuid(),survivor,NULL,'PURGED',NULL,s.code,
+                 snap.payload->'sections'->'basic'->>'title',r.difficulty,NULL,NULL,m.role_code,
+                 role->>'name',NULL,reason,
+                 NULL,NULL,NULL,
+                 GREATEST(0,EXTRACT(EPOCH FROM (basis_time-r.started_at))::integer),
+                 NULL,NULL,settled_score,true,1,NULL
+               FROM public.game_room r JOIN public.game_member m ON m.room_id=r.id AND m.member_id=survivor
+                 JOIN public.story s ON s.id=r.story_id JOIN public.review_snapshot snap ON snap.id=r.snapshot_id
+                 CROSS JOIN LATERAL jsonb_array_elements(snap.payload->'resources'->'roles') role
+               WHERE r.id=source_room AND r.started_at IS NOT NULL AND role->>'code'=m.role_code;
+               IF NOT FOUND AND EXISTS (SELECT 1 FROM public.game_room WHERE id=source_room AND started_at IS NOT NULL) THEN
+                 RAISE EXCEPTION 'survivor summary unavailable' USING ERRCODE='23514';
+               END IF;
+             END IF;
+           END IF;
+           DELETE FROM public.grade_event e USING public.grade_job j,public.game_report gr
+            WHERE e.job_id=j.id AND j.game_report_id=gr.id AND gr.room_id=source_room;
+           DELETE FROM public.grade_attempt a USING public.grade_job j,public.game_report gr
+            WHERE a.job_id=j.id AND j.game_report_id=gr.id AND gr.room_id=source_room;
+           DELETE FROM public.grade_job j USING public.game_report gr WHERE j.game_report_id=gr.id AND gr.room_id=source_room;
+           DELETE FROM public.game_report WHERE room_id=source_room;
+           DELETE FROM public.game_hint WHERE room_id=source_room;
+           DELETE FROM public.game_clue_read WHERE room_id=source_room;
+           DELETE FROM public.game_invite WHERE room_id=source_room;
+           DELETE FROM public.game_action WHERE room_id=source_room;
+           DELETE FROM public.game_audit WHERE room_id=source_room;
+           DELETE FROM public.game_member WHERE room_id=source_room;
+           DELETE FROM public.game_room WHERE id=source_room;
+           UPDATE public.privacy_target SET state='COMPLETE',locator_cipher=NULL,confirmed_at=clock_timestamp(),
+            result_code='PHYSICAL_REMOVED',lease_until=NULL WHERE id=target_id;
+         ELSE
+           RAISE EXCEPTION 'unsupported primary closure' USING ERRCODE='23514';
+         END IF;
+         IF NOT EXISTS (SELECT 1 FROM public.privacy_target WHERE erase_id=root_row.id
+           AND kind='PRIMARY' AND state<>'COMPLETE') THEN
+           UPDATE public.privacy_erase SET state='WAITING',primary_done_at=clock_timestamp() WHERE id=root_row.id;
+         END IF;
+         RETURN true;
+        END;
+        $$;
+        REVOKE ALL ON FUNCTION public.consume_privacy_primary_test_account(bigint),
+         public.privacy_primary_room_allowed(bigint),public.privacy_primary_membership_allowed(bigint),
+         public.guard_public_game_erase() FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.consume_privacy_primary(bigint) FROM PUBLIC;
+        -- 비소유자에게 옛 helper를 직접 호출할 권한을 남기지 않고 새 진입점으로만 이전한다.
+        DO $$
+        DECLARE executor record; role_name text;
+        BEGIN
+         IF (SELECT proowner FROM pg_catalog.pg_proc WHERE oid=pg_catalog.to_regprocedure('public.consume_privacy_primary(bigint)'))
+           IS DISTINCT FROM
+            (SELECT proowner FROM pg_catalog.pg_proc WHERE oid=pg_catalog.to_regprocedure('public.consume_privacy_primary_test_account(bigint)')) THEN
+           RAISE EXCEPTION 'erasure consumer owner changed' USING ERRCODE='42501';
+         END IF;
+         FOR executor IN SELECT grantee,grantable FROM privacy_consumer_executor_acl LOOP
+           role_name:=pg_catalog.pg_get_userbyid(executor.grantee);
+           IF role_name IS NULL OR NOT EXISTS
+              (SELECT 1 FROM pg_catalog.pg_roles WHERE oid=executor.grantee) THEN
+             RAISE EXCEPTION 'erasure executor role unavailable' USING ERRCODE='42501';
+           END IF;
+           EXECUTE pg_catalog.format('REVOKE ALL ON FUNCTION public.consume_privacy_primary_test_account(bigint) FROM %I CASCADE',role_name);
+         END LOOP;
+         FOR executor IN SELECT grantee,grantable FROM privacy_consumer_executor_acl LOOP
+           role_name:=pg_catalog.pg_get_userbyid(executor.grantee);
+           EXECUTE pg_catalog.format('GRANT EXECUTE ON FUNCTION public.consume_privacy_primary(bigint) TO %I%s',
+             role_name,CASE WHEN executor.grantable THEN ' WITH GRANT OPTION' ELSE '' END);
+         END LOOP;
+        END $$;
         """;
     }
 }

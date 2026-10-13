@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.icegreen.greenmail.util.GreenMail;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -47,6 +48,605 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                 .header("Sec-Fetch-Site", "same-origin")
                 .contentType("application/json")
                 .content(body);
+    }
+
+    /** 같은 TLS·Origin 경계지만 cookie 대신 정확한 Bearer 업무 경로로 보낸다. */
+    private MockHttpServletRequestBuilder business(String suffix, String access, Object input)
+            throws Exception {
+        return web(suffix, UUID.randomUUID(), JSON.writeValueAsString(input))
+                .with(
+                        request -> {
+                            request.setRequestURI("/api/member/auth" + suffix);
+                            return request;
+                        })
+                .header("Authorization", "Bearer " + access);
+    }
+
+    /** 상태 영수증은 인증 경로가 아닌 웹 공개 POST이며 출처·epoch만 전송한다. */
+    private MockHttpServletRequestBuilder erasureStatus(UUID epoch, Object input) throws Exception {
+        return web("/unused", epoch, JSON.writeValueAsString(input))
+                .with(
+                        request -> {
+                            request.setRequestURI("/api/member/privacy/erase/status");
+                            return request;
+                        });
+    }
+
+    /** 현재 브라우저 Bearer의 삭제 권리와 독립 영수증 조회를 실제 HTTP 경계에서 확인한다. */
+    @Test
+    void deletionRightsAndCookieFreeReceiptRemainAvailableWithoutCollection() throws Exception {
+        String access =
+                account("web-erasure-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        UUID identity =
+                service.getMe(access, UUID.randomUUID()).identities().getFirst().identityKey();
+        var deletionProof =
+                Map.of("purpose", "DELETE_ACCOUNT", "identityKey", identity, "password", PASSWORD);
+        configuration.setCollectionEnabled(false);
+        try {
+            for (String purpose : List.of("PASSWORD_CHANGE", "LOGOUT_ALL")) {
+                var gated =
+                        mvc.perform(
+                                        business(
+                                                "/reauth/local",
+                                                access,
+                                                Map.of(
+                                                        "purpose",
+                                                        purpose,
+                                                        "identityKey",
+                                                        identity,
+                                                        "password",
+                                                        PASSWORD)))
+                                .andExpect(status().isServiceUnavailable())
+                                .andReturn();
+                assertThat(body(gated).path("code").asText()).isEqualTo("COLLECTION_NOT_READY");
+                assertThat(gated.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            }
+            var granted =
+                    mvc.perform(business("/reauth/local", access, deletionProof))
+                            .andExpect(status().isOk())
+                            .andReturn();
+            assertThat(body(granted).path("purpose").asText()).isEqualTo("DELETE_ACCOUNT");
+            String proof = body(granted).path("reauthGrant").asText();
+            var command = Map.of("reauthGrant", proof, "requestKey", UUID.randomUUID());
+            mvc.perform(
+                            business("/account/delete", access, command)
+                                    .header("Cookie", COOKIE + "=fake"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(
+                            business("/account/delete", access, command)
+                                    .header("Origin", "https://foreign.example.invalid"))
+                    .andExpect(status().isForbidden());
+            var deleted =
+                    mvc.perform(business("/account/delete", access, command))
+                            .andExpect(status().isAccepted())
+                            .andReturn();
+            assertThat(body(deleted).fieldNames())
+                    .toIterable()
+                    .containsExactlyInAnyOrder(
+                            "state", "eraseKey", "receiptToken", "receiptExpiresAt", "requestId");
+            assertThat(body(deleted).path("state").asText()).isEqualTo("ACCESS_REVOKED");
+            assertThat(deleted.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            assertThat(deleted.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            String key = body(deleted).path("eraseKey").asText();
+            String receipt = body(deleted).path("receiptToken").asText();
+            assertThat(receipt).matches("[A-Za-z0-9_-]{43}");
+            mvc.perform(business("/account/delete", access, command))
+                    .andExpect(status().isUnauthorized());
+            mvc.perform(me(access)).andExpect(status().isServiceUnavailable());
+            configuration.setCollectionEnabled(true);
+            mvc.perform(me(access)).andExpect(status().isUnauthorized());
+            configuration.setCollectionEnabled(false);
+
+            UUID epoch = UUID.randomUUID();
+            var lookup = Map.of("eraseKey", key, "receiptToken", receipt);
+            var pending =
+                    mvc.perform(erasureStatus(epoch, lookup))
+                            .andExpect(status().isOk())
+                            .andReturn();
+            assertThat(body(pending).fieldNames())
+                    .toIterable()
+                    .containsExactlyInAnyOrder(
+                            "state",
+                            "accessRevoked",
+                            "primaryDone",
+                            "externalDone",
+                            "backupDone",
+                            "completedAt",
+                            "requestId");
+            assertThat(body(pending).path("state").asText()).isEqualTo("PROCESSING");
+            assertThat(body(pending).path("accessRevoked").asBoolean()).isTrue();
+            assertThat(body(pending).path("primaryDone").asBoolean()).isFalse();
+            assertThat(body(pending).path("externalDone").asBoolean()).isFalse();
+            assertThat(body(pending).path("backupDone").asBoolean()).isFalse();
+            assertThat(body(pending).path("completedAt").isNull()).isTrue();
+            assertThat(pending.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            assertThat(pending.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            for (var invalid :
+                    List.of(
+                            Map.of(
+                                    "eraseKey",
+                                    UUID.randomUUID().toString(),
+                                    "receiptToken",
+                                    receipt),
+                            Map.of("eraseKey", key, "receiptToken", "A".repeat(43)))) {
+                var denied =
+                        mvc.perform(erasureStatus(UUID.randomUUID(), invalid))
+                                .andExpect(status().isUnauthorized())
+                                .andReturn();
+                assertThat(body(denied).path("code").asText()).isEqualTo("RECEIPT_UNAVAILABLE");
+                assertThat(denied.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            }
+            var nativeLookup =
+                    mvc.perform(
+                                    post("/api/member/privacy/erase/status")
+                                            .secure(true)
+                                            .contentType("application/json")
+                                            .content(JSON.writeValueAsBytes(lookup)))
+                            .andExpect(status().isOk())
+                            .andReturn();
+            assertThat(body(nativeLookup).path("state").asText()).isEqualTo("PROCESSING");
+            assertThat(nativeLookup.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            assertThat(nativeLookup.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        } finally {
+            configuration.setCollectionEnabled(true);
+        }
+    }
+
+    /** 조회 본문과 웹 전송 경계는 토큰을 URL·쿠키·Bearer나 미승인 경로로 우회하지 않는다. */
+    @Test
+    void erasureReceiptRejectsLeakyAndMalformedRequests() throws Exception {
+        UUID epoch = UUID.randomUUID();
+        var lookup =
+                Map.of("eraseKey", UUID.randomUUID().toString(), "receiptToken", "A".repeat(43));
+        for (var request :
+                List.of(
+                        erasureStatus(epoch, lookup)
+                                .header("Origin", "https://foreign.example.invalid"),
+                        erasureStatus(epoch, lookup).header("Cookie", COOKIE + "=fake"),
+                        erasureStatus(epoch, lookup)
+                                .header("Authorization", "Bearer " + "A".repeat(43)))) {
+            var denied = mvc.perform(request).andExpect(status().isForbidden()).andReturn();
+            assertThat(denied.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(denied.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        }
+        var query =
+                mvc.perform(erasureStatus(epoch, lookup).queryParam("receiptToken", "secret"))
+                        .andExpect(status().isBadRequest())
+                        .andReturn();
+        assertThat(query.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        for (var invalid :
+                List.of(
+                        Map.of("eraseKey", "not-a-uuid", "receiptToken", "A".repeat(43)),
+                        Map.of(
+                                "eraseKey",
+                                UUID.randomUUID().toString(),
+                                "receiptToken",
+                                "A".repeat(43),
+                                "extra",
+                                "unapproved"))) {
+            mvc.perform(erasureStatus(epoch, invalid)).andExpect(status().isBadRequest());
+        }
+        mvc.perform(
+                        erasureStatus(epoch, lookup)
+                                .with(
+                                        request -> {
+                                            request.removeHeader("X-Sicha-Player-Web-Epoch");
+                                            return request;
+                                        }))
+                .andExpect(status().isForbidden());
+        mvc.perform(web("/unknown-worker", epoch, "{}")).andExpect(status().isForbidden());
+        mvc.perform(
+                        web("/unused", epoch, "{}")
+                                .with(
+                                        request -> {
+                                            request.setRequestURI(
+                                                    "/api/member/privacy/erase/worker");
+                                            return request;
+                                        }))
+                .andExpect(status().isForbidden());
+        mvc.perform(
+                        post("/api/member/privacy/erase/status")
+                                .secure(true)
+                                .header("Origin", ORIGIN)
+                                .contentType("application/json")
+                                .content(JSON.writeValueAsBytes(lookup)))
+                .andExpect(status().isForbidden());
+    }
+
+    /** 네이티브는 Origin 없이 현재 Bearer만 허용하며 웹 출처를 섞거나 본문을 늘리면 거절한다. */
+    @Test
+    void nativeDeletionNeedsCurrentBearerAndExactBody() throws Exception {
+        String access =
+                account("native-erasure-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        UUID identity =
+                service.getMe(access, UUID.randomUUID()).identities().getFirst().identityKey();
+        var proof =
+                Map.of("purpose", "DELETE_ACCOUNT", "identityKey", identity, "password", PASSWORD);
+        var nativeReauth =
+                mvc.perform(
+                                post("/api/member/auth/reauth/local")
+                                        .secure(true)
+                                        .header("Authorization", "Bearer " + access)
+                                        .contentType("application/json")
+                                        .content(JSON.writeValueAsBytes(proof)))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        var command =
+                Map.of(
+                        "reauthGrant",
+                        body(nativeReauth).path("reauthGrant").asText(),
+                        "requestKey",
+                        UUID.randomUUID());
+        mvc.perform(
+                        post("/api/member/auth/account/delete")
+                                .secure(true)
+                                .header("Origin", ORIGIN)
+                                .header("Authorization", "Bearer " + access)
+                                .contentType("application/json")
+                                .content(JSON.writeValueAsBytes(command)))
+                .andExpect(status().isForbidden());
+        mvc.perform(
+                        post("/api/member/auth/account/delete")
+                                .secure(true)
+                                .contentType("application/json")
+                                .content(JSON.writeValueAsBytes(command)))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(
+                        post("/api/member/auth/account/delete")
+                                .secure(true)
+                                .header("Authorization", "Bearer " + access)
+                                .contentType("application/json")
+                                .content(
+                                        JSON.writeValueAsBytes(
+                                                Map.of(
+                                                        "reauthGrant",
+                                                        command.get("reauthGrant"),
+                                                        "requestKey",
+                                                        command.get("requestKey"),
+                                                        "extra",
+                                                        true))))
+                .andExpect(status().isBadRequest());
+        var accepted =
+                mvc.perform(
+                                post("/api/member/auth/account/delete")
+                                        .secure(true)
+                                        .header("Authorization", "Bearer " + access)
+                                        .contentType("application/json")
+                                        .content(JSON.writeValueAsBytes(command)))
+                        .andExpect(status().isAccepted())
+                        .andReturn();
+        assertThat(body(accepted).path("state").asText()).isEqualTo("ACCESS_REVOKED");
+        assertThat(body(accepted).path("receiptToken").asText()).matches("[A-Za-z0-9_-]{43}");
+        assertThat(accepted.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        assertThat(accepted.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+    }
+
+    /** 브라우저 최근본인확인·암호변경은 cookie를 거부하고 전송 자격과 업무 grant를 함께 요구한다. */
+    @Test
+    void recentVerificationAndPasswordChangeUseCookieFreeBearerOnly() throws Exception {
+        String email = "web-recent-" + UUID.randomUUID() + "@example.invalid";
+        var issued = account(email);
+        String access = issued.path("accessToken").asText();
+        var identity =
+                service.getMe(access, UUID.randomUUID()).identities().getFirst().identityKey();
+        var input =
+                Map.of("purpose", "PASSWORD_CHANGE", "identityKey", identity, "password", PASSWORD);
+        mvc.perform(business("/reauth/local", access, input).header("Cookie", COOKIE + "=fake"))
+                .andExpect(status().isForbidden());
+        mvc.perform(
+                        business("/reauth/local", access, input)
+                                .header("Origin", "https://foreign.example.invalid"))
+                .andExpect(status().isForbidden());
+        mvc.perform(web("/reauth/local", UUID.randomUUID(), JSON.writeValueAsString(input)))
+                .andExpect(status().isForbidden());
+        var granted =
+                mvc.perform(business("/reauth/local", access, input))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        assertThat(granted.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        assertThat(granted.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(body(granted).size()).isEqualTo(4);
+        var command =
+                Map.of(
+                        "reauthGrant",
+                        body(granted).path("reauthGrant").asText(),
+                        "newPassword",
+                        "Synthetic-web-new-password!",
+                        "requestKey",
+                        UUID.randomUUID());
+        var changed =
+                mvc.perform(business("/password/change", access, command))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        assertThat(body(changed).size()).isEqualTo(2);
+        assertThat(body(changed).path("state").asText()).isEqualTo("LOGIN_REQUIRED");
+        assertThat(changed.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        mvc.perform(business("/password/change", access, command))
+                .andExpect(status().isUnauthorized());
+        assertThat(
+                        service.login(
+                                        email,
+                                        "Synthetic-web-new-password!",
+                                        "198.19.1.1",
+                                        UUID.randomUUID())
+                                .principal()
+                                .authRev())
+                .isEqualTo(1);
+    }
+
+    /** GET 고지도 동일한 TLS authority·웹 표지·epoch 경계에서 요청한다. */
+    private MockHttpServletRequestBuilder webNotice(UUID epoch) {
+        return get(BASE + "/notice")
+                .secure(true)
+                .with(
+                        request -> {
+                            request.setScheme("https");
+                            request.setServerName("player.example.invalid");
+                            request.setServerPort(443);
+                            return request;
+                        })
+                .header("X-Sicha-Player-Web", "1")
+                .header("X-Sicha-Player-Web-Epoch", epoch.toString())
+                .header("Sec-Fetch-Site", "same-origin");
+    }
+
+    /** 상위 폐기형 SMTP fixture가 받은 검증 코드만 사용한다. */
+    private static GreenMail smtpFixture() {
+        return (GreenMail)
+                org.springframework.test.util.ReflectionTestUtils.getField(
+                        LocalMemberAuthIT.class, "SMTP");
+    }
+
+    /** 실제 격리 메일로 검증한 flow를 브라우저 가입 완료에 전달한다. */
+    private Map<String, Object> verifiedWebSignup(String email, UUID epoch) throws Exception {
+        var smtp = smtpFixture();
+        int expected = smtp.getReceivedMessages().length + 1;
+        var started =
+                mvc.perform(
+                                web(
+                                        "/email/signup",
+                                        epoch,
+                                        JSON.writeValueAsString(Map.of("email", email))))
+                        .andExpect(status().isAccepted())
+                        .andReturn();
+        assertThat(started.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(started.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        assertThat(smtp.waitForIncomingEmail(5000, expected)).isTrue();
+        String content = smtp.getReceivedMessages()[expected - 1].getContent().toString();
+        var code = java.util.regex.Pattern.compile("[0-9]{8}").matcher(content);
+        assertThat(code.find()).isTrue();
+        String flowKey = body(started).path("flowKey").asText();
+        String binder = body(started).path("flowBinder").asText();
+        var verified =
+                mvc.perform(
+                                web(
+                                        "/email/verify",
+                                        epoch,
+                                        JSON.writeValueAsString(
+                                                Map.of(
+                                                        "flowKey",
+                                                        flowKey,
+                                                        "flowBinder",
+                                                        binder,
+                                                        "code",
+                                                        code.group()))))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        assertThat(body(verified).path("state").asText()).isEqualTo("VERIFIED");
+        assertThat(verified.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        var notice = mvc.perform(webNotice(epoch)).andExpect(status().isOk()).andReturn();
+        assertThat(notice.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(notice.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        assertThat(body(notice).has("evidence")).isFalse();
+        return Map.of(
+                "flowKey",
+                flowKey,
+                "flowBinder",
+                binder,
+                "password",
+                PASSWORD,
+                "nickname",
+                " 합성회원 ",
+                "policyCode",
+                body(notice).path("policyCode").asText(),
+                "noticeHash",
+                body(notice).path("noticeHash").asText(),
+                "requestKey",
+                UUID.randomUUID().toString());
+    }
+
+    /** 웹 고지·실제 메일 확인·단회 가입은 refresh JSON 없이 좁은 쿠키와 일곱 access 필드만 낸다. */
+    @Test
+    void webSignupWithIsolatedMailAndSingleUseCompletion() throws Exception {
+        UUID epoch = UUID.randomUUID();
+        var input = verifiedWebSignup("web-new-" + UUID.randomUUID() + "@example.invalid", epoch);
+        var completed =
+                mvc.perform(web("/email/signup/complete", epoch, JSON.writeValueAsString(input)))
+                        .andExpect(status().isCreated())
+                        .andReturn();
+        assertThat(completed.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(body(completed).fieldNames())
+                .toIterable()
+                .containsExactlyInAnyOrder(
+                        "tokenType",
+                        "accessToken",
+                        "accessExpiresAt",
+                        "sessionKey",
+                        "sessionAbsoluteExpiresAt",
+                        "webEpoch",
+                        "requestId");
+        assertThat(body(completed).path("webEpoch").asText()).isEqualTo(epoch.toString());
+        assertThat(body(completed).toString()).doesNotContain("refreshToken", "flowBinder");
+        assertThat(completed.getResponse().getHeaders("Set-Cookie")).hasSize(1);
+        assertThat(completed.getResponse().getHeader("Set-Cookie"))
+                .contains("Path=" + BASE, "Secure", "HttpOnly", "SameSite=Strict")
+                .doesNotContain("Domain=");
+        assertThat(cookie(completed)).matches(COOKIE + "=" + epoch + "\\.[A-Za-z0-9_-]{43}");
+        mvc.perform(me(body(completed).path("accessToken").asText())).andExpect(status().isOk());
+        var replay =
+                mvc.perform(web("/email/signup/complete", epoch, JSON.writeValueAsString(input)))
+                        .andExpect(status().is4xxClientError())
+                        .andReturn();
+        assertThat(replay.getResponse().getHeaders("Set-Cookie")).isEmpty();
+    }
+
+    /** 가입 완료 전에 기존 로그인 family를 회수하며 공개 flow는 어떤 쿠키도 받지 않는다. */
+    @Test
+    void signupReplacementRevokesOldFamilyAndFlowRejectsCredentials() throws Exception {
+        String previous = "web-old-" + UUID.randomUUID() + "@example.invalid";
+        account(previous);
+        UUID oldEpoch = UUID.randomUUID();
+        var old = login(previous, oldEpoch);
+        UUID epoch = UUID.randomUUID();
+        var input =
+                verifiedWebSignup(
+                        "web-replacement-" + UUID.randomUUID() + "@example.invalid", epoch);
+        for (String suffix : List.of("/email/signup", "/email/verify")) {
+            mvc.perform(web(suffix, epoch, "{}").header("Cookie", cookie(old)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(
+                            web(suffix, epoch, "{}")
+                                    .header("Authorization", "Bearer " + "a".repeat(43)))
+                    .andExpect(status().isForbidden());
+        }
+        mvc.perform(webNotice(epoch).header("Cookie", cookie(old)))
+                .andExpect(status().isForbidden());
+        mvc.perform(webNotice(epoch).header("Authorization", "Bearer " + "a".repeat(43)))
+                .andExpect(status().isForbidden());
+        mvc.perform(
+                        web("/email/signup/complete", epoch, "{}")
+                                .header("Authorization", "Bearer " + "a".repeat(43)))
+                .andExpect(status().isForbidden());
+        var completed =
+                mvc.perform(
+                                web("/email/signup/complete", epoch, JSON.writeValueAsString(input))
+                                        .header("Cookie", cookie(old)))
+                        .andExpect(status().isCreated())
+                        .andReturn();
+        assertThat(completed.getResponse().getHeaders("Set-Cookie")).hasSize(2);
+        assertThat(completed.getResponse().getHeaders("Set-Cookie").getFirst())
+                .contains("Max-Age=0", "Path=" + BASE);
+        mvc.perform(me(body(old).path("accessToken").asText()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(web("/refresh", epoch, "{}").header("Cookie", cookie(completed)))
+                .andExpect(status().isOk());
+        mvc.perform(web("/refresh", epoch, "{}").header("Cookie", cookie(old)))
+                .andExpect(status().isConflict());
+        mvc.perform(web("/refresh", oldEpoch, "{}").header("Cookie", cookie(old)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** 공개 요청도 strict 본문·exact 경로·origin·기본 비활성 규칙을 따른다. */
+    @Test
+    void signupRoutesRejectMalformedNativeAndUnknownRequests() throws Exception {
+        UUID epoch = UUID.randomUUID();
+        mvc.perform(webNotice(epoch)).andExpect(status().isOk());
+        mvc.perform(webNotice(epoch).header("Origin", "https://foreign.example.invalid"))
+                .andExpect(status().isForbidden());
+        mvc.perform(
+                        webNotice(epoch)
+                                .with(
+                                        request -> {
+                                            request.removeHeader("Sec-Fetch-Site");
+                                            return request;
+                                        }))
+                .andExpect(status().isForbidden());
+        mvc.perform(webNotice(epoch).queryParam("unused", "1")).andExpect(status().isBadRequest());
+        mvc.perform(
+                        web("/email/signup", epoch, "{}")
+                                .with(
+                                        request -> {
+                                            request.removeHeader("Origin");
+                                            return request;
+                                        }))
+                .andExpect(status().isForbidden());
+        for (String suffix : List.of("/email/signup", "/email/verify", "/email/signup/complete")) {
+            mvc.perform(web(suffix, epoch, "{}").queryParam("secret", "x"))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(
+                            web(suffix, epoch, "{}")
+                                    .header("Origin", "https://foreign.example.invalid"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(
+                            web(suffix, epoch, "{}")
+                                    .with(
+                                            request -> {
+                                                request.removeHeader("X-Sicha-Player-Web-Epoch");
+                                                request.addHeader(
+                                                        "X-Sicha-Player-Web-Epoch", "INVALID");
+                                                return request;
+                                            }))
+                    .andExpect(status().isBadRequest());
+        }
+        for (String input :
+                List.of(
+                        "{\"email\":\"a@example.invalid\",\"email\":\"b@example.invalid\"}",
+                        "{\"email\":7}",
+                        "{\"email\":\"a@example.invalid\",\"extra\":1}",
+                        "{} {}",
+                        "[1]"))
+            mvc.perform(web("/email/signup", epoch, input)).andExpect(status().isBadRequest());
+        mvc.perform(web("/email/signup", epoch, " ".repeat(16385)))
+                .andExpect(status().isPayloadTooLarge());
+        mvc.perform(
+                        web(
+                                "/email/verify",
+                                epoch,
+                                "{\"flowKey\":\"x\",\"flowBinder\":\"x\",\"code\":\"x\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(web("/email/signup/complete", epoch, "{\"flowKey\":\"x\",\"flowKey\":\"y\"}"))
+                .andExpect(status().isBadRequest());
+        for (String suffix :
+                List.of(
+                        "/email/signup",
+                        "/email/verify",
+                        "/email/signup/complete",
+                        "/unknown",
+                        "/email/signup/complete/")) {
+            mvc.perform(
+                            org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                                    .request(org.springframework.http.HttpMethod.GET, BASE + suffix)
+                                    .secure(true)
+                                    .with(
+                                            request -> {
+                                                request.setScheme("https");
+                                                request.setServerName("player.example.invalid");
+                                                request.setServerPort(443);
+                                                return request;
+                                            })
+                                    .header("Origin", ORIGIN)
+                                    .header("X-Sicha-Player-Web", "1")
+                                    .header("X-Sicha-Player-Web-Epoch", epoch.toString())
+                                    .header("Sec-Fetch-Site", "same-origin"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(web(suffix, epoch, "{}"))
+                    .andExpect(
+                            status().is(
+                                            suffix.equals("/unknown") || suffix.endsWith("/")
+                                                    ? 403
+                                                    : 400));
+        }
+        mvc.perform(web("/notice", epoch, "{}")).andExpect(status().isForbidden());
+        mvc.perform(
+                        get("/api/member/privacy/policies/member-auth")
+                                .secure(true)
+                                .header("Origin", ORIGIN)
+                                .header("Sec-Fetch-Site", "same-origin"))
+                .andExpect(status().isForbidden());
+        var disabled = new com.reasoning.web.member.auth.MemberWebPolicy(false, "");
+        var admission =
+                com.reasoning.web.member.auth.MemberWebPolicy.class.getDeclaredMethod(
+                        "admit", jakarta.servlet.http.HttpServletRequest.class, boolean.class);
+        admission.setAccessible(true);
+        var request =
+                webNotice(epoch)
+                        .buildRequest(new org.springframework.mock.web.MockServletContext());
+        assertThatThrownBy(() -> admission.invoke(disabled, request, false))
+                .hasCauseInstanceOf(com.reasoning.common.auth.service.AuthException.class);
     }
 
     /** 단일 43자 access 자격으로 웹 회원 확인 요청을 만든다. */

@@ -48,7 +48,7 @@ class GradeEventSchemaIT {
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(42);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             jdbc = GradeSchemaIT.jdbc(postgres);

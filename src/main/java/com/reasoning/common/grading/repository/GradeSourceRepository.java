@@ -4,6 +4,8 @@ import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.member.auth.MemberPolicyEvidenceRegistry;
 import com.reasoning.common.member.auth.MemberPolicyGate;
 import com.reasoning.common.member.auth.PlaytestPolicyGate;
+import com.reasoning.common.story.repository.BlindEligibilityReader;
+import com.reasoning.common.story.repository.BlindEligibilityReader.Use;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -71,8 +73,556 @@ public class GradeSourceRepository {
                 AND acceptor_identity.active_yn
             WHERE j.job_key=? AND j.batch_id IS NULL
             """;
+    private static final String GAME_RELATIONSHIPS =
+            """
+            SELECT j.id AS job_id,g.id AS report_id,r.id AS room_id,r.story_id,r.version_id,
+                r.snapshot_id,r.runtime_id,r.reviewer_id,r.selected_member_id,r.policy_id,
+                r.purpose,g.proposer_id,g.accepted_by,m.identity_id,p.owner_id,p.env_code
+            FROM public.grade_job j JOIN public.game_report g ON g.id=j.game_report_id
+            JOIN public.game_room r ON r.id=g.room_id
+            JOIN public.game_member m ON m.room_id=r.id AND m.member_id=g.proposer_id
+            JOIN public.privacy_policy p ON p.id=r.policy_id
+            WHERE j.job_key=? AND j.batch_id IS NULL AND j.report_id IS NULL
+            """;
     private final JdbcTemplate jdbc;
     private final MemberPolicyGate memberPolicy;
+    private final BlindEligibilityReader eligibility;
+
+    /** 잠금 없는 분류이며 권위는 잠금 후 배타적 부모 관계를 다시 검사한다. */
+    public SourceKind sourceKind(UUID key) {
+        var rows =
+                jdbc.queryForList(
+                        "SELECT batch_id,report_id,game_report_id FROM public.grade_job WHERE"
+                            + " job_key=?",
+                        key);
+        if (rows.size() != 1) reject();
+        var row = rows.getFirst();
+        int count =
+                (row.get("batch_id") != null ? 1 : 0)
+                        + (row.get("report_id") != null ? 1 : 0)
+                        + (row.get("game_report_id") != null ? 1 : 0);
+        if (count != 1) reject();
+        return row.get("batch_id") != null
+                ? SourceKind.BATCH
+                : row.get("report_id") != null ? SourceKind.TEST : SourceKind.GAME;
+    }
+
+    public enum SourceKind {
+        BATCH,
+        TEST,
+        GAME
+    }
+
+    /** 정책 준비 이전에 고정된 방의 목적을 발견한다. 잠금 후 재검사 없이는 권위가 아니다. */
+    public String gamePurpose(UUID key) {
+        return discoverGame(key).purpose();
+    }
+
+    /** 실제 방·보고서 관계를 발견할 뿐 잠금 또는 실행 권위를 제공하지 않는다. */
+    private GameHints discoverGame(UUID key) {
+        var rows =
+                jdbc.query(
+                        GAME_RELATIONSHIPS,
+                        (r, i) ->
+                                new GameHints(
+                                        r.getLong("job_id"),
+                                        r.getLong("report_id"),
+                                        r.getLong("room_id"),
+                                        r.getLong("story_id"),
+                                        r.getLong("version_id"),
+                                        r.getLong("snapshot_id"),
+                                        r.getLong("runtime_id"),
+                                        (Long) r.getObject("reviewer_id"),
+                                        (Long) r.getObject("selected_member_id"),
+                                        r.getLong("policy_id"),
+                                        r.getString("purpose"),
+                                        r.getLong("proposer_id"),
+                                        r.getLong("accepted_by"),
+                                        r.getLong("identity_id"),
+                                        r.getLong("owner_id"),
+                                        r.getString("env_code")),
+                        key);
+        if (rows.size() != 1) reject();
+        return rows.getFirst();
+    }
+
+    public record GamePreparation(
+            PlaytestPolicyGate.Snapshot playtest, MemberPolicyEvidenceRegistry.Snapshot member) {}
+
+    /** 방 목적에 맞는 독립 정책·회원 파일을 거래 밖에서 준비한다. */
+    public GamePreparation prepareQualificationGame(PlaytestPolicyGate gate) {
+        if (gate == null || memberPolicy == null)
+            throw new IllegalStateException("SOURCE_NOT_CURRENT");
+        return new GamePreparation(gate.prepare(), memberPolicy.prepare());
+    }
+
+    /** 실제 GAME 부모를 관리자/회원→런타임→사건/버전→방/보고서→작업 순서로 잠근다. */
+    public LockedGameSource lockGameRoots(
+            UUID jobKey, PlaytestPolicyGate gate, GamePreparation prepared) {
+        if (jobKey == null
+                || gate == null
+                || prepared == null
+                || prepared.playtest() == null
+                || prepared.member() == null
+                || memberPolicy == null) throw new IllegalArgumentException("INVALID_GAME_SOURCE");
+        return lockGame(jobKey, gate, prepared, false);
+    }
+
+    /** 취소·회수 경계의 역사 관계만 잠근다. 이 증거로 실행 자격을 획득할 수 없다. */
+    public LockedGameSource lockGameRootsForSettlement(UUID jobKey) {
+        if (jobKey == null) throw new IllegalArgumentException("INVALID_GAME_SOURCE");
+        return lockGame(jobKey, null, null, true);
+    }
+
+    private LockedGameSource lockGame(
+            UUID key, PlaytestPolicyGate gate, GamePreparation prepared, boolean historical) {
+        try {
+            ConnectionHolder holder = requireTransaction();
+            jdbc.execute("SET LOCAL lock_timeout='5s'");
+            GameHints h = discoverGame(key);
+            TreeSet<Long> owners = new TreeSet<>();
+            owners.add(h.ownerId());
+            if (h.reviewerId() != null) owners.add(h.reviewerId());
+            if (!historical) {
+                owners.addAll(memberPolicy.ownerIds(h.proposerId()));
+                if (h.acceptedBy() != h.proposerId())
+                    owners.addAll(memberPolicy.ownerIds(h.acceptedBy()));
+            }
+            for (long id : owners)
+                locked("admin_account", "id", id, "active_yn,can_manage,can_review");
+            locked("member_account", "id", h.proposerId(), "state");
+            if (h.acceptedBy() != h.proposerId())
+                locked("member_account", "id", h.acceptedBy(), "state");
+            for (long id : owners)
+                locked("admin_credential", "account_id", id, "enrolled_at,mfa_state");
+            TreeSet<Long> members = new TreeSet<>();
+            members.add(h.proposerId());
+            members.add(h.acceptedBy());
+            for (long member : members) {
+                var identities =
+                        jdbc.queryForList(
+                                "SELECT id FROM public.member_identity WHERE member_id=? AND"
+                                    + " provider='LOCAL' AND realm='LOCAL' ORDER BY id FOR UPDATE",
+                                member);
+                if (identities.isEmpty()) reject();
+            }
+            java.util.List<MemberPolicyGate.Permit> permits = new java.util.ArrayList<>();
+            if (!historical) {
+                for (long member : members) {
+                    var permit = memberPolicy.lock(prepared.member(), member, owners);
+                    memberPolicy.checkPinned(permit, member);
+                    memberPolicy.check(permit);
+                    permits.add(permit);
+                }
+            }
+            locked(
+                    "privacy_policy",
+                    "id",
+                    h.policyId(),
+                    "owner_id,env_code,scope,state,notice_hash");
+            PlaytestPolicyGate.Notice notice = null;
+            if (!historical) notice = gate.lock(prepared.playtest(), owners);
+            locked("grade_runtime", "id", h.runtimeId(), RUNTIME_COLUMNS);
+            locked("story", "id", h.storyId(), "active_yn");
+            locked("story_version", "id", h.versionId(), VERSION_COLUMNS);
+            locked(
+                    "game_room",
+                    "id",
+                    h.roomId(),
+                    "room_key,purpose,mode,state,story_id,version_id,snapshot_id,runtime_id,runtime_epoch,config_hash,rubric_hash,policy_id,reviewer_id,selected_member_id,started_at,deadline_at");
+            locked(
+                    "game_member",
+                    "id",
+                    memberRow(h.roomId(), h.proposerId()),
+                    "room_id,member_id,identity_id,active_yn,policy_id,version_id,role_code");
+            if (h.acceptedBy() != h.proposerId())
+                locked(
+                        "game_member",
+                        "id",
+                        memberRow(h.roomId(), h.acceptedBy()),
+                        "room_id,member_id,identity_id,active_yn,policy_id,version_id,role_code");
+            locked(
+                    "game_report",
+                    "id",
+                    h.reportId(),
+                    "room_id,snapshot_id,source_rev,proposer_id,accepted_by,state,accepted_at,grade_deadline_at,payload_hash,purged_at");
+            locked(
+                    "grade_job",
+                    "id",
+                    h.jobId(),
+                    "job_key,batch_id,report_id,game_report_id,snapshot_id,runtime_id,config_hash,rubric_hash,report_hash,accepted_at,deadline_at");
+            if (!h.equals(discoverGame(key))) reject();
+            LockLifetime life = new LockLifetime();
+            TransactionSynchronizationManager.registerSynchronization(life);
+            return new LockedGameSource(
+                    this,
+                    holder,
+                    life,
+                    key,
+                    h,
+                    historical,
+                    gate,
+                    prepared,
+                    notice,
+                    java.util.List.copyOf(permits));
+        } catch (AuthException failure) {
+            throw new IllegalStateException("SOURCE_NOT_CURRENT");
+        } catch (DataAccessException failure) {
+            throw new DataAccessResourceFailureException("SOURCE_STORAGE_FAILURE");
+        }
+    }
+
+    private long memberRow(long room, long member) {
+        var ids =
+                jdbc.queryForList(
+                        "SELECT id FROM public.game_member WHERE room_id=? AND member_id=?",
+                        Long.class,
+                        room,
+                        member);
+        if (ids.size() != 1) reject();
+        return ids.getFirst();
+    }
+
+    /** 목적별 정책과 양쪽 참가자의 현재 신원·동의를 재확인한다. */
+    public GameRootEvidence requireGameExecutionEligibility(LockedGameSource source) {
+        if (source == null) throw new IllegalArgumentException("INVALID_GAME_SOURCE");
+        try {
+            GameRootEvidence fact = gameFacts(source);
+            GameHints h = source.hints;
+            if (source.historical
+                    || source.prepared == null
+                    || source.notice == null
+                    || source.permits.size() != (h.proposerId() == h.acceptedBy() ? 1 : 2))
+                reject();
+            TreeSet<Long> policyOwners = new TreeSet<>();
+            policyOwners.add(h.ownerId());
+            if (h.reviewerId() != null) policyOwners.add(h.reviewerId());
+            if (source.gate == null
+                    || source.prepared.playtest().owner() != h.ownerId()
+                    || !source.prepared.playtest().env().equals(h.environment())
+                    || source.gate.lock(source.prepared.playtest(), policyOwners).policyId()
+                            != h.policyId()) reject();
+            TreeSet<Long> members = new TreeSet<>();
+            members.add(h.proposerId());
+            members.add(h.acceptedBy());
+            int index = 0;
+            for (long memberId : members) {
+                var permit = source.permits.get(index++);
+                memberPolicy.checkPinned(permit, memberId);
+                memberPolicy.check(permit);
+                var member = current("member_account", "id", memberId, "state");
+                var gameMember =
+                        current(
+                                "game_member",
+                                "id",
+                                memberRow(h.roomId(), memberId),
+                                "identity_id,active_yn,policy_id,version_id,role_code");
+                if (!"ACTIVE".equals(member.get("state"))
+                        || !Boolean.TRUE.equals(gameMember.get("active_yn"))
+                        || number(gameMember, "version_id") != h.versionId()
+                        || gameMember.get("role_code") == null) reject();
+                var identity =
+                        current(
+                                "member_identity",
+                                "id",
+                                number(gameMember, "identity_id"),
+                                "member_id,provider,realm,active_yn,proof_at");
+                if (number(identity, "member_id") != memberId
+                        || !"LOCAL".equals(identity.get("provider"))
+                        || !"LOCAL".equals(identity.get("realm"))
+                        || !Boolean.TRUE.equals(identity.get("active_yn"))
+                        || identity.get("proof_at") == null) reject();
+            }
+            var version = current("story_version", "id", h.versionId(), VERSION_COLUMNS);
+            if (source.notice.policyId() != h.policyId()) reject();
+            if ("REVIEW_SOLO_QUALIFICATION".equals(h.purpose())) {
+                var reviewer =
+                        current("admin_account", "id", h.reviewerId(), "active_yn,can_review");
+                var credential =
+                        current(
+                                "admin_credential",
+                                "account_id",
+                                h.reviewerId(),
+                                "enrolled_at,mfa_state");
+                if (!Boolean.TRUE.equals(reviewer.get("active_yn"))
+                        || !Boolean.TRUE.equals(reviewer.get("can_review"))
+                        || credential.get("enrolled_at") == null
+                        || !"READY".equals(credential.get("mfa_state"))
+                        || !Boolean.TRUE.equals(
+                                jdbc.queryForObject(
+                                        "SELECT EXISTS(SELECT 1 FROM public.story_access WHERE"
+                                            + " story_id=? AND admin_id=? AND permission='REVIEW'"
+                                            + " AND active_yn)",
+                                        Boolean.class,
+                                        h.storyId(),
+                                        h.reviewerId()))
+                        || !"REVIEW".equals(version.get("status"))
+                        || !Objects.equals(version.get("current_snapshot_id"), h.snapshotId()))
+                    reject();
+            }
+            var runtime = current("grade_runtime", "id", h.runtimeId(), RUNTIME_COLUMNS);
+            var story = current("story", "id", h.storyId(), "active_yn");
+            var report = current("game_report", "id", h.reportId(), "state,purged_at");
+            var room = current("game_room", "id", h.roomId(), "state");
+            var roomDraft = current("game_room", "id", h.roomId(), "draft_rev");
+            var job = current("grade_job", "id", h.jobId(), "state");
+            var reportPins = current("game_report", "id", h.reportId(), "payload_hash");
+            var policy = current("privacy_policy", "id", h.policyId(), "state");
+            if (!"AVAILABLE".equals(runtime.get("state"))
+                    || !Objects.equals(
+                            runtime.get("epoch"),
+                            current("game_room", "id", h.roomId(), "runtime_epoch")
+                                    .get("runtime_epoch"))
+                    || !Objects.equals(
+                            runtime.get("config_hash"),
+                            current("game_room", "id", h.roomId(), "config_hash")
+                                    .get("config_hash"))
+                    || !"RUNNING".equals(room.get("state"))
+                    || !"ACCEPTED".equals(report.get("state"))
+                    || report.get("purged_at") != null
+                    || reportPins.get("payload_hash") == null
+                    || fact.sourceRev() != number(roomDraft, "draft_rev")
+                    || !"ACTIVE".equals(policy.get("state"))
+                    || !("RUNNING".equals(job.get("state")) || "QUEUED".equals(job.get("state")))
+                    || ("REVIEW_SOLO_QUALIFICATION".equals(h.purpose())
+                            && (!Boolean.TRUE.equals(story.get("active_yn"))
+                                    || !Boolean.TRUE.equals(version.get("active_yn"))))) reject();
+            if ("REVIEW_SOLO_QUALIFICATION".equals(h.purpose())) {
+                var qualification =
+                        current("game_room", "id", h.roomId(), "qualification_kind,assessment_id");
+                if ("BLIND".equals(qualification.get("qualification_kind"))
+                        && !eligibility.game(
+                                h.storyId(),
+                                h.snapshotId(),
+                                h.selectedMemberId(),
+                                h.roomId(),
+                                (Long) qualification.get("assessment_id"),
+                                Use.EXECUTION)) reject();
+            }
+            return fact;
+        } catch (AuthException failure) {
+            throw new IllegalStateException("SOURCE_NOT_CURRENT");
+        } catch (DataAccessException failure) {
+            throw new DataAccessResourceFailureException("SOURCE_STORAGE_FAILURE");
+        }
+    }
+
+    private GameRootEvidence gameFacts(LockedGameSource source) {
+        if (source.owner != this
+                || source.holder != requireTransaction()
+                || !source.life.valid
+                || !TransactionSynchronizationManager.getSynchronizations().contains(source.life))
+            reject();
+        GameHints h = source.hints;
+        if (!h.equals(discoverGame(source.key))) reject();
+        var room =
+                current(
+                        "game_room",
+                        "id",
+                        h.roomId(),
+                        "purpose,mode,state,story_id,version_id,snapshot_id,runtime_id,runtime_epoch,config_hash,rubric_hash,policy_id,reviewer_id,selected_member_id,started_at,deadline_at,draft_rev");
+        var report =
+                current(
+                        "game_report",
+                        "id",
+                        h.reportId(),
+                        "room_id,snapshot_id,source_rev,proposer_id,accepted_by,state,accepted_at,grade_deadline_at,payload_hash,purged_at");
+        var job =
+                current(
+                        "grade_job",
+                        "id",
+                        h.jobId(),
+                        "job_key,batch_id,report_id,game_report_id,snapshot_id,runtime_id,config_hash,rubric_hash,report_hash,accepted_at,deadline_at,state");
+        var runtime = current("grade_runtime", "id", h.runtimeId(), RUNTIME_COLUMNS);
+        var snap =
+                current("review_snapshot", "id", h.snapshotId(), "version_id,edit_rev,format_no");
+        var member =
+                current(
+                        "game_member",
+                        "id",
+                        memberRow(h.roomId(), h.proposerId()),
+                        "room_id,member_id,identity_id,active_yn,policy_id,version_id,role_code");
+        var policy = current("privacy_policy", "id", h.policyId(), "owner_id,env_code,scope,state");
+        var version = current("story_version", "id", h.versionId(), VERSION_COLUMNS);
+        var story = current("story", "id", h.storyId(), "active_yn");
+        OffsetDateTime now = jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
+        if (now == null
+                || !source.key.equals(job.get("job_key"))
+                || job.get("batch_id") != null
+                || job.get("report_id") != null
+                || number(job, "game_report_id") != h.reportId()
+                || number(job, "snapshot_id") != h.snapshotId()
+                || number(job, "runtime_id") != h.runtimeId()
+                || number(room, "story_id") != h.storyId()
+                || number(room, "version_id") != h.versionId()
+                || number(room, "snapshot_id") != h.snapshotId()
+                || number(room, "runtime_id") != h.runtimeId()
+                || number(room, "policy_id") != h.policyId()
+                || !h.purpose().equals(room.get("purpose"))
+                || number(report, "room_id") != h.roomId()
+                || ("REVIEW_SOLO_QUALIFICATION".equals(h.purpose())
+                        && (!"SOLO".equals(room.get("mode"))
+                                || h.reviewerId() == null
+                                || h.selectedMemberId() == null
+                                || h.selectedMemberId() != h.proposerId()
+                                || h.acceptedBy() != h.proposerId()))
+                || number(report, "snapshot_id") != h.snapshotId()
+                || number(report, "proposer_id") != h.proposerId()
+                || number(report, "source_rev") > number(room, "draft_rev")
+                || number(report, "accepted_by") != h.acceptedBy()
+                || number(member, "identity_id") != h.identityId()
+                || number(member, "version_id") != h.versionId()
+                || member.get("role_code") == null
+                || number(snap, "version_id") != h.versionId()
+                || number(version, "story_id") != h.storyId()
+                || !Objects.equals(room.get("config_hash"), job.get("config_hash"))
+                || !Objects.equals(room.get("rubric_hash"), job.get("rubric_hash"))
+                || !Objects.equals(job.get("accepted_at"), report.get("accepted_at"))
+                || !Objects.equals(job.get("deadline_at"), report.get("grade_deadline_at"))
+                || report.get("accepted_at") == null
+                || report.get("grade_deadline_at") == null
+                || !((java.sql.Timestamp) report.get("grade_deadline_at"))
+                        .toInstant()
+                        .equals(
+                                ((java.sql.Timestamp) report.get("accepted_at"))
+                                        .toInstant()
+                                        .plusSeconds(120))
+                || number(policy, "owner_id") != h.ownerId()
+                || !h.environment().equals(policy.get("env_code"))
+                || !("PUBLIC".equals(h.purpose()) && "FRIENDLY".equals(policy.get("scope"))
+                        || "REVIEW_SOLO_QUALIFICATION".equals(h.purpose())
+                                && "PLAYTEST".equals(policy.get("scope")))) reject();
+        return new GameRootEvidence(
+                h.jobId(),
+                source.key,
+                h.reportId(),
+                h.roomId(),
+                h.storyId(),
+                h.versionId(),
+                h.snapshotId(),
+                h.runtimeId(),
+                (String) runtime.get("code"),
+                (String) runtime.get("config_hash"),
+                number(runtime, "epoch"),
+                number(snap, "edit_rev"),
+                number(snap, "format_no"),
+                (String) version.get("policy_code"),
+                h.purpose(),
+                (String) report.get("payload_hash"),
+                (String) job.get("report_hash"),
+                (String) job.get("rubric_hash"),
+                number(report, "source_rev"),
+                now);
+    }
+
+    private record GameHints(
+            long jobId,
+            long reportId,
+            long roomId,
+            long storyId,
+            long versionId,
+            long snapshotId,
+            long runtimeId,
+            Long reviewerId,
+            Long selectedMemberId,
+            long policyId,
+            String purpose,
+            long proposerId,
+            long acceptedBy,
+            long identityId,
+            long ownerId,
+            String environment) {}
+
+    public static final class LockedGameSource {
+        private final GradeSourceRepository owner;
+        private final ConnectionHolder holder;
+        private final LockLifetime life;
+        private final UUID key;
+        private final GameHints hints;
+        private final boolean historical;
+        private final PlaytestPolicyGate gate;
+        private final GamePreparation prepared;
+        private final PlaytestPolicyGate.Notice notice;
+        private final java.util.List<MemberPolicyGate.Permit> permits;
+
+        private LockedGameSource(
+                GradeSourceRepository owner,
+                ConnectionHolder holder,
+                LockLifetime life,
+                UUID key,
+                GameHints hints,
+                boolean historical,
+                PlaytestPolicyGate gate,
+                GamePreparation prepared,
+                PlaytestPolicyGate.Notice notice,
+                java.util.List<MemberPolicyGate.Permit> permits) {
+            this.owner = owner;
+            this.holder = holder;
+            this.life = life;
+            this.key = key;
+            this.hints = hints;
+            this.historical = historical;
+            this.gate = gate;
+            this.prepared = prepared;
+            this.notice = notice;
+            this.permits = permits;
+        }
+
+        public long reportId() {
+            return hints.reportId();
+        }
+
+        public long roomId() {
+            return hints.roomId();
+        }
+
+        public UUID jobKey() {
+            return key;
+        }
+
+        /** 실행 자격 없이 역사 부모를 식별하며, 원문·성공 결과는 반환하지 않는다. */
+        public GameSettlementEvidence lockedFacts(javax.sql.DataSource dataSource) {
+            if (dataSource == null
+                    || owner.jdbc.getDataSource() != dataSource
+                    || owner != this.owner
+                    || holder != owner.requireTransaction()
+                    || !life.valid
+                    || !TransactionSynchronizationManager.getSynchronizations().contains(life)
+                    || !hints.equals(owner.discoverGame(key))) reject();
+            return new GameSettlementEvidence(
+                    hints.jobId(), key, hints.reportId(), hints.roomId(), hints.purpose());
+        }
+
+        public GameRootEvidence requireCurrent(javax.sql.DataSource dataSource) {
+            if (dataSource == null || owner.jdbc.getDataSource() != dataSource) reject();
+            return owner.requireGameExecutionEligibility(this);
+        }
+    }
+
+    public record GameSettlementEvidence(
+            long jobId, UUID jobKey, long reportId, long roomId, String purpose) {}
+
+    public record GameRootEvidence(
+            long jobId,
+            UUID jobKey,
+            long reportId,
+            long roomId,
+            long storyId,
+            long versionId,
+            long snapshotId,
+            long runtimeId,
+            String runtimeCode,
+            String configHash,
+            long runtimeEpoch,
+            long snapshotRev,
+            long snapshotFormat,
+            String policyCode,
+            String purpose,
+            String payloadHash,
+            String reportHash,
+            String rubricHash,
+            long sourceRev,
+            OffsetDateTime checkedAt) {}
 
     public record TestPreparation(
             PlaytestPolicyGate.Snapshot playtest, MemberPolicyEvidenceRegistry.Snapshot member) {}
@@ -93,6 +643,7 @@ public class GradeSourceRepository {
     public GradeSourceRepository(JdbcTemplate jdbc, MemberPolicyGate memberPolicy) {
         this.jdbc = Objects.requireNonNull(jdbc);
         this.memberPolicy = memberPolicy;
+        this.eligibility = new BlindEligibilityReader(jdbc);
     }
 
     /**
@@ -605,6 +1156,18 @@ public class GradeSourceRepository {
                     || !("STAGED".equals(job.get("state"))
                             || "QUEUED".equals(job.get("state"))
                             || "RUNNING".equals(job.get("state")))) reject();
+            if ("BLIND".equals(test.get("mode"))) {
+                for (long member : members) {
+                    var pin = member == h.proposerId() ? first : second;
+                    if (!eligibility.test(
+                            h.storyId(),
+                            h.testSnapshot(),
+                            member,
+                            h.testId(),
+                            (Long) pin.get("assessment_id"),
+                            Use.EXECUTION)) reject();
+                }
+            }
             return new TestRootEvidence(
                     h.jobId(),
                     source.jobKey,
@@ -781,8 +1344,9 @@ public class GradeSourceRepository {
     private Map<String, Object> currentMember(long testId, long memberId) {
         var rows =
                 jdbc.queryForList(
-                        "SELECT invite_state,accepted_policy_id,accepted_notice_hash,revoked_at"
-                                + " FROM public.test_member WHERE test_id=? AND member_id=?",
+                        "SELECT"
+                            + " invite_state,accepted_policy_id,accepted_notice_hash,revoked_at,assessment_id"
+                            + " FROM public.test_member WHERE test_id=? AND member_id=?",
                         testId,
                         memberId);
         if (rows.size() != 1) throw new IllegalStateException("SOURCE_NOT_CURRENT");

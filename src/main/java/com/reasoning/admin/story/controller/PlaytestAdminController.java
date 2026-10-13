@@ -3,6 +3,8 @@ package com.reasoning.admin.story.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.reasoning.admin.auth.session.AdminSessionAdapter.CurrentSession;
 import com.reasoning.common.auth.service.AuthException;
+import com.reasoning.common.game.service.GameQualificationService;
+import com.reasoning.common.story.service.BlindEligibilityService;
 import com.reasoning.common.story.service.PlaytestInvitationService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,6 +18,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -24,18 +28,135 @@ import java.util.UUID;
 /** 현재 관리자 세션과 사건 REVIEW 권한으로 초대 관리 경계를 연결한다. */
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@RequestMapping("/admin/api/stories/{storyCode}/versions/{versionNo}/playtests")
+@RequestMapping("/admin/api/stories/{storyCode}/versions/{versionNo}")
 public final class PlaytestAdminController {
     private final StoryHttpSupport http;
     private final PlaytestInvitationService invitations;
+    private final GameQualificationService qualifications;
+    private final BlindEligibilityService blind;
 
-    public PlaytestAdminController(StoryHttpSupport http, PlaytestInvitationService invitations) {
+    public PlaytestAdminController(
+            StoryHttpSupport http,
+            PlaytestInvitationService invitations,
+            GameQualificationService qualifications,
+            BlindEligibilityService blind) {
         this.http = http;
         this.invitations = invitations;
+        this.qualifications = qualifications;
+        this.blind = blind;
+    }
+
+    /** 검수자가 실제 확인한 비참여 판단만 현재 REVIEW 사본에 등록한다. */
+    @PostMapping("/blind-assessments")
+    public ResponseEntity<?> createBlindAssessment(
+            @PathVariable String storyCode,
+            @PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor = http.currentSession(request);
+        noQuery(request);
+        JsonNode body =
+                http.body(
+                        request,
+                        8192,
+                        Set.of(
+                                "expectedRev",
+                                "snapshotId",
+                                "memberKey",
+                                "decision",
+                                "reasonCode",
+                                "verificationRef",
+                                "checkedAt",
+                                "confirmed",
+                                "supersedesKey",
+                                "requestKey"));
+        JsonNode confirmed = body.get("confirmed");
+        JsonNode supersedes = body.get("supersedesKey");
+        if (!confirmed.isBoolean()
+                || !confirmed.booleanValue()
+                || !(supersedes.isNull() || supersedes.isTextual()))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        return StoryHttpSupport.created(
+                blind.create(
+                        actor.id(),
+                        actor.principal(),
+                        storyCode,
+                        versionNo,
+                        decimal(body, "expectedRev", false),
+                        decimal(body, "snapshotId", true),
+                        StoryHttpSupport.uuid(body, "memberKey", true),
+                        StoryHttpSupport.text(body, "decision"),
+                        StoryHttpSupport.text(body, "reasonCode"),
+                        StoryHttpSupport.text(body, "verificationRef"),
+                        checkedAt(body),
+                        true,
+                        supersedes.isNull()
+                                ? null
+                                : StoryHttpSupport.uuid(supersedes.textValue(), true),
+                        StoryHttpSupport.uuid(body, "requestKey", true),
+                        StoryHttpSupport.requestId(request)));
+    }
+
+    /** 현재 검수 권위로 제한된 적격 상태를 다시 계산한다. */
+    @GetMapping("/blind-assessments/{assessmentKey}")
+    public ResponseEntity<?> blindAssessmentDetail(
+            @PathVariable String storyCode,
+            @PathVariable int versionNo,
+            @PathVariable String assessmentKey,
+            HttpServletRequest request) {
+        CurrentSession actor = http.currentSession(request);
+        noQuery(request);
+        return StoryHttpSupport.ok(
+                blind.detail(
+                        actor.id(),
+                        actor.principal(),
+                        storyCode,
+                        versionNo,
+                        StoryHttpSupport.uuid(assessmentKey, true),
+                        StoryHttpSupport.requestId(request)));
+    }
+
+    /** 활성 공개 버전에서도 현재 검수 권위로 단회 회수한다. */
+    @PostMapping("/blind-assessments/{assessmentKey}/revoke")
+    public ResponseEntity<?> revokeBlindAssessment(
+            @PathVariable String storyCode,
+            @PathVariable int versionNo,
+            @PathVariable String assessmentKey,
+            HttpServletRequest request) {
+        CurrentSession actor = http.currentSession(request);
+        noQuery(request);
+        JsonNode body =
+                http.body(
+                        request,
+                        8192,
+                        Set.of("expectedRev", "reasonCode", "verificationRef", "requestKey"));
+        return StoryHttpSupport.ok(
+                blind.revoke(
+                        actor.id(),
+                        actor.principal(),
+                        storyCode,
+                        versionNo,
+                        StoryHttpSupport.uuid(assessmentKey, true),
+                        decimal(body, "expectedRev", false),
+                        StoryHttpSupport.text(body, "reasonCode"),
+                        StoryHttpSupport.text(body, "verificationRef"),
+                        StoryHttpSupport.uuid(body, "requestKey", true),
+                        StoryHttpSupport.requestId(request)));
+    }
+
+    private static Instant checkedAt(JsonNode body) {
+        String raw = StoryHttpSupport.text(body, "checkedAt");
+        if (!raw.matches(
+                "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z"))
+            throw AuthException.badRequest("INVALID_REQUEST");
+        try {
+            return Instant.parse(raw);
+        } catch (DateTimeParseException failure) {
+            throw AuthException.badRequest("INVALID_REQUEST");
+        }
     }
 
     /** 현재 REVIEW 권한으로 배타 커서의 원문 없는 초대 요약을 읽는다. */
-    @GetMapping
+    @GetMapping("/playtests")
     public ResponseEntity<?> list(
             @PathVariable String storyCode,
             @PathVariable int versionNo,
@@ -64,7 +185,7 @@ public final class PlaytestAdminController {
     }
 
     /** 완전한 의도 본문으로 실제 FUNCTIONAL 초대를 생성한다. */
-    @PostMapping
+    @PostMapping("/playtests")
     public ResponseEntity<?> create(
             @PathVariable String storyCode,
             @PathVariable int versionNo,
@@ -111,7 +232,7 @@ public final class PlaytestAdminController {
     }
 
     /** 다른 사건의 키를 404로 숨기는 서비스의 현재 권한·감사 경계를 사용한다. */
-    @GetMapping("/{testKey}")
+    @GetMapping("/playtests/{testKey}")
     public ResponseEntity<?> detail(
             @PathVariable String storyCode,
             @PathVariable int versionNo,
@@ -130,7 +251,7 @@ public final class PlaytestAdminController {
     }
 
     /** 현재 REVIEW 권한을 다시 검사해 WAITING 초대만 감사와 함께 회수한다. */
-    @PostMapping("/{testKey}/revoke")
+    @PostMapping("/playtests/{testKey}/revoke")
     public ResponseEntity<?> revoke(
             @PathVariable String storyCode,
             @PathVariable int versionNo,
@@ -152,6 +273,64 @@ public final class PlaytestAdminController {
                         decimal(body, "expectedTestRev", false),
                         StoryHttpSupport.text(body, "reasonCode"),
                         StoryHttpSupport.text(body, "verificationRef"),
+                        StoryHttpSupport.uuid(body, "requestKey", true),
+                        StoryHttpSupport.requestId(request)));
+    }
+
+    /** 현재 관리자 세션의 REVIEW 권한으로 선택한 회원의 동의 전 단독 검수 방만 생성한다. */
+    @PostMapping("/solo-qualifications")
+    public ResponseEntity<?> createQualification(
+            @PathVariable String storyCode,
+            @PathVariable int versionNo,
+            HttpServletRequest request) {
+        CurrentSession actor = http.currentSession(request);
+        noQuery(request);
+        JsonNode body =
+                http.body(
+                        request,
+                        8192,
+                        Set.of(
+                                "expectedRev",
+                                "snapshotId",
+                                "pair",
+                                "runtimeConfigId",
+                                "memberKey",
+                                "qualificationKind",
+                                "policyCode",
+                                "noticeHash",
+                                "requestKey"));
+        JsonNode pair = body.get("pair");
+        if (!pair.isArray()
+                || pair.size() != 2
+                || !pair.get(0).isTextual()
+                || !pair.get(1).isTextual()) throw AuthException.badRequest("INVALID_REQUEST");
+        String roleA = pair.get(0).textValue();
+        String roleB = pair.get(1).textValue();
+        String runtime = StoryHttpSupport.text(body, "runtimeConfigId");
+        String kind = StoryHttpSupport.text(body, "qualificationKind");
+        String code = StoryHttpSupport.text(body, "policyCode");
+        String hash = StoryHttpSupport.text(body, "noticeHash");
+        if (!roleA.matches("[A-Z0-9_]{1,32}")
+                || !roleB.matches("[A-Z0-9_]{1,32}")
+                || !runtime.matches("[A-Z0-9_]{1,80}")
+                || !Set.of("BLIND", "FUNCTIONAL").contains(kind)
+                || !code.matches("[A-Za-z0-9_:-]{1,80}")
+                || !hash.matches("[0-9a-f]{64}")) throw AuthException.badRequest("INVALID_REQUEST");
+        return StoryHttpSupport.created(
+                qualifications.createQualification(
+                        actor.id(),
+                        actor.principal(),
+                        storyCode,
+                        versionNo,
+                        decimal(body, "expectedRev", false),
+                        decimal(body, "snapshotId", true),
+                        roleA,
+                        roleB,
+                        runtime,
+                        StoryHttpSupport.uuid(body, "memberKey", true),
+                        kind,
+                        code,
+                        hash,
                         StoryHttpSupport.uuid(body, "requestKey", true),
                         StoryHttpSupport.requestId(request)));
     }

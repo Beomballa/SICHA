@@ -3,6 +3,7 @@ package com.reasoning.common.grading.service;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.reasoning.common.auth.service.AuthException;
 import com.reasoning.common.auth.service.CryptoService;
+import com.reasoning.common.game.service.GameRecordService;
 import com.reasoning.common.grading.engine.InstalledRuntimeManifestVerifier;
 import com.reasoning.common.grading.model.SnapshotJson;
 import com.reasoning.common.grading.repository.GradeEventRepository;
@@ -15,8 +16,11 @@ import com.reasoning.common.grading.repository.GradeFrozenInputRepository;
 import com.reasoning.common.grading.repository.GradeLeaseRepository;
 import com.reasoning.common.grading.repository.GradeRuntimeRepository;
 import com.reasoning.common.grading.repository.GradeSourceRepository;
+import com.reasoning.common.grading.repository.GradeSourceRepository.GamePreparation;
+import com.reasoning.common.grading.repository.GradeSourceRepository.LockedGameSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedSource;
 import com.reasoning.common.grading.repository.GradeSourceRepository.LockedTestSource;
+import com.reasoning.common.grading.repository.GradeSourceRepository.SourceKind;
 import com.reasoning.common.grading.repository.GradeSourceRepository.TestPreparation;
 import com.reasoning.common.grading.security.GradeWorkerCredentials;
 import com.reasoning.common.member.auth.MemberPolicyGate;
@@ -47,6 +51,7 @@ public final class GradeRecoveryService {
     private final GradeLeaseRepository leases;
     private final GradeEventRepository audit;
     private final PlaytestPolicyGate testPolicy;
+    private final PlaytestPolicyGate friendlyPolicy;
     private final MemberPolicyGate memberPolicy;
     private final CryptoService crypto;
     private final String coordinatorKey;
@@ -89,6 +94,29 @@ public final class GradeRecoveryService {
             PlaytestPolicyGate testPolicy,
             MemberPolicyGate memberPolicy,
             CryptoService crypto) {
+        this(
+                jdbc,
+                manager,
+                credentials,
+                installations,
+                trustedCoordinatorKey,
+                testPolicy,
+                null,
+                memberPolicy,
+                crypto);
+    }
+
+    /** 목적별 정책을 분리해 실제 GAME 원본과 기술 정산을 같은 서비스에 조립한다. */
+    public GradeRecoveryService(
+            JdbcTemplate jdbc,
+            PlatformTransactionManager manager,
+            GradeWorkerCredentials credentials,
+            Map<String, InstalledRuntimeManifestVerifier> installations,
+            String trustedCoordinatorKey,
+            PlaytestPolicyGate testPolicy,
+            PlaytestPolicyGate friendlyPolicy,
+            MemberPolicyGate memberPolicy,
+            CryptoService crypto) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) throw boundary();
         this.jdbc = Objects.requireNonNull(jdbc);
         this.manager = Objects.requireNonNull(manager);
@@ -111,6 +139,7 @@ public final class GradeRecoveryService {
         frozen = new GradeFrozenInputRepository(jdbc);
         leases = new GradeLeaseRepository(jdbc, manager);
         this.testPolicy = testPolicy;
+        this.friendlyPolicy = friendlyPolicy;
         this.memberPolicy = memberPolicy;
         this.crypto = crypto;
         audit = new GradeEventRepository(jdbc, credentials, trustedCoordinatorKey);
@@ -169,13 +198,9 @@ public final class GradeRecoveryService {
         }
         if (TransactionSynchronizationManager.isActualTransactionActive()) throw boundary();
         try {
-            var sources =
-                    jdbc.queryForList(
-                            "SELECT report_id FROM public.grade_job WHERE job_key=?",
-                            Long.class,
-                            jobKey);
-            if (sources.size() != 1) throw new IllegalStateException("SOURCE_NOT_CURRENT");
-            if (sources.getFirst() != null) {
+            SourceKind kind = sources.sourceKind(jobKey);
+            if (kind == SourceKind.GAME) return recoverGame(jobKey);
+            if (kind == SourceKind.TEST) {
                 RecoveryResult terminal =
                         transaction.execute(status -> applyTest(jobKey, null, null));
                 if (terminal != null) return terminal;
@@ -212,6 +237,321 @@ public final class GradeRecoveryService {
             if ("GRADE_AUDIT_STORAGE_FAILURE".equals(failure.getMessage())) throw storage();
             throw failure;
         }
+    }
+
+    /** GAME도 예약 유실은 재실행하지 않고 역사적 근거로 종료하거나 재대기시킨다. */
+    private RecoveryResult recoverGame(UUID key) {
+        RecoveryResult terminal = transaction.execute(status -> applyGame(key, null, null, null));
+        if (terminal != null) return terminal;
+        PlaytestPolicyGate gate;
+        try {
+            gate =
+                    switch (sources.gamePurpose(key)) {
+                        case "PUBLIC" -> friendlyPolicy;
+                        case "REVIEW_SOLO_QUALIFICATION" -> testPolicy;
+                        default -> throw new IllegalStateException("SOURCE_NOT_CURRENT");
+                    };
+            if (gate == null || crypto == null || memberPolicy == null)
+                throw new IllegalStateException("SOURCE_NOT_CURRENT");
+            GamePreparation prepared = sources.prepareQualificationGame(gate);
+            try {
+                return transaction.execute(status -> applyGame(key, gate, prepared, null));
+            } catch (GameSettlementNeeded failure) {
+                return transaction.execute(status -> applyGame(key, null, null, failure.reason));
+            }
+        } catch (AuthException failure) {
+            return transaction.execute(status -> applyGame(key, null, null, Reason.SOURCE_REVOKED));
+        } catch (IllegalStateException failure) {
+            if (!"SOURCE_NOT_CURRENT".equals(failure.getMessage())
+                    && !"GAME_INPUT_NOT_CURRENT".equals(failure.getMessage())) throw failure;
+            return transaction.execute(
+                    status ->
+                            applyGame(
+                                    key,
+                                    null,
+                                    null,
+                                    "GAME_INPUT_NOT_CURRENT".equals(failure.getMessage())
+                                            ? Reason.INVALID_REPORT
+                                            : Reason.SOURCE_REVOKED));
+        }
+    }
+
+    private static final class GameSettlementNeeded extends RuntimeException {
+        private final Reason reason;
+
+        private GameSettlementNeeded(Reason reason) {
+            super("GAME_SETTLEMENT_REQUIRED");
+            this.reason = reason;
+        }
+    }
+
+    /** 끝난 임대의 시도만 소모하며 성공 결과·방 점수는 복구에서 계산하지 않는다. */
+    private RecoveryResult applyGame(
+            UUID key, PlaytestPolicyGate gate, GamePreparation prepared, Reason forced) {
+        boolean historical = prepared == null;
+        LockedGameSource locked =
+                historical
+                        ? sources.lockGameRootsForSettlement(key)
+                        : sources.lockGameRoots(key, gate, prepared);
+        var fact = locked.lockedFacts(jdbc.getDataSource());
+        long id = fact.jobId();
+        Job before = job(id);
+        if (!"RUNNING".equals(before.state()) && !"QUEUED".equals(before.state()))
+            return unchanged(key, before);
+        var attempts =
+                jdbc.queryForList(
+                        "SELECT * FROM public.grade_attempt WHERE job_id=?"
+                                + " ORDER BY attempt_no FOR UPDATE",
+                        id);
+        OffsetDateTime clock = now();
+        if ("QUEUED".equals(before.state())) {
+            if (before.deadlineAt() != null && clock.isBefore(before.deadlineAt()))
+                return unchanged(key, before);
+            if (!historical) throw new GameSettlementNeeded(Reason.DEADLINE_EXCEEDED);
+            return settleQueuedGame(key, locked, before, attempts);
+        }
+        if (before.leaseUntil() != null
+                && before.deadlineAt() != null
+                && clock.isBefore(before.leaseUntil())
+                && clock.isBefore(before.deadlineAt())) return unchanged(key, before);
+        if (before.worker() == null
+                || before.leaseUntil() == null
+                || before.generation() <= 0
+                || before.count() < 0
+                || before.count() > 3
+                || before.count() != attempts.size()
+                || before.acceptedAt() == null
+                || before.deadlineAt() == null
+                || !before.deadlineAt().equals(before.acceptedAt().plusSeconds(120)))
+            throw storage();
+        Map<String, Object> current = null;
+        for (int i = 0; i < attempts.size(); i++) {
+            Map<String, Object> row = attempts.get(i);
+            if (number(row, "attempt_no") != i + 1
+                    || number(row, "lease_gen") > before.generation()
+                    || "SUCCEEDED".equals(row.get("state"))) throw storage();
+            if (number(row, "lease_gen") == before.generation()) {
+                if (current != null
+                        || i + 1 != before.count()
+                        || !before.worker().equals(row.get("worker_key"))
+                        || !"RUNNING".equals(row.get("state"))
+                        || row.get("ended_at") != null
+                        || row.get("completion_data") != null) throw storage();
+                current = row;
+            } else if ("RUNNING".equals(row.get("state"))) throw storage();
+        }
+        if (before.count() == 3 && current == null) throw storage();
+        if (!Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                        "SELECT j.batch_id IS NULL AND j.report_id IS NULL AND j.game_report_id=?"
+                            + " AND j.result_data IS NULL AND j.result_hash IS NULL AND"
+                            + " j.result_cipher IS NULL AND j.accepted_at=r.accepted_at AND"
+                            + " j.deadline_at=r.grade_deadline_at AND r.state='ACCEPTED' AND"
+                            + " r.room_id=? AND g.state='RUNNING' FROM public.grade_job j JOIN"
+                            + " public.game_report r ON r.id=j.game_report_id JOIN public.game_room"
+                            + " g ON g.id=r.room_id WHERE j.id=?",
+                        Boolean.class,
+                        fact.reportId(),
+                        fact.roomId(),
+                        id))) throw storage();
+        Reason reason =
+                !clock.isBefore(before.deadlineAt())
+                        ? Reason.DEADLINE_EXCEEDED
+                        : before.count() == 3 ? Reason.WORKER_LOST : forced;
+        if (historical && reason == null) return null;
+        if (!historical && reason != null) throw new GameSettlementNeeded(reason);
+        if (!historical) {
+            try {
+                var root = locked.requireCurrent(jdbc.getDataSource());
+                var installed = installations.get(root.runtimeCode());
+                if (installed == null)
+                    throw new IllegalStateException("INSTALLED_RUNTIME_MISMATCH");
+                var runtime =
+                        installed.verify(
+                                runtimes.getRuntimeDetail(root.runtimeId())
+                                        .orElseThrow(GradeRecoveryService::storage));
+                var input = frozen.verifiedGameInput(locked, runtime, crypto);
+                if (input.root().jobId() != id || input.root().reportId() != fact.reportId())
+                    throw storage();
+                installed.verify(
+                        runtimes.getRuntimeDetail(root.runtimeId())
+                                .orElseThrow(GradeRecoveryService::storage));
+                frozen.verifiedGameInput(locked, runtime, crypto);
+            } catch (IllegalStateException failure) {
+                if (!"SOURCE_NOT_CURRENT".equals(failure.getMessage())
+                        && !"GAME_INPUT_NOT_CURRENT".equals(failure.getMessage())) throw failure;
+                throw new GameSettlementNeeded(
+                        "GAME_INPUT_NOT_CURRENT".equals(failure.getMessage())
+                                ? Reason.INVALID_REPORT
+                                : Reason.SOURCE_REVOKED);
+            }
+        }
+        JobState after = reason == null ? JobState.QUEUED : JobState.FAILED;
+        if (reason == null) reason = current == null ? Reason.STALE_LEASE : Reason.WORKER_LOST;
+        Integer attemptNo = current == null ? null : before.count();
+        OffsetDateTime ended = current == null ? null : now();
+        if (current != null
+                && jdbc.update(
+                                "UPDATE public.grade_attempt SET"
+                                    + " state='FAILED',error_code='WORKER_LOST',ended_at=? WHERE"
+                                    + " job_id=? AND attempt_no=? AND state='RUNNING' AND"
+                                    + " completion_data IS NULL AND worker_key=? AND lease_gen=?",
+                                ended,
+                                id,
+                                attemptNo,
+                                before.worker(),
+                                before.generation())
+                        != 1) throw storage();
+        OffsetDateTime changed = now();
+        if (after == JobState.QUEUED && !changed.isBefore(before.deadlineAt()))
+            throw new GameSettlementNeeded(Reason.DEADLINE_EXCEEDED);
+        if (jdbc.update(
+                        "UPDATE public.grade_job SET"
+                            + " state=?,worker_key=NULL,lease_until=NULL,error_code=?,next_run_at=?,updated_at=?"
+                            + " WHERE id=? AND game_report_id=? AND state='RUNNING' AND"
+                            + " worker_key=? AND lease_gen=? AND call_count=? AND"
+                            + " (lease_until<=clock_timestamp() OR deadline_at<=clock_timestamp())",
+                        after.name(),
+                        after == JobState.QUEUED ? null : reason.name(),
+                        changed,
+                        changed,
+                        id,
+                        fact.reportId(),
+                        before.worker(),
+                        before.generation(),
+                        before.count())
+                != 1) throw storage();
+        EventKind kind =
+                current == null ? EventKind.JOB_LEASE_RECLAIMED : EventKind.RECOVERY_EXPIRED;
+        var command =
+                JsonNodeFactory.instance
+                        .objectNode()
+                        .put("operation", kind.name())
+                        .put("jobKey", key.toString())
+                        .put("leaseGen", before.generation())
+                        .put("attemptNo", attemptNo)
+                        .put("callCount", before.count())
+                        .put("beforeState", "RUNNING")
+                        .put("afterState", after.name())
+                        .put("reason", reason.name())
+                        .put("checkedAt", changed.toString());
+        UUID commandKey = UUID.randomUUID();
+        String hash = SnapshotJson.hash(command);
+        long event =
+                audit.recordSystemEvent(
+                        id,
+                        attemptNo,
+                        kind,
+                        commandKey,
+                        hash,
+                        new Detail(
+                                before.generation(),
+                                JobState.RUNNING,
+                                after,
+                                current == null ? null : AttemptState.RUNNING,
+                                current == null ? null : AttemptState.FAILED,
+                                reason,
+                                null,
+                                null));
+        if (after == JobState.FAILED) settleGameFailure(locked, changed);
+        if (!Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                        "SELECT j.state=? AND j.worker_key IS NULL AND j.lease_until IS NULL AND"
+                            + " j.call_count=? AND e.command_key=? AND e.command_hash=? FROM"
+                            + " public.grade_job j JOIN public.grade_event e ON e.job_id=j.id WHERE"
+                            + " j.id=? AND e.id=?",
+                        Boolean.class,
+                        after.name(),
+                        before.count(),
+                        commandKey,
+                        hash,
+                        id,
+                        event))) throw storage();
+        return new RecoveryResult(true, key, after.name(), attemptNo, reason.name());
+    }
+
+    /** 접수 마감 후 아직 예약하지 않은 보고서도 동일한 실패 방 상태로 닫는다. */
+    private RecoveryResult settleQueuedGame(
+            UUID key, LockedGameSource source, Job before, List<Map<String, Object>> attempts) {
+        var root = source.lockedFacts(jdbc.getDataSource());
+        if (before.deadlineAt() == null
+                || before.acceptedAt() == null
+                || !before.deadlineAt().equals(before.acceptedAt().plusSeconds(120))
+                || before.count() != attempts.size()
+                || before.count() > 3) throw storage();
+        for (int i = 0; i < attempts.size(); i++) {
+            if (number(attempts.get(i), "attempt_no") != i + 1
+                    || "RUNNING".equals(attempts.get(i).get("state"))
+                    || "SUCCEEDED".equals(attempts.get(i).get("state"))) throw storage();
+        }
+        OffsetDateTime clock = now();
+        if (clock.isBefore(before.deadlineAt())) return unchanged(key, before);
+        if (jdbc.update(
+                        "UPDATE public.grade_job SET"
+                            + " state='FAILED',error_code='DEADLINE_EXCEEDED',next_run_at=?,updated_at=?"
+                            + " WHERE id=? AND game_report_id=? AND state='QUEUED' AND"
+                            + " deadline_at<=clock_timestamp()",
+                        clock,
+                        clock,
+                        root.jobId(),
+                        root.reportId())
+                != 1) throw storage();
+        var command =
+                JsonNodeFactory.instance
+                        .objectNode()
+                        .put("operation", "JOB_DEADLINE_EXPIRED")
+                        .put("jobKey", key.toString())
+                        .put("reason", "DEADLINE_EXCEEDED")
+                        .put("checkedAt", clock.toString());
+        UUID commandKey = UUID.randomUUID();
+        String hash = SnapshotJson.hash(command);
+        long event =
+                audit.recordSystemEvent(
+                        root.jobId(),
+                        null,
+                        EventKind.JOB_DEADLINE_EXPIRED,
+                        commandKey,
+                        hash,
+                        new Detail(
+                                before.generation(),
+                                JobState.QUEUED,
+                                JobState.FAILED,
+                                null,
+                                null,
+                                Reason.DEADLINE_EXCEEDED,
+                                null,
+                                null));
+        settleGameFailure(source, clock);
+        if (!Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                        "SELECT j.state='FAILED' AND j.error_code='DEADLINE_EXCEEDED' AND"
+                            + " e.command_hash=? FROM public.grade_job j JOIN public.grade_event e"
+                            + " ON e.job_id=j.id WHERE j.id=? AND e.id=?",
+                        Boolean.class,
+                        hash,
+                        root.jobId(),
+                        event))) throw storage();
+        return new RecoveryResult(true, key, "FAILED", null, "DEADLINE_EXCEEDED");
+    }
+
+    private void settleGameFailure(LockedGameSource source, OffsetDateTime clock) {
+        var root = source.lockedFacts(jdbc.getDataSource());
+        if (jdbc.update(
+                        "UPDATE public.game_report SET state='UNGRADABLE' WHERE id=?"
+                                + " AND room_id=? AND state='ACCEPTED' AND graded_at IS NULL",
+                        root.reportId(),
+                        root.roomId())
+                != 1) throw storage();
+        if (jdbc.update(
+                        "UPDATE public.game_room SET state='ENDED',end_reason='SYSTEM_ERROR',"
+                            + "final_score=NULL,ended_at=?,time_basis_at=?,updated_at=?,rev=rev+1"
+                            + " WHERE id=? AND state='RUNNING'",
+                        clock,
+                        clock,
+                        clock,
+                        root.roomId())
+                != 1) throw storage();
+        GameRecordService.snapshotTerminal(jdbc, root.roomId());
     }
 
     /**

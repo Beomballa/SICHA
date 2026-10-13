@@ -58,7 +58,7 @@ public class MemberAuthController {
         JsonNode input = body(request, "flowKey", "flowBinder", "code");
         return response(
                 200,
-                service.verifySignup(
+                service.verifyEmail(
                         uuid(input, "flowKey"),
                         text(input, "flowBinder"),
                         text(input, "code"),
@@ -93,6 +93,29 @@ public class MemberAuthController {
         return response(201, issued.tokens());
     }
 
+    /** 복구 요청만으로 계정 존재나 세션 회수 상태를 공개하지 않는다. */
+    @PostMapping(MemberSecurityConfig.AUTH + "/password/reset")
+    public ResponseEntity<?> reset(HttpServletRequest request) {
+        var input = body(request, "email");
+        return response(
+                202,
+                service.startReset(text(input, "email"), request.getRemoteAddr(), id(request)));
+    }
+
+    /** 메일로 확인한 복구를 단회 소비하며 자동 로그인 토큰은 반환하지 않는다. */
+    @PostMapping(MemberSecurityConfig.AUTH + "/password/reset/complete")
+    public ResponseEntity<?> completeReset(HttpServletRequest request) {
+        var input = body(request, "flowKey", "flowBinder", "newPassword", "requestKey");
+        return response(
+                200,
+                service.completeReset(
+                        uuid(input, "flowKey"),
+                        text(input, "flowBinder"),
+                        text(input, "newPassword"),
+                        uuid(input, "requestKey"),
+                        id(request)));
+    }
+
     /** 정상 LOCAL 인증 결과만 접근 이력 주체로 채택한다. */
     @PostMapping(MemberSecurityConfig.AUTH + "/login/local")
     public ResponseEntity<?> login(HttpServletRequest request) {
@@ -120,6 +143,74 @@ public class MemberAuthController {
     @GetMapping(MemberSecurityConfig.AUTH + "/me")
     public ResponseEntity<?> me(HttpServletRequest request) {
         return response(200, service.getMe(MemberSecurityConfig.bearer(request), id(request)));
+    }
+
+    /** 현재 family의 LOCAL 수단만 목적별 최근 본인 확인 증명으로 발급한다. */
+    @PostMapping(MemberSecurityConfig.AUTH + "/reauth/local")
+    public ResponseEntity<?> reauthenticate(HttpServletRequest request) {
+        var input = body(request, "purpose", "identityKey", "password");
+        return response(
+                200,
+                service.reauthenticate(
+                        MemberSecurityConfig.bearer(request),
+                        text(input, "purpose"),
+                        uuid(input, "identityKey"),
+                        text(input, "password"),
+                        request.getRemoteAddr(),
+                        id(request)));
+    }
+
+    /** 탈퇴 증명을 단회 소비해 접근 회수와 내구 접수만 확인하며 전체 파기 완료를 뜻하지 않는다. */
+    @PostMapping(MemberSecurityConfig.AUTH + "/account/delete")
+    public ResponseEntity<?> deleteAccount(HttpServletRequest request) {
+        var input = body(request, "reauthGrant", "requestKey");
+        return response(
+                202,
+                service.deleteAccount(
+                        MemberSecurityConfig.bearer(request),
+                        text(input, "reauthGrant"),
+                        uuid(input, "requestKey"),
+                        id(request)));
+    }
+
+    /** 별도 영수증 비밀로만 진행 상태를 읽고 회원 인증 권위를 부여하지 않는다. */
+    @PostMapping(MemberSecurityConfig.ERASE_STATUS)
+    public ResponseEntity<?> erasureStatus(HttpServletRequest request) {
+        var input = body(request, "eraseKey", "receiptToken");
+        return response(
+                200,
+                service.status(
+                        uuid(input, "eraseKey"),
+                        text(input, "receiptToken"),
+                        id(request),
+                        request.getRemoteAddr()));
+    }
+
+    /** 현재 family에 결속된 PASSWORD_CHANGE 증명을 단회 소비하고 새 로그인을 요구한다. */
+    @PostMapping(MemberSecurityConfig.AUTH + "/password/change")
+    public ResponseEntity<?> changePassword(HttpServletRequest request) {
+        var input = body(request, "reauthGrant", "newPassword", "requestKey");
+        return response(
+                200,
+                service.changePassword(
+                        MemberSecurityConfig.bearer(request),
+                        text(input, "reauthGrant"),
+                        text(input, "newPassword"),
+                        uuid(input, "requestKey"),
+                        id(request)));
+    }
+
+    /** LOGOUT_ALL 증명과 현재 자격을 함께 확인하고 모든 family를 원자적으로 회수한다. */
+    @PostMapping(MemberSecurityConfig.AUTH + "/logout-all")
+    public ResponseEntity<?> logoutAll(HttpServletRequest request) {
+        var input = body(request, "reauthGrant", "requestKey");
+        return response(
+                200,
+                service.logoutAll(
+                        MemberSecurityConfig.bearer(request),
+                        text(input, "reauthGrant"),
+                        uuid(input, "requestKey"),
+                        id(request)));
     }
 
     /** 고지 효력과 무관한 보안 회수를 실제 현재 access에 한정한다. */

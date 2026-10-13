@@ -197,7 +197,7 @@ public class GradeSchemaIT {
                                     + " zone:N,input_hash:character(64):Y,config_hash:character(64):N,rubric_hash:character(64):N,result_cipher:bytea:Y,result_data:jsonb:Y,result_hash:character(64):Y,error_code:character"
                                     + " varying(40):Y,created_at:timestamp with time"
                                     + " zone:N,updated_at:timestamp with time"
-                                    + " zone:N,report_id:bigint:Y,report_hash:character(64):Y",
+                                    + " zone:N,report_id:bigint:Y,report_hash:character(64):Y,game_report_id:bigint:Y",
                         "grade_attempt",
                                 "job_id:bigint:N,attempt_no:smallint:N,lease_gen:bigint:N,worker_key:character"
                                     + " varying(80):N,started_at:timestamp with time"
@@ -290,7 +290,8 @@ public class GradeSchemaIT {
                                         "uk_grade_job_key",
                                         "uk_grade_job_sample",
                                         "uk_gj_worker",
-                                        "uk_gj_report"),
+                                        "uk_gj_report",
+                                        "uk_gj_game_report"),
                         "grade_attempt", Set.of("pk_grade_attempt", "uk_ga_lease"));
         Map<String, Set<String>> checks =
                 Map.of(
@@ -359,6 +360,8 @@ public class GradeSchemaIT {
                         "UNIQUE (batch_id, sample_code, repeat_no)",
                         "uk_gj_report",
                         "UNIQUE (report_id)",
+                        "uk_gj_game_report",
+                        "UNIQUE (game_report_id)",
                         "uk_ga_lease",
                         "UNIQUE (job_id, lease_gen)");
         Map<String, List<String>> foreignKeys = new HashMap<>();
@@ -413,7 +416,12 @@ public class GradeSchemaIT {
                                         .toList())
                         .containsExactlyInAnyOrderElementsOf(checks.get(table));
                 for (var constraint : constraints) {
-                    if (Set.of("ck_gj_source", "ck_gj_report_hash", "uk_gj_report", "fk_gj_report")
+                    if (Set.of(
+                                    "ck_gj_report_hash",
+                                    "uk_gj_report",
+                                    "fk_gj_report",
+                                    "uk_gj_game_report",
+                                    "fk_gj_game_report")
                             .contains(constraint.get("conname"))) {
                         assertThat(constraint.get("comment")).isNull();
                     } else {
@@ -437,7 +445,7 @@ public class GradeSchemaIT {
                                             + " pg_catalog.obj_description(?::regclass,'pg_class')",
                                     String.class,
                                     "public." + index);
-                    if (index.equals("uk_gj_report")) {
+                    if (Set.of("uk_gj_report", "uk_gj_game_report").contains(index)) {
                         assertThat(comment).isNull();
                     } else {
                         assertThat(comment).contains("미측정");
@@ -467,6 +475,10 @@ public class GradeSchemaIT {
                                         "snapshot_id->test_report.snapshot_id",
                                         "runtime_id->test_report.runtime_id",
                                         "report_id->test_report.id"),
+                                "fk_gj_game_report",
+                                List.of(
+                                        "snapshot_id->game_report.snapshot_id",
+                                        "game_report_id->game_report.id"),
                                 "fk_ga_job",
                                 List.of("job_id->grade_job.id")));
         String workerIndex =
@@ -484,9 +496,13 @@ public class GradeSchemaIT {
             String expected =
                     "CHECK ((batch_id IS NOT NULL AND sample_code IS NOT NULL AND repeat_no IS NOT"
                         + " NULL AND repeat_no >= 1 AND repeat_no <= 3 AND input_hash IS NOT NULL"
-                        + " AND report_id IS NULL AND report_hash IS NULL) OR (batch_id IS NULL AND"
+                        + " AND report_id IS NULL AND report_hash IS NULL AND game_report_id IS"
+                        + " NULL) OR (batch_id IS NULL AND sample_code IS NULL AND repeat_no IS"
+                        + " NULL AND input_hash IS NULL AND report_id IS NOT NULL AND report_hash"
+                        + " IS NOT NULL AND game_report_id IS NULL) OR (batch_id IS NULL AND"
                         + " sample_code IS NULL AND repeat_no IS NULL AND input_hash IS NULL AND"
-                        + " report_id IS NOT NULL AND report_hash IS NOT NULL))";
+                        + " report_id IS NULL AND report_hash IS NOT NULL AND game_report_id IS NOT"
+                        + " NULL))";
             assertThat(definition.replaceAll("[()\\s]", ""))
                     .isEqualTo(expected.replaceAll("[()\\s]", ""));
         }

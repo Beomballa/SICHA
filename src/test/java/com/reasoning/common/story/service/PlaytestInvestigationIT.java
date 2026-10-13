@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessException;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 @Import(LocalMemberAuthIT.Installation.class)
 public class PlaytestInvestigationIT extends LocalMemberAuthIT {
     @Autowired PlaytestInvestigationService investigation;
+    @Autowired BlindEligibilityService eligibility;
     private boolean policyReady;
 
     private record Pair(
@@ -70,13 +72,22 @@ public class PlaytestInvestigationIT extends LocalMemberAuthIT {
         var first = invitations.getConsentNotice(a, key, UUID.randomUUID());
         UUID acceptKey = UUID.randomUUID();
         invitations.acceptInvitation(
-                a, key, 1, 0, first.policyCode(), first.noticeHash(), acceptKey, UUID.randomUUID());
+                a,
+                key,
+                1,
+                0,
+                false,
+                first.policyCode(),
+                first.noticeHash(),
+                acceptKey,
+                UUID.randomUUID());
         var second = invitations.getConsentNotice(b, key, UUID.randomUUID());
         invitations.acceptInvitation(
                 b,
                 key,
                 1,
                 1,
+                false,
                 second.policyCode(),
                 second.noticeHash(),
                 UUID.randomUUID(),
@@ -86,6 +97,203 @@ public class PlaytestInvestigationIT extends LocalMemberAuthIT {
 
     private long revision(UUID key) {
         return db.queryForObject("SELECT rev FROM play_test WHERE test_key=?", Long.class, key);
+    }
+
+    /** 합성 LOCAL 두 계정의 실제 검수 평가와 별개 선언으로만 BLIND 원문 출처를 만든다. */
+    @Test
+    void assessedBlindPairDeclaresStartsAndExposesOnlyOnMaterials() throws Exception {
+        playtestPolicy();
+        String a =
+                account("blind-investigation-a-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        String b =
+                account("blind-investigation-b-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        UUID memberA = invitations.getMemberIdentity(a, UUID.randomUUID()).memberKey();
+        UUID memberB = invitations.getMemberIdentity(b, UUID.randomUUID()).memberKey();
+        invitation(List.of(memberA, memberB)); // REVIEW 사본과 관리자 세션만 합성한다.
+        long snapshot =
+                db.queryForObject(
+                        "SELECT current_snapshot_id FROM story_version WHERE story_id=(SELECT id"
+                                + " FROM story WHERE code=?)",
+                        Long.class,
+                        invitationStoryCode);
+        assertThatThrownBy(
+                        () ->
+                                invitations.createInvitation(
+                                        invitationSid,
+                                        invitationActor,
+                                        invitationStoryCode,
+                                        1,
+                                        0,
+                                        snapshot,
+                                        "H5_SYNTHETIC",
+                                        "BLIND",
+                                        "R1",
+                                        "R2",
+                                        List.of(memberA, memberB),
+                                        UUID.randomUUID(),
+                                        UUID.randomUUID()))
+                .hasMessageContaining("BLIND_INELIGIBLE");
+        UUID assessmentA = null;
+        for (UUID member : List.of(memberA, memberB)) {
+            var assessment =
+                    eligibility.create(
+                            invitationSid,
+                            invitationActor,
+                            invitationStoryCode,
+                            1,
+                            0,
+                            snapshot,
+                            member,
+                            "ELIGIBLE",
+                            "NON_PARTICIPATION_CONFIRMED",
+                            "synthetic.review:01",
+                            Instant.now().minusSeconds(30),
+                            true,
+                            null,
+                            UUID.randomUUID(),
+                            UUID.randomUUID());
+            assertThat(assessment.current()).isTrue();
+            if (member.equals(memberA)) assessmentA = assessment.assessmentKey();
+        }
+        var created =
+                invitations.createInvitation(
+                        invitationSid,
+                        invitationActor,
+                        invitationStoryCode,
+                        1,
+                        0,
+                        snapshot,
+                        "H5_SYNTHETIC",
+                        "BLIND",
+                        "R1",
+                        "R2",
+                        List.of(memberA, memberB),
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
+        UUID key = (UUID) created.current().get("testKey");
+        assertThat(
+                        db.queryForObject(
+                                "SELECT mode FROM play_test WHERE test_key=?", String.class, key))
+                .isEqualTo("BLIND");
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(assessment_id) FROM test_member m JOIN play_test t ON"
+                                        + " t.id=m.test_id WHERE t.test_key=?",
+                                Integer.class,
+                                key))
+                .isEqualTo(2);
+        var noticeA = invitations.getConsentNotice(a, key, UUID.randomUUID());
+        UUID acceptKey = UUID.randomUUID();
+        assertThatThrownBy(
+                        () ->
+                                invitations.acceptInvitation(
+                                        a,
+                                        key,
+                                        1,
+                                        0,
+                                        false,
+                                        noticeA.policyCode(),
+                                        noticeA.noticeHash(),
+                                        acceptKey,
+                                        UUID.randomUUID()))
+                .hasMessageContaining("BLIND_INELIGIBLE");
+        invitations.acceptInvitation(
+                a,
+                key,
+                1,
+                0,
+                true,
+                noticeA.policyCode(),
+                noticeA.noticeHash(),
+                acceptKey,
+                UUID.randomUUID());
+        assertThat(
+                        invitations
+                                .acceptInvitation(
+                                        a,
+                                        key,
+                                        1,
+                                        0,
+                                        true,
+                                        noticeA.policyCode(),
+                                        noticeA.noticeHash(),
+                                        acceptKey,
+                                        UUID.randomUUID())
+                                .replayed())
+                .isTrue();
+        assertThatThrownBy(
+                        () ->
+                                invitations.acceptInvitation(
+                                        a,
+                                        key,
+                                        1,
+                                        0,
+                                        false,
+                                        noticeA.policyCode(),
+                                        noticeA.noticeHash(),
+                                        acceptKey,
+                                        UUID.randomUUID()))
+                .hasMessageContaining("REQUEST_KEY_CONFLICT");
+        var noticeB = invitations.getConsentNotice(b, key, UUID.randomUUID());
+        invitations.acceptInvitation(
+                b,
+                key,
+                1,
+                1,
+                true,
+                noticeB.policyCode(),
+                noticeB.noticeHash(),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+        investigation.ready(a, key, 2, true, UUID.randomUUID(), UUID.randomUUID());
+        investigation.ready(b, key, 3, true, UUID.randomUUID(), UUID.randomUUID());
+        investigation.heartbeat(a, key, UUID.randomUUID());
+        investigation.heartbeat(b, key, UUID.randomUUID());
+        investigation.start(a, key, 4, UUID.randomUUID(), UUID.randomUUID());
+        assertThat(exposures(key)).isZero();
+        investigation.openHint(a, key, 1, 5, UUID.randomUUID(), UUID.randomUUID());
+        assertThat(exposures(key)).isZero();
+        assertThat(investigation.materials(a, key, UUID.randomUUID()).path("openedHints").size())
+                .isEqualTo(1);
+        var exposure =
+                db.queryForMap(
+                        "SELECT first_test_id,first_exposed_at FROM test_exposure WHERE"
+                            + " member_id=(SELECT id FROM member_account WHERE member_key=?) AND"
+                            + " story_id=(SELECT id FROM story WHERE code=?)",
+                        memberA,
+                        invitationStoryCode);
+        assertThat(exposure.get("first_test_id"))
+                .isEqualTo(
+                        db.queryForObject(
+                                "SELECT id FROM play_test WHERE test_key=?", Long.class, key));
+        investigation.materials(a, key, UUID.randomUUID());
+        assertThat(
+                        db.queryForMap(
+                                "SELECT first_test_id,first_exposed_at FROM test_exposure WHERE"
+                                        + " member_id=(SELECT id FROM member_account WHERE"
+                                        + " member_key=?) AND story_id=(SELECT id FROM story WHERE"
+                                        + " code=?)",
+                                memberA,
+                                invitationStoryCode))
+                .isEqualTo(exposure);
+        assertThat(count(key, "test_audit", "CONTENT_READ")).isEqualTo(2);
+        eligibility.revoke(
+                invitationSid,
+                invitationActor,
+                invitationStoryCode,
+                1,
+                assessmentA,
+                0,
+                "EVIDENCE_INVALID",
+                "synthetic.revoke:01",
+                UUID.randomUUID(),
+                UUID.randomUUID());
+        assertThatThrownBy(() -> investigation.materials(a, key, UUID.randomUUID()))
+                .hasMessageContaining("BLIND_INELIGIBLE");
     }
 
     private int count(UUID key, String table, String action) {
@@ -567,7 +775,14 @@ public class PlaytestInvestigationIT extends LocalMemberAuthIT {
                                 investigation.openHint(
                                         pair.a(), key, 1, 5, hintKey, UUID.randomUUID()))
                 .hasMessageContaining("MEMBER_AUTH_REQUIRED");
-        assertThat(exposures(key)).isEqualTo(1);
+        assertThat(exposures(key)).isZero();
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM test_hint h JOIN play_test t ON"
+                                    + " t.id=h.test_id WHERE t.test_key=?",
+                                Integer.class,
+                                key))
+                .isEqualTo(1);
     }
 
     /** 실제 dispatcher가 엄격한 revision/body를 검사하고 공개 DTO·204 응답을 전달한다. */
@@ -700,6 +915,7 @@ public class PlaytestInvestigationIT extends LocalMemberAuthIT {
                                                     pair.key(),
                                                     1,
                                                     0,
+                                                    false,
                                                     pair.policyCode(),
                                                     pair.noticeHash(),
                                                     pair.acceptKey(),
@@ -807,6 +1023,7 @@ public class PlaytestInvestigationIT extends LocalMemberAuthIT {
                                         pair.key(),
                                         1,
                                         1,
+                                        false,
                                         pair.policyCode(),
                                         pair.noticeHash(),
                                         pair.acceptKey(),
@@ -1091,6 +1308,7 @@ public class PlaytestInvestigationIT extends LocalMemberAuthIT {
                 pair.key(),
                 1,
                 0,
+                false,
                 pair.policyCode(),
                 pair.noticeHash(),
                 pair.acceptKey(),
