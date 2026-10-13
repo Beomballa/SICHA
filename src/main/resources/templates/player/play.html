@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>시차 · 단독 사건 조사</title>
+    <link rel="stylesheet" href="/player-public.css" />
+    <script type="module" src="/player-common/solo-page.mjs"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 바로 이동</a>
+    <header class="site-header">
+      <div class="shell">
+        <a class="brand" href="/">시차</a><a href="/account">회원 계정</a>
+      </div>
+    </header>
+    <main id="main" class="shell" tabindex="-1">
+      <h1>단독 사건 조사</h1>
+      <p>
+        공개 가능한 사건만 서버에서 조회합니다. 실제 공개·수집 준비가 없으면
+        게임을 시작할 수 없습니다.
+      </p>
+      <p id="status" role="status" aria-live="polite">
+        회원 상태를 확인하는 중입니다.
+      </p>
+      <p id="error" role="alert" hidden></p>
+      <div class="actions">
+        <button id="connect" class="secondary-action" type="button">
+          회원 연결 복구</button
+        ><button id="catalog-button" class="secondary-action" type="button">
+          사건 목록 조회</button
+        ><button id="current-button" class="secondary-action" type="button">
+          진행 중인 방 확인
+        </button>
+      </div>
+      <noscript
+        ><p>
+          계정과 게임 기능에는 JavaScript와 HTTPS·Web Locks 지원이 필요합니다.
+        </p></noscript
+      >
+      <section
+        id="catalog"
+        class="section"
+        aria-labelledby="catalog-title"
+        hidden
+      >
+        <h2 id="catalog-title">공개 사건</h2>
+        <p id="empty" hidden>공개 가능한 사건이 없습니다.</p>
+        <div id="story-list" class="guide"></div>
+        <div class="actions">
+          <button id="next" class="secondary-action" type="button" hidden>
+            다음 사건 조회
+          </button>
+        </div>
+      </section>
+      <section id="story" class="section" hidden aria-labelledby="story-title">
+        <h2 id="story-title"></h2>
+        <p id="story-intro" class="notice-body"></p>
+        <p id="story-setting" class="notice-body"></p>
+        <p id="story-details"></p>
+        <h3>현재 게임 수집 고지</h3>
+        <p id="notice-version"></p>
+        <p id="notice-body" class="notice-body"></p>
+        <p id="notice-contact"></p>
+        <label class="check-label"
+          ><input id="create-consent" type="checkbox" />현재 고지를 읽고 이
+          사건의 단독 게임 참여에 동의합니다.</label
+        >
+        <div class="actions">
+          <button id="create" class="primary-action" type="button">
+            동의한 SOLO 방 만들기
+          </button>
+        </div>
+      </section>
+      <section id="game" class="section" hidden aria-labelledby="game-title">
+        <h2 id="game-title"></h2>
+        <p id="game-state"></p>
+        <p id="game-counts"></p>
+        <p id="deadline"></p>
+        <p>표시 시각은 안내입니다. 종료와 점수는 서버 결과로만 확인합니다.</p>
+        <div class="actions">
+          <button id="refresh" class="secondary-action" type="button">
+            현재 방 서버 상태 조회</button
+          ><button id="start" class="primary-action" type="button" hidden>
+            단독 조사 시작
+          </button>
+        </div>
+      </section>
+      <section
+        id="investigation"
+        class="section"
+        hidden
+        aria-labelledby="investigation-title"
+      >
+        <h2 id="investigation-title">조사 자료</h2>
+        <p id="basic-intro" class="notice-body"></p>
+        <p id="basic-setting" class="notice-body"></p>
+        <h3>고정된 두 역할</h3>
+        <div id="roles" class="guide"></div>
+        <h3>인물</h3>
+        <div id="persons" class="guide"></div>
+        <h3>단서</h3>
+        <div id="clues" class="guide"></div>
+        <h3>힌트</h3>
+        <div id="hints"></div>
+        <div id="required-notices"></div>
+      </section>
+      <section
+        id="report-section"
+        class="section"
+        hidden
+        aria-labelledby="report-title"
+      >
+        <h2 id="report-title">REPORT-1 보고서</h2>
+        <p>
+          편집 입력은 현재 문서에만 있습니다. 서버 저장본과 다른 입력은 제출할
+          수 없습니다.
+        </p>
+        <p id="saved-revision"></p>
+        <div id="saved-report" class="panel notice-body"></div>
+        <form id="report-form">
+          <label
+            >지목 인물<select id="culprit">
+              <option value="">미선택</option>
+            </select></label
+          ><label
+            >방법<textarea
+              id="method"
+              rows="4"
+              maxlength="10000"
+            ></textarea></label
+          ><label
+            >시간<textarea
+              id="time"
+              rows="4"
+              maxlength="10000"
+            ></textarea></label
+          ><label
+            >동기<textarea
+              id="motive"
+              rows="4"
+              maxlength="10000"
+            ></textarea></label
+          ><label
+            >근거<textarea id="evidence" rows="4" maxlength="10000"></textarea>
+          </label>
+          <div class="actions">
+            <button id="save" class="primary-action" type="submit">
+              보고서 명시 저장</button
+            ><button id="revert" class="secondary-action" type="button">
+              편집을 버리고 서버 저장본 사용
+            </button>
+            <button id="accept-latest" class="secondary-action" type="button">
+              최신 저장본을 확인하고 편집 입력 유지
+            </button>
+          </div>
+        </form>
+        <label class="check-label"
+          ><input id="submit-consent" type="checkbox" />위 서버 저장본의
+          인물·방법·시간·동기·근거를 확인했습니다. 이 저장본을 불변 제출본으로
+          접수합니다.</label
+        >
+        <div class="actions">
+          <button id="submit" class="primary-action" type="button">
+            동의한 서버 저장본 제출
+          </button>
+        </div>
+      </section>
+      <section id="forfeit-section" class="section" hidden>
+        <h2>조사 포기</h2>
+        <label class="check-label"
+          ><input id="forfeit-consent" type="checkbox" />이 방의 조사를 포기하고
+          종료하는 것에 동의합니다.</label
+        >
+        <div class="actions">
+          <button id="forfeit" class="secondary-action" type="button">
+            동의한 방 포기
+          </button>
+        </div>
+      </section>
+      <section
+        id="result"
+        class="section"
+        hidden
+        aria-labelledby="result-title"
+      >
+        <h2 id="result-title">서버 종료 결과</h2>
+        <p id="result-summary"></p>
+        <div id="score-details"></div>
+        <div id="report-results"></div>
+        <p id="reveal" class="notice-body"></p>
+      </section>
+      <section id="uncertain" class="section" hidden>
+        <h2>원본 명령 확인 필요</h2>
+        <p id="intent-name"></p>
+        <p>
+          자동 재전송하지 않습니다. 서버 조회나 수정번호 변화로 명령 성공을
+          추정하지 않습니다.
+        </p>
+        <div class="actions">
+          <button id="replay" class="secondary-action" type="button">
+            동일 키·동일 본문으로 원본 요청 다시 보내기
+          </button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -170,8 +170,14 @@ public class MemberSecurityConfig {
         return headers.getFirst().substring(7);
     }
 
-    /** 웹 Bearer는 지정된 회원 보안·초대·조사 경로만 열고 나머지는 닫는다. */
+    /**
+     * 웹 Bearer는 기존 PUBLIC·검수·회원 보안의 정확한 경로만 사용한다.
+     *
+     * @param request 실제 HTTP 메서드와 URI를 가진 요청이며 null 불가
+     * @return 현재 웹 allowlist에 등록된 메서드/경로이면 true
+     */
     static boolean browserBearerRoute(HttpServletRequest request) {
+        if (MemberWebPolicy.gameRoute(request)) return true;
         if (MemberWebPolicy.qualificationRoute(request)) return true;
         String path = request.getRequestURI();
         if ("GET".equals(request.getMethod())) {

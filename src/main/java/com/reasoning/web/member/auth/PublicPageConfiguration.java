@@ -31,13 +31,20 @@ public class PublicPageConfiguration {
                                 request.getRequestURI().equals("/")
                                         || request.getRequestURI().equals("/privacy")
                                         || request.getRequestURI().equals("/account")
+                                        || request.getRequestURI().equals("/play")
                                         || request.getRequestURI().equals("/player-public.css")
                                         || request.getRequestURI()
                                                 .equals("/player-common/web-api.mjs")
                                         || request.getRequestURI()
                                                 .equals("/player-common/web-session.mjs")
                                         || request.getRequestURI()
-                                                .equals("/player-common/account.mjs"))
+                                                .equals("/player-common/account.mjs")
+                                        || request.getRequestURI()
+                                                .equals("/player-common/solo-model.mjs")
+                                        || request.getRequestURI()
+                                                .equals("/player-common/solo-client.mjs")
+                                        || request.getRequestURI()
+                                                .equals("/player-common/solo-page.mjs"))
                 .securityContext(
                         context ->
                                 context.securityContextRepository(
@@ -86,13 +93,15 @@ public class PublicPageConfiguration {
             response.setHeader("Cache-Control", "no-store");
             response.setHeader("Referrer-Policy", "no-referrer");
             response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-            boolean account = request.getRequestURI().equals("/account");
+            boolean interactive =
+                    request.getRequestURI().equals("/account")
+                            || request.getRequestURI().equals("/play");
             response.setHeader(
                     "Content-Security-Policy",
                     "default-src 'self'; script-src "
-                            + (account ? "'self'" : "'none'")
+                            + (interactive ? "'self'" : "'none'")
                             + "; style-src 'self';"
-                            + (account ? " connect-src 'self'; object-src 'none';" : "")
+                            + (interactive ? " connect-src 'self'; object-src 'none';" : "")
                             + " frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
             chain.doFilter(request, response);
         }

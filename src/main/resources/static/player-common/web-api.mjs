@@ -21,6 +21,66 @@ const SECURITY_POSTS = new Set([
   "/api/member/auth/logout-all",
 ]);
 
+/** SOLO 단계의 고정 경로만 열고 query는 사건 목록의 단일 cursor/size에만 허용한다. */
+function gameRoute(method, raw) {
+  const key =
+    "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+  const path = raw.split("?")[0];
+  if (raw.includes("?")) {
+    if (method !== "GET" || path !== "/api/stories" || raw.length > 4096)
+      return false;
+    const fields = raw.slice(path.length + 1).split("&");
+    const seen = new Set();
+    if (!fields.length || fields.length > 2) return false;
+    for (const field of fields) {
+      const equals = field.indexOf("=");
+      const name = field.slice(0, equals);
+      const value = field.slice(equals + 1);
+      if (equals < 1 || seen.has(name)) return false;
+      seen.add(name);
+      if (name === "size") {
+        if (!/^[1-9][0-9]{0,2}$/.test(value) || Number(value) > 100)
+          return false;
+      } else if (name === "cursor") {
+        try {
+          const decoded = decodeURIComponent(value);
+          if (
+            !decoded ||
+            decoded.length > 2048 ||
+            encodeURIComponent(decoded) !== value
+          )
+            return false;
+        } catch (_) {
+          return false;
+        }
+      } else return false;
+    }
+  }
+  if (method === "GET")
+    return (
+      [
+        "/api/stories",
+        "/api/games/current",
+        "/api/member/privacy/policies/friendly",
+      ].includes(path) ||
+      /^\/api\/stories\/[A-Z0-9_]{1,40}$/.test(path) ||
+      new RegExp(
+        "^/api/games/" + key + "(?:/materials|/report|/result)?$",
+      ).test(path)
+    );
+  if (method === "PATCH")
+    return new RegExp("^/api/games/" + key + "/report$").test(path);
+  return (
+    method === "POST" &&
+    (path === "/api/games" ||
+      new RegExp(
+        "^/api/games/" +
+          key +
+          "/(?:start|heartbeat|forfeit|report/submit|hints/[1-3]/open|clues/[A-Z0-9_]{1,32}/read)$",
+      ).test(path))
+  );
+}
+
 /** 원문이나 URL을 오류 메시지에 포함하지 않는 고정 전송 오류다. */
 export class WebApiError extends Error {
   constructor(status = 0, code = "WEB_REQUEST_FAILED") {
@@ -59,7 +119,8 @@ export function createWebApi(browser = globalThis.window) {
       (method === "POST" && PUBLIC_POSTS.has(path));
     const bearer =
       (method === "GET" && path === "/api/member/auth/me") ||
-      (method === "POST" && SECURITY_POSTS.has(path));
+      (method === "POST" && SECURITY_POSTS.has(path)) ||
+      gameRoute(method, path);
     if (
       browser.location.origin !== origin ||
       (!cookie && !publicAuth && !bearer) ||
@@ -68,7 +129,7 @@ export function createWebApi(browser = globalThis.window) {
         : typeof epoch !== "string" ||
           !UUID4.test(epoch) ||
           token !== undefined) ||
-      (method === "POST"
+      (method === "POST" || method === "PATCH"
         ? !body || typeof body !== "object" || Array.isArray(body)
         : body !== undefined)
     ) {
@@ -77,11 +138,21 @@ export function createWebApi(browser = globalThis.window) {
     const headers = { Accept: "application/json", "X-Sicha-Player-Web": "1" };
     if (bearer) headers.Authorization = `Bearer ${token}`;
     else headers["X-Sicha-Player-Web-Epoch"] = epoch;
-    const encoded = method === "POST" ? JSON.stringify(body) : undefined;
-    if (encoded && new TextEncoder().encode(encoded).length > 16384)
+    const encoded =
+      method === "POST" || method === "PATCH"
+        ? JSON.stringify(body)
+        : undefined;
+    const limit =
+      method === "PATCH"
+        ? 131072
+        : path.startsWith("/api/games")
+          ? 8192
+          : 16384;
+    if (encoded && new TextEncoder().encode(encoded).length > limit)
       throw new WebApiError(0, "WEB_REQUEST_TOO_LARGE");
     if (encoded) headers["Content-Type"] = "application/json";
     const controller = new AbortController();
+    let responseConsumed = false;
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await browser.fetch(path, {
@@ -123,7 +194,12 @@ export function createWebApi(browser = globalThis.window) {
           reader.releaseLock();
         }
       }
-      if (response.status === 204 && size === 0 && path === BASE + "/refresh")
+      if (
+        response.status === 204 &&
+        size === 0 &&
+        (path === BASE + "/refresh" ||
+          (method === "POST" && path.endsWith("/heartbeat")))
+      )
         return null;
       if (
         !size ||
@@ -145,6 +221,7 @@ export function createWebApi(browser = globalThis.window) {
       );
       if (!value || typeof value !== "object" || Array.isArray(value))
         throw new WebApiError();
+      responseConsumed = true;
       if (!response.ok) {
         const code =
           typeof value.code === "string" && /^[A-Z0-9_]{1,64}$/.test(value.code)
@@ -154,7 +231,8 @@ export function createWebApi(browser = globalThis.window) {
       }
       if (
         response.status !==
-        (path === BASE + "/email/signup/complete"
+        (path === BASE + "/email/signup/complete" ||
+        (method === "POST" && path === "/api/games")
           ? 201
           : PUBLIC_POSTS.has(path) &&
               ["/email/signup", "/password/reset"].some((suffix) =>
@@ -166,7 +244,7 @@ export function createWebApi(browser = globalThis.window) {
         throw new WebApiError();
       return value;
     } catch (failure) {
-      controller.abort();
+      if (!responseConsumed) controller.abort();
       if (failure instanceof WebApiError) throw failure;
       throw new WebApiError();
     } finally {

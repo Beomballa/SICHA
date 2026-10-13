@@ -158,18 +158,67 @@ public class NativeAccountWebIT extends LocalMemberAuthIT {
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM member_identity WHERE lookup_hash=? AND"
-                                        + " active_yn",
+                                            + " active_yn",
                                     Integer.class,
                                     lookup))
                     .isEqualTo(1);
             assertThat(
                             db.queryForObject(
                                     "SELECT count(*) FROM member_session s JOIN member_identity i"
-                                        + " ON i.id=s.identity_id WHERE i.lookup_hash=? AND"
-                                        + " s.revoked_at IS NULL",
+                                            + " ON i.id=s.identity_id WHERE i.lookup_hash=? AND"
+                                            + " s.revoked_at IS NULL",
                                     Integer.class,
                                     lookup))
                     .isZero();
+        } finally {
+            if (browser != null && browser.isAlive()) browser.destroyForcibly();
+            Files.deleteIfExists(receipt);
+            Files.deleteIfExists(errors);
+        }
+    }
+
+    /** 실제 회원과 제품 문서에서 수집 미준비를 가짜 빈 목록이나 공개 사건으로 바꾸지 않는다. */
+    @Test
+    void soloCatalogDoesNotBypassRealCollectionGate() throws Exception {
+        configuration.setFriendlyCollectionEnabled(false);
+        String email = "solo-web-gate-" + UUID.randomUUID() + "@example.invalid";
+        account(email);
+        int roomsBefore =
+                db.queryForObject(
+                        "SELECT count(*) FROM game_room WHERE purpose='PUBLIC'", Integer.class);
+        Path receipt = Files.createTempFile("sicha-solo-gate-", ".json");
+        Path errors = Files.createTempFile("sicha-solo-gate-error-", ".txt");
+        Process browser = null;
+        try {
+            browser =
+                    new ProcessBuilder("node", "src/test/browser/native-solo-gate.mjs")
+                            .redirectOutput(receipt.toFile())
+                            .redirectError(errors.toFile())
+                            .start();
+            try (var input = browser.getOutputStream()) {
+                JSON.writeValue(
+                        input,
+                        Map.of(
+                                "origin",
+                                ORIGIN,
+                                "email",
+                                email,
+                                "password",
+                                "Synthetic-member-password-987!"));
+            }
+            if (!browser.waitFor(60, TimeUnit.SECONDS)) {
+                browser.destroyForcibly();
+                throw new AssertionError("Native solo gate browser deadline exceeded");
+            }
+            assertThat(browser.exitValue())
+                    .withFailMessage("Solo browser gate: %s", Files.readString(errors))
+                    .isZero();
+            assertThat(JSON.readTree(receipt.toFile()).path("ok").asBoolean()).isTrue();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM game_room WHERE purpose='PUBLIC'",
+                                    Integer.class))
+                    .isEqualTo(roomsBefore);
         } finally {
             if (browser != null && browser.isAlive()) browser.destroyForcibly();
             Files.deleteIfExists(receipt);

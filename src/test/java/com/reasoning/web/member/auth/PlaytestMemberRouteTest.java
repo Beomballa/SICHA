@@ -132,8 +132,14 @@ class PlaytestMemberRouteTest {
         "GET, /api/member/auth/login/local, false"
     })
     void onlyExactMethodsAndPathsArePermitted(String method, String path, boolean permitted) {
-        assertThat(MemberSecurityConfig.route(new MockHttpServletRequest(method, path)))
-                .isEqualTo(permitted);
+        var request = new MockHttpServletRequest(method, path);
+        assertThat(MemberSecurityConfig.route(request)).isEqualTo(permitted);
+        if (path.startsWith("/api/games")
+                || path.startsWith("/api/stories")
+                || path.startsWith("/api/member/records")
+                || path.equals("/api/member/privacy/policies/friendly")) {
+            assertThat(MemberSecurityConfig.browserBearerRoute(request)).isEqualTo(permitted);
+        }
     }
 
     @ParameterizedTest

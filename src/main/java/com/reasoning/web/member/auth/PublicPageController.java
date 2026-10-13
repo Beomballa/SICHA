@@ -33,6 +33,12 @@ public class PublicPageController {
         return "player/account";
     }
 
+    /** 사건 자료·자격을 서버 HTML에 포함하지 않고 회원용 단독 조사 문서만 제공한다. */
+    @GetMapping("/play")
+    public String play() {
+        return "player/play";
+    }
+
     /** 현재 환경의 검증된 회원 고지만 표시하며 준비되지 않은 법적 내용을 대신 만들지 않는다. */
     @GetMapping("/privacy")
     public String privacy(Model model, HttpServletResponse response) {

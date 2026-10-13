@@ -315,8 +315,30 @@ export function createWebSession(browser = globalThis.window) {
   browser.addEventListener("pagehide", clear);
   browser.document.addEventListener("visibilitychange", visibility);
 
+  /** 현재 문서 자격으로만 업무를 전송하고 계정·배경 전환 뒤 응답은 폐기한다. 자동 재전송하지 않는다. */
+  async function authorizedRequest(method, path, body) {
+    if (!current()) throw new WebSessionBlocked();
+    const fence = generation;
+    const token = access.token;
+    try {
+      const result = await api.request(method, path, { token, body });
+      if (generation !== fence || !current() || access.token !== token)
+        throw new WebSessionBlocked();
+      return result;
+    } catch (failure) {
+      if (
+        failure instanceof WebApiError &&
+        ([401, 403].includes(failure.status) ||
+          (path === "/api/member/auth/me" && failure.status === 409))
+      )
+        clear();
+      throw failure;
+    }
+  }
+
   return Object.freeze({
     current,
+    authorizedRequest,
     /** 자격 회전 결과가 불확실하면 다음 복구도 차단하며 자동 재전송하지 않는다. */
     restore() {
       return exclusive(() => {
@@ -357,25 +379,8 @@ export function createWebSession(browser = globalThis.window) {
       });
     },
     /** 현재 회원 응답은 발급 세대에 결속하며 계정 교체 후 늦게 도착하면 폐기한다. */
-    async getCurrentMember() {
-      if (!current()) throw new WebSessionBlocked();
-      const fence = generation;
-      const token = access.token;
-      try {
-        const result = await api.request("GET", "/api/member/auth/me", {
-          token,
-        });
-        if (generation !== fence || !current() || access.token !== token)
-          throw new WebSessionBlocked();
-        return result;
-      } catch (failure) {
-        if (
-          failure instanceof WebApiError &&
-          [401, 403, 409].includes(failure.status)
-        )
-          clear();
-        throw failure;
-      }
+    getCurrentMember() {
+      return authorizedRequest("GET", "/api/member/auth/me");
     },
     /** 목적 변경이나 화면 이탈 시 미완료 메일·최근 확인 증명을 폐기한다. */
     cancelPending() {

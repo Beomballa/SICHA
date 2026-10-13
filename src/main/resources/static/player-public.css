@@ -164,6 +164,7 @@ p {
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
   outline: 3px solid var(--accent);
@@ -186,6 +187,7 @@ form label,
 }
 
 input:not([type="checkbox"]),
+textarea,
 select {
   width: 100%;
   min-width: 0;

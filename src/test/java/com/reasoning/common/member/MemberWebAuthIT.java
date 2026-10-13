@@ -157,6 +157,68 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
         mvc.perform(publicPage(get("/account?token=forbidden"))).andExpect(status().isForbidden());
     }
 
+    /** 단독 문서와 세 모듈만 HTTPS 읽기로 제공하고 query/변경/원문 주입을 막는다. */
+    @Test
+    void soloDocumentAndAssetsStayStatelessAndNarrow() throws Exception {
+        var result = mvc.perform(publicPage(get("/play"))).andExpect(status().isOk()).andReturn();
+        assertThat(result.getResponse().getContentAsString())
+                .contains("/player-common/solo-page.mjs", "단독 사건 조사", "서버 저장본")
+                .doesNotContain("accessToken", "<script>");
+        assertThat(result.getResponse().getHeader("Content-Security-Policy"))
+                .contains("script-src 'self'", "connect-src 'self'", "form-action 'none'")
+                .doesNotContain("unsafe-inline", "unsafe-eval");
+        for (String path :
+                List.of(
+                        "/play",
+                        "/player-common/solo-model.mjs",
+                        "/player-common/solo-client.mjs",
+                        "/player-common/solo-page.mjs")) {
+            var asset = mvc.perform(publicPage(get(path))).andExpect(status().isOk()).andReturn();
+            assertThat(asset.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(asset.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            if (path.endsWith(".mjs"))
+                assertThat(asset.getResponse().getContentType())
+                        .isIn("text/javascript", "application/javascript");
+            mvc.perform(get(path)).andExpect(status().isForbidden());
+            mvc.perform(publicPage(post(path))).andExpect(status().isForbidden());
+            mvc.perform(publicPage(get(path + "?secret=forbidden")))
+                    .andExpect(status().isForbidden());
+        }
+    }
+
+    /** PUBLIC 웹 경로도 동일 원점/무쿠키/정확 query를 유지하며 실제 수집 미준비는 503이다. */
+    @Test
+    void publicBrowserAdmissionKeepsOriginCookieAndQueryGuards() throws Exception {
+        configuration.setFriendlyCollectionEnabled(false);
+        var issued = account("public-web-route-" + UUID.randomUUID() + "@example.invalid");
+        String token = issued.path("accessToken").asText();
+        mvc.perform(
+                        publicPage(get("/api/stories?size=20"))
+                                .header("X-Sicha-Player-Web", "1")
+                                .header("Sec-Fetch-Site", "same-origin")
+                                .header("Authorization", "Bearer " + token))
+                .andExpect(status().isServiceUnavailable());
+        for (String[] headers :
+                List.of(
+                        new String[] {"Origin", "https://foreign.example.invalid"},
+                        new String[] {"Cookie", "JSESSIONID=synthetic"},
+                        new String[] {"Sec-Fetch-Site", "cross-site"})) {
+            var request =
+                    publicPage(get("/api/stories"))
+                            .header("X-Sicha-Player-Web", "1")
+                            .header("Authorization", "Bearer " + token);
+            if (!headers[0].equals("Sec-Fetch-Site"))
+                request.header("Sec-Fetch-Site", "same-origin");
+            mvc.perform(request.header(headers[0], headers[1])).andExpect(status().isForbidden());
+        }
+        mvc.perform(
+                        publicPage(get("/api/stories?size=20&size=30"))
+                                .header("X-Sicha-Player-Web", "1")
+                                .header("Sec-Fetch-Site", "same-origin")
+                                .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
     /** 공개 고지는 기존 정책 권위의 현재 값만 표시하고 동의나 회원 세션을 만들지 않는다. */
     @Test
     void publicNoticeUsesCurrentPolicyAuthority() throws Exception {
