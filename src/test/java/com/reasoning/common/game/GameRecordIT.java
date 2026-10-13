@@ -29,7 +29,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 격리된 합성 FRIENDLY 근거로 실제 PUBLIC worker 종료와 개인 기록 소유 읽기를 검증한다. */
-@SpringBootTest
+@SpringBootTest(
+        properties = {
+            "app.member-web.enabled=true",
+            "app.member-web.origin=https://player.example.invalid"
+        })
 @Testcontainers
 @Import({
     com.reasoning.common.member.LocalMemberAuthIT.Installation.class,
@@ -370,6 +374,7 @@ class GameRecordIT extends PublicGameFixture {
                                 records.getReportDetail(
                                         foreign, recordKey, report.reportKey(), UUID.randomUUID()))
                 .hasMessageContaining("RECORD_NOT_FOUND");
+        verifyWebRecordModels(token, foreign, recordKey, reportKey);
         assertThatThrownBy(() -> db.update("DELETE FROM game_member WHERE room_id=?", room))
                 .hasRootCauseInstanceOf(org.postgresql.util.PSQLException.class)
                 .hasStackTraceContaining("member physical deletion unauthorized");
@@ -390,5 +395,100 @@ class GameRecordIT extends PublicGameFixture {
         db.update("UPDATE privacy_policy SET state='RETIRED' WHERE id=?", notice.id());
         assertThatThrownBy(() -> records.getRecordList(foreign, null, 1, UUID.randomUUID()))
                 .hasMessageContaining("FRIENDLY_COLLECTION_NOT_READY");
+    }
+
+    /** 실제 worker의 저장·HTTP 투영을 제품 JavaScript 파서와 대조하고 타인 원문은404로 유지한다. */
+    private void verifyWebRecordModels(String token, String foreign, UUID recordKey, UUID reportKey)
+            throws Exception {
+        var page =
+                mvc.perform(recordWeb("/api/member/records?size=20", token))
+                        .andExpect(
+                                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                                        .status()
+                                        .isOk())
+                        .andReturn();
+        var detail =
+                mvc.perform(recordWeb("/api/member/records/" + recordKey, token))
+                        .andExpect(
+                                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                                        .status()
+                                        .isOk())
+                        .andReturn();
+        var report =
+                mvc.perform(
+                                recordWeb(
+                                        "/api/member/records/"
+                                                + recordKey
+                                                + "/reports/"
+                                                + reportKey,
+                                        token))
+                        .andExpect(
+                                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                                        .status()
+                                        .isOk())
+                        .andReturn();
+        mvc.perform(recordWeb("/api/member/records/" + recordKey, foreign))
+                .andExpect(
+                        org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                                .isNotFound());
+        mvc.perform(
+                        recordWeb(
+                                "/api/member/records/" + recordKey + "/reports/" + reportKey,
+                                foreign))
+                .andExpect(
+                        org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                                .isNotFound());
+        Path receipt = Files.createTempFile("record-model-check-", ".json");
+        Path error = Files.createTempFile("record-model-check-", ".txt");
+        Process process = null;
+        try {
+            process =
+                    new ProcessBuilder("node", "src/test/browser/record-model-check.mjs")
+                            .redirectOutput(receipt.toFile())
+                            .redirectError(error.toFile())
+                            .start();
+            try (var input = process.getOutputStream()) {
+                JSON.writeValue(
+                        input,
+                        Map.of(
+                                "recordKey",
+                                recordKey.toString(),
+                                "page",
+                                JSON.readTree(page.getResponse().getContentAsByteArray()),
+                                "detail",
+                                JSON.readTree(detail.getResponse().getContentAsByteArray()),
+                                "report",
+                                JSON.readTree(report.getResponse().getContentAsByteArray())));
+            }
+            if (!process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new AssertionError("Record model checker deadline exceeded");
+            }
+            assertThat(process.exitValue())
+                    .withFailMessage("Record model: %s", Files.readString(error))
+                    .isZero();
+            assertThat(JSON.readTree(receipt.toFile()).path("ok").asBoolean()).isTrue();
+        } finally {
+            if (process != null && process.isAlive()) process.destroyForcibly();
+            Files.deleteIfExists(receipt);
+            Files.deleteIfExists(error);
+        }
+    }
+
+    /** 무쿠키·동일 원점·현재 Bearer의 실제 브라우저 요청 경계만 구성한다. */
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder recordWeb(
+            String path, String token) {
+        return org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path)
+                .secure(true)
+                .with(
+                        request -> {
+                            request.setScheme("https");
+                            request.setServerName("player.example.invalid");
+                            request.setServerPort(443);
+                            return request;
+                        })
+                .header("X-Sicha-Player-Web", "1")
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("Authorization", "Bearer " + token);
     }
 }

@@ -33,6 +33,7 @@ public class PublicPageConfiguration {
                                         || request.getRequestURI().equals("/account")
                                         || request.getRequestURI().equals("/play")
                                         || request.getRequestURI().equals("/coop-invite")
+                                        || request.getRequestURI().equals("/records")
                                         || request.getRequestURI().equals("/player-public.css")
                                         || request.getRequestURI()
                                                 .equals("/player-common/web-api.mjs")
@@ -47,7 +48,9 @@ public class PublicPageConfiguration {
                                         || request.getRequestURI()
                                                 .equals("/player-common/play-page.mjs")
                                         || request.getRequestURI()
-                                                .equals("/player-common/invite-bootstrap.js"))
+                                                .equals("/player-common/invite-bootstrap.js")
+                                        || request.getRequestURI()
+                                                .equals("/player-common/records-page.mjs"))
                 .securityContext(
                         context ->
                                 context.securityContextRepository(
@@ -99,7 +102,8 @@ public class PublicPageConfiguration {
             boolean interactive =
                     request.getRequestURI().equals("/account")
                             || request.getRequestURI().equals("/play")
-                            || request.getRequestURI().equals("/coop-invite");
+                            || request.getRequestURI().equals("/coop-invite")
+                            || request.getRequestURI().equals("/records");
             response.setHeader(
                     "Content-Security-Policy",
                     "default-src 'self'; script-src "

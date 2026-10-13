@@ -188,6 +188,31 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
         }
     }
 
+    /** 기록 문서는 서버 자격/원문 없이 제공하며 변경/query/비보안 전송을 열지 않는다. */
+    @Test
+    void recordDocumentAndAssetStayStrictAndStateless() throws Exception {
+        for (String path : List.of("/records", "/player-common/records-page.mjs")) {
+            var result = mvc.perform(publicPage(get(path))).andExpect(status().isOk()).andReturn();
+            assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            mvc.perform(publicPage(head(path))).andExpect(status().isOk());
+            mvc.perform(publicPage(post(path))).andExpect(status().isForbidden());
+            mvc.perform(get(path)).andExpect(status().isForbidden());
+            mvc.perform(publicPage(get(path + "?record=forbidden")))
+                    .andExpect(status().isForbidden());
+            if (path.equals("/records")) {
+                assertThat(result.getResponse().getContentAsString())
+                        .contains("/player-common/records-page.mjs", "내 플레이 기록")
+                        .doesNotContain("accessToken", "<script>");
+                assertThat(result.getResponse().getHeader("Content-Security-Policy"))
+                        .contains("script-src 'self'", "connect-src 'self'", "form-action 'none'")
+                        .doesNotContain("unsafe-inline", "unsafe-eval");
+            } else
+                assertThat(result.getResponse().getContentType())
+                        .isIn("text/javascript", "application/javascript");
+        }
+    }
+
     /** PUBLIC 웹 경로도 동일 원점/무쿠키/정확 query를 유지하며 실제 수집 미준비는 503이다. */
     @Test
     void publicBrowserAdmissionKeepsOriginCookieAndQueryGuards() throws Exception {

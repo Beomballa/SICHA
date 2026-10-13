@@ -39,6 +39,12 @@ public class PublicPageController {
         return "player/play";
     }
 
+    /** 기록·자격·보고서 원문을 HTML에 넣지 않고 본인 명시 조회 문서만 제공한다. */
+    @GetMapping("/records")
+    public String records() {
+        return "player/records";
+    }
+
     /** 현재 환경의 검증된 회원 고지만 표시하며 준비되지 않은 법적 내용을 대신 만들지 않는다. */
     @GetMapping("/privacy")
     public String privacy(Model model, HttpServletResponse response) {

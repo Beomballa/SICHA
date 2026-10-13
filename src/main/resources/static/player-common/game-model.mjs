@@ -607,6 +607,159 @@ export function parseReceipt(value, action, expectedKey, mode = "SOLO") {
   return value;
 }
 
+const RECORD_SUMMARY = [
+  "recordKey",
+  "rawState",
+  "story",
+  "selfRole",
+  "mode",
+  "difficulty",
+  "durationSec",
+  "outcome",
+  "finalScore",
+  "teamAttempts",
+  "ownHintsUsed",
+  "timeBasisAt",
+  "startedAt",
+  "endedAt",
+];
+const PURGED_SUMMARY = [
+  "recordKey",
+  "rawState",
+  "story",
+  "selfRole",
+  "difficulty",
+  "durationSec",
+  "outcome",
+  "finalScore",
+  "rawDeletedReason",
+];
+
+/** 기록 키에 결속된 NORMAL/PURGED의 서로 다른 투영을 검사하며 삭제된 필드는 만들지 않는다. */
+export function parseRecord(value, detail = false, expectedKey) {
+  if (detail && value?.rawState === "NORMAL") {
+    if (expectedKey !== undefined && value.recordKey !== expectedKey)
+      throw new SoloFormatError();
+    return parseResult(value, value.gameKey, value.mode);
+  }
+  const purged = value?.rawState === "PURGED";
+  shape(value, purged ? PURGED_SUMMARY : RECORD_SUMMARY);
+  id(value.recordKey);
+  if (expectedKey !== undefined && value.recordKey !== expectedKey)
+    throw new SoloFormatError();
+  shape(value.story, ["code", "title"]);
+  code(value.story.code);
+  text(value.story.title);
+  shape(value.selfRole, ["code", "name"]);
+  code(value.selfRole.code);
+  text(value.selfRole.name);
+  integer(value.difficulty, 1, 5);
+  integer(value.durationSec);
+  if (
+    ![
+      "SUCCESS",
+      "TIME_LIMIT",
+      "ATTEMPTS_EXHAUSTED",
+      "FORFEIT",
+      "SYSTEM_ERROR",
+      "ACCOUNT_DELETED",
+    ].includes(value.outcome)
+  )
+    throw new SoloFormatError();
+  if (["SUCCESS", "TIME_LIMIT", "ATTEMPTS_EXHAUSTED"].includes(value.outcome))
+    integer(value.finalScore, 0, 100);
+  else if (value.finalScore !== null) throw new SoloFormatError();
+  if (purged) {
+    if (value.rawDeletedReason !== "JOINT_REPORT_DELETED")
+      throw new SoloFormatError();
+  } else {
+    if (value.rawState !== "NORMAL" || !["SOLO", "COOP"].includes(value.mode))
+      throw new SoloFormatError();
+    integer(value.teamAttempts);
+    if (value.ownHintsUsed !== null) integer(value.ownHintsUsed);
+    for (const field of ["startedAt", "endedAt", "timeBasisAt"])
+      timestamp(value[field]);
+  }
+  return value;
+}
+
+/** 목록은 본인에게 서버가 투영한20개 이하 기록과 단회 전진 cursor만 채택한다. */
+export function parseRecordPage(value) {
+  shape(value, ["items", "nextCursor", "requestId"]);
+  request(value);
+  if (
+    !Array.isArray(value.items) ||
+    value.items.length > 20 ||
+    (value.nextCursor !== null &&
+      (typeof value.nextCursor !== "string" ||
+        !value.nextCursor.length ||
+        value.nextCursor.length > 2048))
+  )
+    throw new SoloFormatError();
+  value.items.forEach((item) => parseRecord(item));
+  if (
+    new Set(value.items.map((item) => item.recordKey)).size !==
+    value.items.length
+  )
+    throw new SoloFormatError();
+  return value;
+}
+
+/** 명시 조회한 완료 보고서만 검사하며 판정 불가의 점수·시각·근거를 꾸미지 않는다. */
+export function parseRecordReport(value, summary) {
+  shape(value, [
+    "reportKey",
+    "submitNo",
+    "state",
+    "report",
+    "baseScore",
+    "success",
+    "scoreBasis",
+    "acceptedAt",
+    "gradedAt",
+    "requestId",
+  ]);
+  request(value);
+  id(value.reportKey);
+  integer(value.submitNo, 1, 5);
+  parseReportBody(value.report);
+  timestamp(value.acceptedAt);
+  timestamp(value.gradedAt, true);
+  if (
+    value.reportKey !== summary.reportKey ||
+    value.submitNo !== summary.submitNo ||
+    value.state !== summary.state ||
+    value.baseScore !== summary.baseScore ||
+    value.success !== summary.success
+  )
+    throw new SoloFormatError();
+  if (value.state === "GRADED") {
+    integer(value.baseScore, 0, 100);
+    boolean(value.success);
+    if (value.gradedAt === null) throw new SoloFormatError();
+    const basis = shape(value.scoreBasis, ["categories", "wrongPenalty"]);
+    if (
+      ![0, 10].includes(basis.wrongPenalty) ||
+      !Array.isArray(basis.categories)
+    )
+      throw new SoloFormatError();
+    for (const item of basis.categories) {
+      shape(item, ["category", "score", "maxScore"]);
+      code(item.category);
+      integer(item.maxScore);
+      integer(item.score, 0, item.maxScore);
+    }
+  } else if (
+    value.state !== "UNGRADABLE" ||
+    value.baseScore !== null ||
+    value.success !== null ||
+    value.scoreBasis !== null ||
+    value.gradedAt !== null
+  )
+    throw new SoloFormatError();
+  return value;
+}
+
 /** 정식 개인 기록 상세만 결과로 채택하고 파기·미측정 값을 복구하지 않는다. */
 export function parseResult(value, expectedKey, mode = "SOLO") {
   shape(value, [

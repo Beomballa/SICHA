@@ -27,7 +27,11 @@ function gameRoute(method, raw) {
     "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
   const path = raw.split("?")[0];
   if (raw.includes("?")) {
-    if (method !== "GET" || path !== "/api/stories" || raw.length > 4096)
+    if (
+      method !== "GET" ||
+      !["/api/stories", "/api/member/records"].includes(path) ||
+      raw.length > 4096
+    )
       return false;
     const fields = raw.slice(path.length + 1).split("&");
     const seen = new Set();
@@ -61,9 +65,13 @@ function gameRoute(method, raw) {
       [
         "/api/stories",
         "/api/games/current",
+        "/api/member/records",
         "/api/member/privacy/policies/friendly",
       ].includes(path) ||
       /^\/api\/stories\/[A-Z0-9_]{1,40}$/.test(path) ||
+      new RegExp(
+        "^/api/member/records/" + key + "(?:/reports/" + key + ")?$",
+      ).test(path) ||
       new RegExp(
         "^/api/games/" + key + "(?:/materials|/report|/result)?$",
       ).test(path)
