@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 /** 실제 등록 관리자 HTTPS 세션으로 화면만 탐색한다. 미연동 API·회원 수집·게임 실행은 하지 않는다. */
 export async function exerciseAdminWorkspace(page, fixture, helpers) {
-  const { notice, text, layout, inspectLayout } = helpers;
+  const { notice, text, layout, inspectLayout, inspectLongCopy } = helpers;
   const apiRequests = [];
   const observe = (request) => {
     const path = new URL(request.url()).pathname;
@@ -98,6 +98,7 @@ export async function exerciseAdminWorkspace(page, fixture, helpers) {
         );
       }
       await layout(page, `workspace-${tab}`);
+      if (tab === "security") await inspectLongCopy(page);
     }
     const invalid = await page.goto(
       `${fixture.url}/admin?tab=SYNTHETIC_QUERY_SECRET`,

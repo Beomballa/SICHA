@@ -234,6 +234,34 @@ class StoryBrowserIT extends DatabaseContextTest {
                         UUID.class,
                         receiverRegistration);
 
+        var designSession = frameworkSessions.prepare();
+        UUID designSessionKey = UUID.randomUUID();
+        db.update(
+                "INSERT INTO"
+                    + " admin_session(session_key,account_id,sid_hash,auth_rev,state,started_at,last_action_at,expires_at,reauth_at,activated_at)"
+                    + " VALUES (?,?,?,?,'ACTIVE',?,?,?,?,?)",
+                designSessionKey,
+                inviterId,
+                crypto.sessionHash(designSession.id()),
+                fixtureAuthRev,
+                Timestamp.from(now.minusSeconds(900)),
+                Timestamp.from(now),
+                Timestamp.from(now.minusSeconds(900).plusSeconds(8 * 3600)),
+                Timestamp.from(now.minusSeconds(600)),
+                Timestamp.from(now.minusSeconds(900)));
+        frameworkSessions.save(
+                designSession,
+                new com.reasoning.admin.auth.session.AdminSessionAdapter.AdminPrincipal(
+                        inviterId, inviterKey, designSessionKey, fixtureAuthRev));
+        var cookieRequest = new org.springframework.mock.web.MockHttpServletRequest();
+        cookieRequest.setSecure(true);
+        var cookieResponse = new org.springframework.mock.web.MockHttpServletResponse();
+        frameworkSessions.issueCookie(designSession.id(), cookieRequest, cookieResponse);
+        String designCookie =
+                java.net.HttpCookie.parse(cookieResponse.getHeader("Set-Cookie"))
+                        .getFirst()
+                        .getValue();
+
         Process browser =
                 new ProcessBuilder("node", "src/test/browser/story-workflow.mjs")
                         .inheritIO()
@@ -260,9 +288,12 @@ class StoryBrowserIT extends DatabaseContextTest {
                             "receiverKey",
                             receiverKey,
                             "inactiveKey",
-                            inactiveKey));
+                            inactiveKey,
+                            "designSessionId",
+                            designCookie));
         }
-        boolean completed = browser.waitFor(180, TimeUnit.SECONDS);
+        // 새 실제 재인증과 전후/열린 모달 캡처를 기존 회귀에 더한 전체 실행 한도다.
+        boolean completed = browser.waitFor(300, TimeUnit.SECONDS);
         if (!completed) browser.destroyForcibly();
         assertThat(completed).as("브라우저 시험 제한 시간").isTrue();
         assertThat(browser.exitValue()).as("실제 HTTPS 브라우저 회귀").isZero();

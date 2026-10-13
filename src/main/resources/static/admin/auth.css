@@ -15,7 +15,6 @@
 #content > section > h2 {
   margin-bottom: var(--gap-related);
 }
-.actions,
 .links {
   display: flex;
   gap: var(--gap-related);

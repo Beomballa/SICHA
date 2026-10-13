@@ -227,13 +227,6 @@ section {
 .timing-fields .field {
   margin-top: var(--gap-related);
 }
-.form-actions,
-.button-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--gap-related);
-}
 .form-actions {
   margin-top: var(--gap-group);
   padding-top: var(--gap-group);
@@ -420,6 +413,18 @@ dd {
 .reading {
   max-width: var(--reading-max-width);
   min-width: 0;
+}
+.report-document .version-panel > h2,
+.report-document .version-panel > p,
+#comparison > h2,
+#comparison > p {
+  max-width: var(--reading-max-width);
+}
+#review-check > .button-row {
+  margin-top: var(--gap-related);
+}
+#review-check > .button-row + p {
+  margin-top: var(--gap-helper);
 }
 .chapter-head {
   display: flex;

@@ -104,6 +104,17 @@ a {
 p + p {
   margin-top: var(--gap-helper);
 }
+.actions,
+.button-row,
+.form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-related);
+}
+.actions {
+  margin-top: var(--gap-group);
+}
 h1 + p,
 h2 + p,
 h3 + p,

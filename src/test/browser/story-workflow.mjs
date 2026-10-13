@@ -6,6 +6,12 @@ import { resolve } from "node:path";
 import { captureReportPreview } from "./story-report-preview.mjs";
 import { exerciseAdminWorkspace } from "./admin-workspace.mjs";
 import { exerciseAdminAccounts } from "./admin-accounts.mjs";
+import {
+  inspectAdminDesign,
+  inspectOpenDialog,
+} from "./admin-design-check.mjs";
+import { exerciseDesignReauth } from "./admin-design-reauth.mjs";
+import { exerciseSecurityLongCopy } from "./admin-design-long-copy.mjs";
 import { exerciseRolePairs } from "./story-role-pair.mjs";
 import { exerciseClueAssignments } from "./story-clue-assignment.mjs";
 import { exerciseHints } from "./story-hints.mjs";
@@ -354,6 +360,7 @@ async function inspectEditorNavigation(page) {
 
 /** 표시된 실제 DOM의 크기·계산 색상을 검사한다. 원고나 식별자 값은 측정 파일에 기록하지 않는다. */
 async function inspectLayout(page, name, viewport) {
+  await inspectAdminDesign(page, name, viewport);
   const state = await page.evaluate(() => {
     const visible = (e) =>
       e.getClientRects().length && e.getBoundingClientRect().width > 1;
@@ -537,6 +544,7 @@ try {
   ]);
   await page.waitForSelector("[name=totp]");
   await page.waitForNetworkIdle();
+  const ownerLoginStep = Math.floor(Date.now() / 30000);
   await page.type("[name=totp]", otp(fixture.secret));
   try {
     await Promise.all([
@@ -568,13 +576,24 @@ try {
     text,
     confirmation,
     loseResponse,
+    inspectDesignDialog: (target, name) =>
+      inspectOpenDialog(target, name, zoomWorker),
   });
   await exerciseAdminWorkspace(page, fixture, {
     notice,
     text,
     layout,
     inspectLayout,
+    inspectLongCopy: (target) => exerciseSecurityLongCopy(target, zoomWorker),
   });
+
+  await page.waitForFunction(
+    (step) => Math.floor(Date.now() / 30000) > step,
+    { timeout: 31000 },
+    ownerLoginStep,
+  );
+  await exerciseDesignReauth(browser, fixture, { otp, notice, zoomWorker });
+  await page.bringToFront();
 
   await page.goto(`${fixture.url}/admin/stories`);
   await notice(page, "현재 페이지");

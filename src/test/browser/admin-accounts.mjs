@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 
 /** 실제 폐기 계정의 UI와 기존 API를 확인한다. 변경 동의는 취소하고 사업 쓰기는 실행하지 않는다. */
 export async function exerciseAdminAccounts(page, fixture, helpers) {
-  const { notice, layout, inspectLayout, text, confirmation, loseResponse } =
-    helpers;
+  const {
+    notice,
+    layout,
+    inspectLayout,
+    text,
+    confirmation,
+    loseResponse,
+    inspectDesignDialog,
+  } = helpers;
   async function accountLayout(name) {
     await layout(page, name);
     for (const width of [900, 1200]) {
@@ -117,6 +124,7 @@ export async function exerciseAdminAccounts(page, fixture, helpers) {
     await page.type(`${grant} [name="verificationRef"]`, "verified_ui_cancel");
     await page.click(`${grant} button`);
     await page.waitForSelector("#ui-confirm-dialog[open]");
+    await inspectDesignDialog(page, "design-confirm");
     await page.click("#ui-confirm-cancel");
     await page.waitForFunction(
       () => !document.querySelector("#ui-confirm-dialog[open]"),
