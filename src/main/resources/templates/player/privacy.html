@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>시차 · 회원 수집 고지</title>
+    <link rel="stylesheet" href="/player-public.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 바로 이동</a>
+    <header class="site-header">
+      <div class="shell">
+        <span class="brand">시차</span><a href="/">서비스 소개</a>
+      </div>
+    </header>
+    <main id="main" class="shell" tabindex="-1">
+      <h1>회원 수집 고지</h1>
+      <section th:if="${notice != null}" aria-labelledby="notice-title">
+        <h2 id="notice-title" th:text="${notice.notice().version()}">
+          고지 버전
+        </h2>
+        <p class="notice-body" th:text="${notice.notice().body()}"></p>
+        <h2>문의</h2>
+        <p th:text="${notice.contact()}"></p>
+        <p class="note">
+          고지 열람은 가입 동의가 아닙니다. 회원가입 화면에서 현재 고지를
+          확인하고 명시적으로 동의해 주세요.
+        </p>
+      </section>
+      <section
+        th:if="${unavailable == true}"
+        aria-labelledby="unavailable-title"
+      >
+        <h2 id="unavailable-title">현재 고지를 확인할 수 없습니다</h2>
+        <p>
+          검증된 회원 수집 고지가 준비되지 않았거나 현재 조회할 수 없습니다.
+          이전 고지나 임의의 정책으로 대신하지 않습니다.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

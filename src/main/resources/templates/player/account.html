@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>시차 · 회원 계정</title>
+    <link rel="stylesheet" href="/player-public.css" />
+    <script type="module" src="/player-common/account.mjs"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 바로 이동</a>
+    <header class="site-header">
+      <div class="shell">
+        <a class="brand" href="/">시차</a><span>회원 계정</span>
+      </div>
+    </header>
+    <main id="main" class="shell account-shell" tabindex="-1">
+      <h1>회원 계정</h1>
+      <p>
+        계정 기능과 사건 공개는 별개입니다. 게임 화면은 아직 연결하지
+        않았습니다.
+      </p>
+      <nav class="actions" aria-label="계정 작업">
+        <button type="button" class="secondary-action" data-view="login">
+          로그인
+        </button>
+        <button type="button" class="secondary-action" data-view="signup">
+          회원가입
+        </button>
+        <button type="button" class="secondary-action" data-view="recover">
+          계정 복구
+        </button>
+        <button type="button" class="secondary-action" data-view="security">
+          계정 보안
+        </button>
+      </nav>
+      <p id="status" role="status" aria-live="polite">
+        계정 상태를 확인하는 중입니다.
+      </p>
+      <p id="error" role="alert" hidden></p>
+      <noscript
+        ><p>
+          계정 기능에는 JavaScript와 HTTPS 및 Web Locks를 지원하는 브라우저가
+          필요합니다.
+        </p></noscript
+      >
+      <section id="login" class="panel" aria-labelledby="login-title" hidden>
+        <h2 id="login-title" tabindex="-1">로그인</h2>
+        <form id="login-form">
+          <label
+            >이메일<input
+              id="login-email"
+              type="email"
+              autocomplete="username"
+              required
+              maxlength="254"
+          /></label>
+          <label
+            >비밀번호<input
+              id="login-password"
+              type="password"
+              autocomplete="current-password"
+              required
+          /></label>
+          <div class="actions">
+            <button class="primary-action" type="submit">로그인 실행</button>
+          </div>
+        </form>
+      </section>
+      <section id="email" class="panel" aria-labelledby="email-title" hidden>
+        <h2 id="email-title" tabindex="-1">회원가입</h2>
+        <p>
+          메일 절차의 확인 정보는 현재 문서에만 보관합니다. 화면을 나가거나
+          배경으로 이동하면 다시 시작해야 합니다.
+        </p>
+        <form id="email-start">
+          <label
+            >이메일<input
+              id="flow-email"
+              type="email"
+              autocomplete="email"
+              required
+              maxlength="254"
+          /></label>
+          <div class="actions">
+            <button class="primary-action" type="submit">확인 메일 요청</button>
+          </div>
+        </form>
+        <form id="email-verify" hidden>
+          <label
+            >메일 확인 코드<input
+              id="flow-code"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              pattern="[0-9]{8}"
+              maxlength="8"
+              required
+          /></label>
+          <div class="actions">
+            <button class="primary-action" type="submit">코드 확인</button>
+          </div>
+        </form>
+        <form id="email-complete" hidden>
+          <label id="nickname-label"
+            >닉네임 (2~20자)<input
+              id="nickname"
+              type="text"
+              autocomplete="nickname"
+              maxlength="40"
+          /></label>
+          <label
+            >새 비밀번호<input
+              id="flow-password"
+              type="password"
+              autocomplete="new-password"
+              required
+              aria-describedby="password-help"
+          /></label>
+          <label
+            >새 비밀번호 확인<input
+              id="flow-confirm"
+              type="password"
+              autocomplete="new-password"
+              required
+          /></label>
+          <p id="password-help">
+            비밀번호는 공백을 포함한 입력 그대로 사용하며 15~128자여야 합니다.
+          </p>
+          <div id="signup-notice" hidden>
+            <h3>현재 회원 수집 고지</h3>
+            <p id="notice-version"></p>
+            <p id="notice-body" class="notice-body"></p>
+            <p id="notice-contact"></p>
+            <label class="check-label"
+              ><input id="signup-consent" type="checkbox" />위 고지를 확인하고
+              회원 수집에 동의합니다.</label
+            >
+          </div>
+          <div class="actions">
+            <button
+              id="complete-email-button"
+              class="primary-action"
+              type="submit"
+            >
+              가입 완료
+            </button>
+          </div>
+        </form>
+        <div class="actions">
+          <button id="cancel-email" class="secondary-action" type="button">
+            메일 절차 취소
+          </button>
+        </div>
+      </section>
+      <section
+        id="security"
+        class="panel"
+        aria-labelledby="security-title"
+        hidden
+      >
+        <h2 id="security-title" tabindex="-1">계정 보안</h2>
+        <p id="member-name"></p>
+        <p>
+          목적별 본인 확인은 최대 5분입니다. 화면 변경·배경 이동·새로고침 후에는
+          다시 확인해야 합니다.
+        </p>
+        <label
+          >실행할 작업<select id="security-purpose">
+            <option value="PASSWORD_CHANGE">비밀번호 변경</option>
+            <option value="LOGOUT_ALL">모든 기기 로그아웃</option>
+          </select></label
+        >
+        <form id="recent-form">
+          <label
+            >현재 비밀번호<input
+              id="recent-password"
+              type="password"
+              autocomplete="current-password"
+              required
+          /></label>
+          <div class="actions">
+            <button class="primary-action" type="submit">본인 확인</button>
+          </div>
+        </form>
+        <form id="security-complete" hidden>
+          <div id="new-password-fields">
+            <label
+              >새 비밀번호<input
+                id="new-password"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+            <label
+              >새 비밀번호 확인<input
+                id="new-confirm"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+          </div>
+          <label class="check-label"
+            ><input id="security-consent" type="checkbox" required />선택한
+            작업으로 현재 화면을 포함한 모든 기기에서 로그아웃되는 것에
+            동의합니다.</label
+          >
+          <div class="actions">
+            <button class="primary-action" type="submit">
+              선택한 작업 실행
+            </button>
+          </div>
+        </form>
+        <div class="actions">
+          <button id="logout" class="secondary-action" type="button">
+            현재 로그인 로그아웃</button
+          ><button id="cancel-recent" class="secondary-action" type="button">
+            본인 확인 취소
+          </button>
+        </div>
+      </section>
+      <p>
+        <a href="/privacy">현재 회원 수집 고지</a> · <a href="/">서비스 소개</a>
+      </p>
+    </main>
+  </body>
+</html>

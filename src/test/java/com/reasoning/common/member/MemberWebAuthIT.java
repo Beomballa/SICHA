@@ -3,6 +3,7 @@ package com.reasoning.common.member;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -30,6 +31,166 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
     private static final String ORIGIN = "https://player.example.invalid";
     private static final String COOKIE = "__Secure-sicha_player_refresh";
     private static final String PASSWORD = "Synthetic-member-password-987!";
+
+    /** 소개 화면의 정확한 HTTPS 경로만 요청하며 계정용 웹 헤더를 붙이지 않는다. */
+    private MockHttpServletRequestBuilder publicPage(MockHttpServletRequestBuilder request) {
+        return request.secure(true)
+                .with(
+                        servlet -> {
+                            servlet.setScheme("https");
+                            servlet.setServerName("player.example.invalid");
+                            servlet.setServerPort(443);
+                            return servlet;
+                        });
+    }
+
+    /** Flutter 자산 없이 계정 문서로 연결되는 소개와 별도 보안 헤더를 확인한다. */
+    @Test
+    void publicIntroductionWithoutFlutterAssets() throws Exception {
+        var result =
+                mvc.perform(publicPage(get("/")).header("Cookie", "JSESSIONID=ignored"))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        String html = result.getResponse().getContentAsString();
+        assertThat(html)
+                .contains("시차 · 서비스 소개", "혼자 살펴보기", "둘이 협력하기")
+                .contains("href=\"/player-public.css\"")
+                .contains(
+                        "href=\"/account#login\"",
+                        "href=\"/account#signup\"",
+                        "href=\"/account#recover\"")
+                .doesNotContain(
+                        "href=\"/player/#/login\"",
+                        "href=\"/player/#/signup\"",
+                        "href=\"/player/#/recover\"");
+        assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(result.getResponse().getHeader("Referrer-Policy")).isEqualTo("no-referrer");
+        assertThat(result.getResponse().getHeader("Content-Security-Policy"))
+                .isEqualTo(
+                        "default-src 'self'; script-src 'none'; style-src 'self';"
+                                + " frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+        mvc.perform(publicPage(head("/"))).andExpect(status().isOk());
+    }
+
+    /** 쿼리·변경 메서드·HTTP는 헤더가 붙은 403이고 CSS 이외의 자산은 공개하지 않는다. */
+    @Test
+    void publicIntroductionAdmissionIsNarrow() throws Exception {
+        for (var request :
+                List.of(
+                        publicPage(get("/?preview=1")),
+                        publicPage(post("/")),
+                        publicPage(get("/privacy?token=forbidden")),
+                        publicPage(post("/privacy")),
+                        get("/privacy"),
+                        publicPage(get("/player-public.css?version=1")),
+                        publicPage(post("/player-public.css")),
+                        get("/"),
+                        get("/player-public.css"))) {
+            var rejected = mvc.perform(request).andExpect(status().isForbidden()).andReturn();
+            assertThat(rejected.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(rejected.getResponse().getHeader("Referrer-Policy"))
+                    .isEqualTo("no-referrer");
+            assertThat(rejected.getResponse().getHeader("Content-Security-Policy"))
+                    .contains("script-src 'none'", "style-src 'self'");
+            assertThat(rejected.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        }
+        var css =
+                mvc.perform(publicPage(get("/player-public.css")))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        assertThat(css.getResponse().getContentType()).contains("text/css");
+        assertThat(css.getResponse().getContentAsString()).contains("--accent: #ffc700");
+        assertThat(css.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        mvc.perform(publicPage(head("/player-public.css"))).andExpect(status().isOk());
+        mvc.perform(publicPage(get("/player-public.js"))).andExpect(status().is4xxClientError());
+    }
+
+    /** 공통 모듈만 HTTPS 읽기로 제공하고 변경·쿼리·임의 자산은 차단한다. */
+    @Test
+    void sharedWebModulesAreSecureStatelessResources() throws Exception {
+        for (String path :
+                List.of(
+                        "/player-common/web-api.mjs",
+                        "/player-common/web-session.mjs",
+                        "/player-common/account.mjs")) {
+            var result = mvc.perform(publicPage(get(path))).andExpect(status().isOk()).andReturn();
+            assertThat(result.getResponse().getContentAsString()).contains("createWeb");
+            if (!path.endsWith("/account.mjs")) {
+                assertThat(result.getResponse().getContentAsString()).contains("export");
+            }
+            assertThat(result.getResponse().getContentType())
+                    .isIn("text/javascript", "application/javascript");
+            assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(result.getResponse().getHeader("Referrer-Policy")).isEqualTo("no-referrer");
+            assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            mvc.perform(publicPage(head(path))).andExpect(status().isOk());
+            mvc.perform(get(path)).andExpect(status().isForbidden());
+            mvc.perform(publicPage(post(path))).andExpect(status().isForbidden());
+            mvc.perform(publicPage(get(path + "?token=forbidden")))
+                    .andExpect(status().isForbidden());
+        }
+        mvc.perform(publicPage(get("/player-common/private.mjs")))
+                .andExpect(status().is4xxClientError());
+    }
+
+    /** 계정 문서는 외부 실행·기본 폼 전송·쿼리를 열지 않고 서버 비밀을 포함하지 않는다. */
+    @Test
+    void accountDocumentHasStrictHeadersAndNoServerCredentials() throws Exception {
+        var result =
+                mvc.perform(publicPage(get("/account"))).andExpect(status().isOk()).andReturn();
+        assertThat(result.getResponse().getContentAsString())
+                .contains("type=\"module\"", "src=\"/player-common/account.mjs\"", "회원 계정")
+                .doesNotContain("accessToken", "flowBinder", "reauthGrant", "<script>");
+        assertThat(result.getResponse().getHeader("Content-Security-Policy"))
+                .contains(
+                        "script-src 'self'",
+                        "connect-src 'self'",
+                        "object-src 'none'",
+                        "form-action 'none'")
+                .doesNotContain("unsafe-inline", "unsafe-eval");
+        assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        mvc.perform(publicPage(head("/account"))).andExpect(status().isOk());
+        mvc.perform(get("/account")).andExpect(status().isForbidden());
+        mvc.perform(publicPage(post("/account"))).andExpect(status().isForbidden());
+        mvc.perform(publicPage(get("/account?token=forbidden"))).andExpect(status().isForbidden());
+    }
+
+    /** 공개 고지는 기존 정책 권위의 현재 값만 표시하고 동의나 회원 세션을 만들지 않는다. */
+    @Test
+    void publicNoticeUsesCurrentPolicyAuthority() throws Exception {
+        var notice = service.getNotice(UUID.randomUUID());
+        var result =
+                mvc.perform(publicPage(get("/privacy"))).andExpect(status().isOk()).andReturn();
+        assertThat(result.getResponse().getContentAsString())
+                .contains("회원 수집 고지", notice.notice().version(), notice.contact())
+                .doesNotContain("<script", "flowBinder", "receiptToken");
+        assertThat(result.getModelAndView().getModel().get("notice"))
+                .usingRecursiveComparison()
+                .ignoringFields("requestId")
+                .isEqualTo(notice);
+        assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
+        assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+    }
+
+    /** 수집이 중단되면 공개 페이지도 이전 고지 본문을 재사용하지 않고 503으로 닫는다. */
+    @Test
+    void publicNoticeDoesNotRenderStalePolicyWhenCollectionStops() throws Exception {
+        String notice = service.getNotice(UUID.randomUUID()).notice().body();
+        configuration.setCollectionEnabled(false);
+        try {
+            var unavailable =
+                    mvc.perform(publicPage(get("/privacy")))
+                            .andExpect(status().isServiceUnavailable())
+                            .andReturn();
+            assertThat(unavailable.getResponse().getContentAsString()).doesNotContain(notice);
+            assertThat(unavailable.getResponse().getHeaders("Set-Cookie")).isEmpty();
+            assertThat(unavailable.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        } finally {
+            configuration.setCollectionEnabled(true);
+        }
+    }
 
     /** 실제 connector authority를 표현하며 forwarded 헤더로 대체하지 않는다. */
     private MockHttpServletRequestBuilder web(String suffix, UUID epoch, String body) {
