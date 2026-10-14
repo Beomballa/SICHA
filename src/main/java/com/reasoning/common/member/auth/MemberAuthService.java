@@ -1065,6 +1065,15 @@ public final class MemberAuthService {
                 });
     }
 
+    /**
+     * 기존 REFRESH를 단회 회전하며 회원→family 잠금과 쓰기 직전의 단일 DB 시각으로 효력을 봉인한다. USED 재생은 토큰 자체의 만료와 별개로 기존 독립
+     * 회수 경로를 유지한다.
+     *
+     * @param refreshToken canonical 32바이트 REFRESH 원문이며 null 불가
+     * @param requestId null이 아닌 서버 요청 UUID
+     * @return 소비·idle 갱신·새 토큰 쌍을 같은 거래로 확정한 발급 결과
+     * @throws AuthException 현재 계정·수단·정책·family·토큰 검증 또는 원자 저장 실패 시
+     */
     public Issued refresh(String refreshToken, UUID requestId) {
         return safe(
                 () -> {
@@ -1107,22 +1116,35 @@ public final class MemberAuthService {
                                             requestId,
                                             refreshUnavailable());
                                 gate.checkPinned(permit, bound.account().id());
-                                Instant now = gate.clock();
-                                db.update(
-                                        "UPDATE member_token SET state='USED',used_at=? WHERE id=?"
-                                                + " AND state='ISSUED'",
-                                        time(now),
-                                        bound.token().id());
-                                Instant idle =
-                                        minimum(
-                                                now.plusSeconds(2592000),
-                                                bound.family().absolute());
-                                db.update(
-                                        "UPDATE member_session SET last_refresh_at=?,idle_until=?"
-                                                + " WHERE id=?",
-                                        time(now),
-                                        time(idle),
-                                        bound.family().id());
+                                // 소비 전에 한 번의 새 DB 시각으로 family·제시 토큰의 효력을 봉인한다.
+                                var rotated =
+                                        db.queryForList(
+                                                "WITH clock AS MATERIALIZED (SELECT"
+                                                    + " clock_timestamp() AS now) UPDATE"
+                                                    + " member_session s SET"
+                                                    + " last_refresh_at=clock.now,"
+                                                    + " idle_until=LEAST(clock.now+interval '720"
+                                                    + " hours',s.absolute_until) FROM clock WHERE"
+                                                    + " s.id=? AND s.member_id=? AND s.revoked_at"
+                                                    + " IS NULL AND s.idle_until>clock.now AND"
+                                                    + " s.absolute_until>clock.now AND EXISTS"
+                                                    + " (SELECT 1 FROM member_token t WHERE t.id=?"
+                                                    + " AND t.session_id=s.id AND t.kind='REFRESH'"
+                                                    + " AND t.state='ISSUED' AND"
+                                                    + " t.expires_at>clock.now) RETURNING"
+                                                    + " s.last_refresh_at",
+                                                Timestamp.class,
+                                                bound.family().id(),
+                                                bound.account().id(),
+                                                bound.token().id());
+                                if (rotated.size() != 1) throw refreshUnavailable();
+                                Instant now = rotated.getFirst().toInstant();
+                                if (db.update(
+                                                "UPDATE member_token SET state='USED',used_at=?"
+                                                        + " WHERE id=? AND state='ISSUED'",
+                                                time(now),
+                                                bound.token().id())
+                                        != 1) throw refreshUnavailable();
                                 Issued issued =
                                         pair(
                                                 bound.account(),

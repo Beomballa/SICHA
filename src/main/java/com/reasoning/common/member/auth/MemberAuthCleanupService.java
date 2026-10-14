@@ -9,30 +9,35 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
-/** 만료된 flow·ACCESS·휴면 제한 창만 정리한다. family·재생 증거·개인정보 파기는 책임 밖이다. */
+/** 만료 자식과 종료 family를 한정 정리하며 게임 참조 해제·개인정보 파기는 수행하지 않는다. */
 public final class MemberAuthCleanupService {
-    /** 거래 확정 후에만 반환하는 비밀 없는 종류별 삭제 수다. */
-    public record Counts(int flows, int accessTokens, int limits) {}
-
-    private record Candidate(long id, Long memberId, Long sessionId) {}
+    /** 각각의 소유 거래 확정 뒤에만 반환하는 비밀 없는 종류별 삭제 수다. */
+    public record Counts(
+            int flows, int accessTokens, int refreshTokens, int sessions, int limits) {}
 
     private final JdbcTemplate db;
     private final TransactionTemplate transaction;
     private static final long BUDGET = TimeUnit.SECONDS.toNanos(10);
+    private static final String TERMINAL =
+            "(s.revoked_at IS NOT NULL OR s.idle_until<=clock_timestamp() OR"
+                    + " s.absolute_until<=clock_timestamp())";
+    // 게임 대상의 파기 참조도 모든 상태에서 보존하며 게임 잠금·쓰기를 가져오지 않는다.
+    private static final String EXCLUDED =
+            "NOT EXISTS (SELECT 1 FROM privacy_erase e WHERE e.member_id=a.id)"
+                    + " AND NOT EXISTS (SELECT 1 FROM privacy_target p WHERE p.member_id=a.id)"
+                    + " AND NOT EXISTS (SELECT 1 FROM game_member gm JOIN privacy_target p"
+                    + " ON p.room_id=gm.room_id OR p.game_member_id=gm.id WHERE gm.member_id=a.id)";
 
     /**
-     * 동일 연결 원천의 소유 거래를 구성한다.
+     * 동일 DataSource의 JDBC 관리자만 받아 READ_COMMITTED 소유 거래를 구성한다.
      *
-     * @param db null이 아닌 회원 저장소
-     * @param manager db와 동일 DataSource의 JDBC 거래 관리자
-     * @throws IllegalArgumentException 거래 소유권이 다를 경우
+     * @param db null이 아닌 회원 JDBC 저장소
+     * @param manager 같은 DataSource를 소유하는 null이 아닌 JDBC 거래 관리자
+     * @throws IllegalArgumentException 연결 원천 또는 관리자 종류가 일치하지 않는 경우
      */
     public MemberAuthCleanupService(JdbcTemplate db, PlatformTransactionManager manager) {
         this.db = Objects.requireNonNull(db);
@@ -47,16 +52,14 @@ public final class MemberAuthCleanupService {
     }
 
     /**
-     * DB 절대 시각으로 만료를 재검사하고 종류별 독립 상한 안에서 삭제한다. 회원→세션→flow/ACCESS 순으로 잠그며 erasure에 참조된 회원은 후보 발견부터
-     * 제외한다. 잠긴 회원은 부모 후보 선택에서 건너뛰므로 이후 회원의 정리를 막지 않는다. 제한된 부모·자식 후보와 경쟁 스킵 때문에 전체 적체의 정리 기한 준수를
-     * 보장하지 않는다. 제한 창은 회원 잠금 없는 별도 거래의 테이블 쓰기 직렬화로 보호한다. 두 거래 중 뒤 거래가 실패해도 앞 거래의 확정은 되돌리지 않으며 성공 집계는
-     * 반환하지 않는다.
+     * 회원→세션→자식 순서의 정렬 잠금과 새 DB 시각으로 종료를 재검사한다. 큰 family는 호출마다 한정된 자식만 제거하며 참조가 없어질 때까지 세션을 보존한다. 제한
+     * 창은 별도 확정 거래다. SQL 작업 예산은 10초이며 연결 획득·확정 지연이나 전체 적체 정리 기한을 보장하지 않는다.
      *
-     * @param limit 종류별 후보 상한 1~100; 총 삭제 수는 최대 3배
-     * @return 확정된 종류별 삭제 수; 스킵은 삭제 수에 포함하지 않음
-     * @throws IllegalArgumentException 상한이 범위 밖인 경우
-     * @throws IllegalStateException 외부 거래 또는 실행 예산 초과인 경우
-     * @throws org.springframework.dao.DataAccessException 저장·잠금·삭제 가드 실패 시 해당 거래 롤백
+     * @param limit 종류별 전역 삭제 상한 1~100
+     * @return flow·ACCESS·REFRESH·세션·제한 창의 확정 삭제 수
+     * @throws IllegalArgumentException 상한 또는 거래 소유권이 잘못된 경우
+     * @throws IllegalStateException 외부 거래 또는 SQL 예산 초과인 경우
+     * @throws org.springframework.dao.DataAccessException 해당 소유 거래의 저장 실패 시
      */
     public Counts cleanup(int limit) {
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("INVALID_CLEANUP_LIMIT");
@@ -69,152 +72,170 @@ public final class MemberAuthCleanupService {
                 Objects.requireNonNull(transaction.execute(status -> clean(limit, started)));
         int limits =
                 Objects.requireNonNull(transaction.execute(status -> cleanLimits(limit, started)));
-        return new Counts(artifacts.flows(), artifacts.accessTokens(), limits);
+        return new Counts(
+                artifacts.flows(),
+                artifacts.accessTokens(),
+                artifacts.refreshTokens(),
+                artifacts.sessions(),
+                limits);
     }
 
     /**
-     * 만료 자식이 있는 부모만 정렬 잠금한 뒤 자식 후보를 발견하고 바인딩·기한을 다시 검사한다.
+     * 전역 종류별 후보를 부모 잠금 뒤 선택하고 실제 삭제 시 결속·종료·파기 제외를 재검사한다.
      *
-     * @param limit 종류별 후보 상한 1~100
-     * @param started 전체 호출의 단조 시계 시작값
-     * @return 현재 거래의 flow·ACCESS 삭제 수
-     * @throws IllegalStateException 전체 실행 예산 초과 시
+     * @param limit 종류별 전역 삭제 상한 1~100
+     * @param started 호출 시작의 단조 시계 값이며 단위는 나노초
+     * @return 현재 artifact 거래의 삭제 수이며 제한 창은 별도 거래에서 집계한다
      */
     private Counts clean(int limit, long started) {
+        budget(started);
         db.execute("SET LOCAL lock_timeout='1s'");
         budget(started);
         List<Long> parents =
                 db.queryForList(
-                        "SELECT a.id FROM member_account a WHERE NOT EXISTS (SELECT 1 FROM"
-                            + " privacy_erase e WHERE e.member_id=a.id) AND NOT EXISTS (SELECT 1"
-                            + " FROM privacy_target p WHERE p.member_id=a.id) AND (EXISTS (SELECT 1"
-                            + " FROM member_flow f WHERE f.member_id=a.id AND"
-                            + " f.expires_at<=clock_timestamp()) OR EXISTS (SELECT 1 FROM"
-                            + " member_session s JOIN member_token t ON t.session_id=s.id WHERE"
-                            + " s.member_id=a.id AND t.kind='ACCESS' AND"
-                            + " t.expires_at<=clock_timestamp())) ORDER BY a.id LIMIT ? FOR UPDATE"
-                            + " OF a SKIP LOCKED",
+                        "SELECT a.id FROM member_account a WHERE "
+                                + EXCLUDED
+                                + " AND (EXISTS (SELECT 1 FROM member_flow f WHERE f.member_id=a.id"
+                                + " AND f.expires_at<=clock_timestamp()) OR EXISTS (SELECT 1 FROM"
+                                + " member_session s WHERE s.member_id=a.id AND ("
+                                + TERMINAL
+                                + " OR EXISTS (SELECT 1 FROM member_token t WHERE t.session_id=s.id"
+                                + " AND t.kind='ACCESS' AND t.expires_at<=clock_timestamp()))))"
+                                + " ORDER BY a.id LIMIT ? FOR UPDATE OF a SKIP LOCKED",
                         Long.class,
                         limit * 2);
-        Set<Long> allowed = new HashSet<>();
+        List<Long> allowed = new ArrayList<>();
         for (long member : parents) {
             budget(started);
-            if (!Boolean.TRUE.equals(
+            if (Boolean.TRUE.equals(
                     db.queryForObject(
-                            "SELECT EXISTS (SELECT 1 FROM privacy_erase WHERE member_id=? UNION ALL"
-                                    + " SELECT 1 FROM privacy_target WHERE member_id=?)",
+                            "SELECT EXISTS (SELECT 1 FROM member_account a WHERE a.id=? AND "
+                                    + EXCLUDED
+                                    + ")",
                             Boolean.class,
-                            member,
                             member))) allowed.add(member);
         }
-        List<Long> selected = parents.stream().filter(allowed::contains).toList();
-        String placeholders =
-                selected.isEmpty()
-                        ? "NULL"
-                        : String.join(",", Collections.nCopies(selected.size(), "?"));
-        List<Object> parameters = new ArrayList<>(selected);
+        String members = marks(allowed);
+        List<Object> parameters = new ArrayList<>(allowed);
+        parameters.add(limit * 4);
+        budget(started);
+        List<Long> sessions =
+                db.queryForList(
+                        "SELECT s.id FROM member_session s WHERE s.member_id IN ("
+                                + members
+                                + ") AND ("
+                                + TERMINAL
+                                + " OR EXISTS (SELECT 1 FROM member_token t WHERE t.session_id=s.id"
+                                + " AND t.kind='ACCESS' AND t.expires_at<=clock_timestamp()) OR"
+                                + " EXISTS (SELECT 1 FROM member_flow f WHERE"
+                                + " f.member_id=s.member_id AND f.session_id=s.id AND"
+                                + " f.expires_at<=clock_timestamp())) ORDER BY s.id LIMIT ? FOR"
+                                + " UPDATE OF s SKIP LOCKED",
+                        Long.class,
+                        parameters.toArray());
+        String locked = marks(sessions);
+        String boundTerminal =
+                "EXISTS (SELECT 1 FROM member_session s WHERE s.id=f.session_id"
+                        + " AND s.member_id=f.member_id AND "
+                        + TERMINAL
+                        + ")";
+        String flowDue = "(f.expires_at<=clock_timestamp() OR " + boundTerminal + ")";
+        parameters = new ArrayList<>(allowed);
+        parameters.addAll(sessions);
         parameters.add(limit);
         budget(started);
-        List<Candidate> flows =
-                db.query(
-                        "SELECT f.id,f.member_id,f.session_id FROM member_flow f WHERE"
-                                + " f.expires_at<=clock_timestamp() AND (f.member_id IS NULL OR"
-                                + " f.member_id IN ("
-                                + placeholders
-                                + ")) AND NOT EXISTS (SELECT 1 FROM privacy_erase e WHERE"
-                                + " e.member_id=f.member_id) AND NOT EXISTS (SELECT 1 FROM"
-                                + " privacy_target p WHERE p.member_id=f.member_id) ORDER BY"
-                                + " f.expires_at,f.id LIMIT ?",
-                        (rs, row) ->
-                                new Candidate(
-                                        rs.getLong(1),
-                                        rs.getObject(2, Long.class),
-                                        rs.getObject(3, Long.class)),
+        int flows =
+                db.update(
+                        "WITH due AS MATERIALIZED (SELECT f.id FROM member_flow f WHERE"
+                                + " (f.member_id IS NULL OR f.member_id IN ("
+                                + members
+                                + ")) AND (f.session_id IS NULL OR f.session_id IN ("
+                                + locked
+                                + ")) AND "
+                                + flowDue
+                                + " ORDER BY f.id LIMIT ? FOR UPDATE OF f SKIP LOCKED) DELETE FROM"
+                                + " member_flow f USING due WHERE f.id=due.id AND "
+                                + flowDue,
+                        parameters.toArray());
+        int access = tokens("ACCESS", sessions, limit, started);
+        int refresh = tokens("REFRESH", sessions, limit, started);
+        parameters = new ArrayList<>(sessions);
+        parameters.add(limit);
+        budget(started);
+        int removed =
+                db.update(
+                        "WITH due AS MATERIALIZED (SELECT s.id FROM member_session s JOIN"
+                                + " member_account a ON a.id=s.member_id WHERE s.id IN ("
+                                + locked
+                                + ") AND "
+                                + TERMINAL
+                                + " AND "
+                                + EXCLUDED
+                                + " AND NOT EXISTS (SELECT 1 FROM member_token t WHERE"
+                                + " t.session_id=s.id) AND NOT EXISTS (SELECT 1 FROM member_flow f"
+                                + " WHERE f.member_id=s.member_id AND f.session_id=s.id) AND NOT"
+                                + " EXISTS (SELECT 1 FROM game_member gm WHERE"
+                                + " gm.member_id=s.member_id AND gm.presence_session_id=s.id) ORDER"
+                                + " BY s.id LIMIT ?) DELETE FROM member_session s USING due WHERE"
+                                + " s.id=due.id AND "
+                                + TERMINAL,
                         parameters.toArray());
         budget(started);
-        List<Candidate> tokens =
-                db.query(
-                        "SELECT t.id,s.member_id,t.session_id FROM member_token t JOIN"
-                                + " member_session s ON s.id=t.session_id WHERE t.kind='ACCESS' AND"
-                                + " t.expires_at<=clock_timestamp() AND s.member_id IN ("
-                                + placeholders
-                                + ") AND NOT EXISTS (SELECT 1 FROM privacy_erase e WHERE"
-                                + " e.member_id=s.member_id) AND NOT EXISTS (SELECT 1 FROM"
-                                + " privacy_target p WHERE p.member_id=s.member_id) ORDER BY"
-                                + " t.expires_at,t.id LIMIT ?",
-                        (rs, row) -> new Candidate(rs.getLong(1), rs.getLong(2), rs.getLong(3)),
-                        parameters.toArray());
-
-        TreeSet<Long> sessions = new TreeSet<>();
-        for (Candidate value : flows) {
-            if (value.sessionId() != null) sessions.add(value.sessionId());
-        }
-        for (Candidate value : tokens) {
-            sessions.add(value.sessionId());
-        }
-        Set<Long> lockedSessions = new HashSet<>();
-        for (long session : sessions) {
-            budget(started);
-            var owners =
-                    db.queryForList(
-                            "SELECT member_id FROM member_session WHERE id=?", Long.class, session);
-            if (owners.size() == 1
-                    && allowed.contains(owners.getFirst())
-                    && !db.queryForList(
-                                    "SELECT id FROM member_session WHERE id=? FOR UPDATE SKIP"
-                                            + " LOCKED",
-                                    Long.class,
-                                    session)
-                            .isEmpty()) {
-                lockedSessions.add(session);
-            }
-        }
-
-        int flowCount = 0;
-        for (Candidate value : flows) {
-            budget(started);
-            if (value.memberId() != null && !allowed.contains(value.memberId())) continue;
-            if (value.sessionId() != null && !lockedSessions.contains(value.sessionId())) continue;
-            flowCount +=
-                    db.update(
-                            "WITH due AS MATERIALIZED (SELECT id FROM member_flow WHERE id=? AND"
-                                + " member_id IS NOT DISTINCT FROM ?::bigint AND session_id IS NOT"
-                                + " DISTINCT FROM ?::bigint AND expires_at<=clock_timestamp() FOR"
-                                + " UPDATE SKIP LOCKED) DELETE FROM member_flow f USING due WHERE"
-                                + " f.id=due.id AND f.expires_at<=clock_timestamp()",
-                            value.id(),
-                            value.memberId(),
-                            value.sessionId());
-        }
-        int tokenCount = 0;
-        for (Candidate value : tokens) {
-            budget(started);
-            if (!allowed.contains(value.memberId()) || !lockedSessions.contains(value.sessionId()))
-                continue;
-            tokenCount +=
-                    db.update(
-                            "WITH due AS MATERIALIZED (SELECT id FROM member_token WHERE id=? AND"
-                                + " session_id=? AND kind='ACCESS' AND"
-                                + " expires_at<=clock_timestamp() FOR UPDATE SKIP LOCKED) DELETE"
-                                + " FROM member_token t USING due WHERE t.id=due.id AND"
-                                + " t.kind='ACCESS' AND t.expires_at<=clock_timestamp()",
-                            value.id(),
-                            value.sessionId());
-        }
-
-        budget(started);
-        return new Counts(flowCount, tokenCount, 0);
+        return new Counts(flows, access, refresh, removed, 0);
     }
 
     /**
-     * 회원·자식 잠금 없이 제한 창 쓰기 전체와 직렬화하여 INSERT 뒤 행 소실을 막는다.
+     * 잠긴 family의 자식을 종류별 단일 전역 상한 안에서 제거하며 살아 있는 REFRESH는 모두 보존한다.
      *
-     * @param limit 제한 창 삭제 상한 1~100
-     * @param started 전체 호출의 단조 시계 시작값
-     * @return 현재 거래에서 삭제한 휴면 제한 창 수
-     * @throws org.springframework.dao.DataAccessException 직렬화 또는 삭제 실패 시
+     * @param kind 내부 호출로 고정한 ACCESS 또는 REFRESH
+     * @param sessions 부모 결속을 확인하고 잠근 family ID 목록이며 빈 목록을 허용한다
+     * @param limit 종류별 전역 삭제 상한 1~100
+     * @param started 호출 시작의 단조 시계 값이며 단위는 나노초
+     * @return 해당 종류의 실제 삭제 행 수
+     */
+    private int tokens(String kind, List<Long> sessions, int limit, long started) {
+        String eligible =
+                kind.equals("ACCESS")
+                        ? "(t.expires_at<=clock_timestamp() OR " + TERMINAL + ")"
+                        : TERMINAL;
+        List<Object> parameters = new ArrayList<>(sessions);
+        parameters.add(kind);
+        parameters.add(limit);
+        budget(started);
+        return db.update(
+                "WITH due AS MATERIALIZED (SELECT t.id,t.session_id FROM member_token t JOIN"
+                        + " member_session s ON s.id=t.session_id WHERE s.id IN ("
+                        + marks(sessions)
+                        + ") AND t.kind=? AND "
+                        + eligible
+                        + " ORDER BY t.id LIMIT ? FOR UPDATE OF t SKIP LOCKED) DELETE FROM"
+                        + " member_token t USING due,member_session s WHERE t.id=due.id AND"
+                        + " t.session_id=due.session_id AND s.id=t.session_id AND "
+                        + eligible,
+                parameters.toArray());
+    }
+
+    /**
+     * 빈 집합은 SQL NULL로 표현하여 추가 후보나 미잠금 부모를 선택하지 않는다.
+     *
+     * @param values null이 아닌 내부 ID 목록이며 빈 목록을 허용한다
+     * @return 목록 크기에 맞춘 바인딩 자리 또는 빈 목록의 NULL 표현
+     */
+    private static String marks(List<Long> values) {
+        return values.isEmpty()
+                ? "NULL"
+                : String.join(",", Collections.nCopies(values.size(), "?"));
+    }
+
+    /**
+     * 회원 잠금 없는 별도 거래에서 제한 창 쓰기를 직렬화하며 앞 artifact 확정을 되돌리지 않는다.
+     *
+     * @param limit 제한 창의 전역 삭제 상한 1~100
+     * @param started 호출 시작의 단조 시계 값이며 단위는 나노초
+     * @return 현재 제한 창 거래의 실제 삭제 행 수
      */
     private int cleanLimits(int limit, long started) {
+        budget(started);
         db.execute("SET LOCAL lock_timeout='5s'");
         budget(started);
         db.execute("LOCK TABLE public.member_auth_limit IN SHARE ROW EXCLUSIVE MODE");
@@ -233,10 +254,10 @@ public final class MemberAuthCleanupService {
     }
 
     /**
-     * 남은 전체 실행 예산을 다음 SQL의 제한으로 전달하며 초과 시 현재 거래를 롤백한다.
+     * 남은 SQL 작업 예산을 다음 문장에 전달하며 초과 시 현재 거래를 롤백한다.
      *
-     * @param started 전체 호출의 단조 시계 시작값
-     * @throws IllegalStateException 10초 실행 예산을 초과한 경우
+     * @param started 호출 시작의 단조 시계 값이며 단위는 나노초
+     * @throws IllegalStateException SQL 작업 예산 10초가 소진된 경우
      */
     private void budget(long started) {
         long remaining = BUDGET - (System.nanoTime() - started);

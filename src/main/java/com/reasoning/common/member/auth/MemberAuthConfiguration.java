@@ -19,6 +19,19 @@ import org.springframework.mail.javamail.JavaMailSender;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(MemberAuthConfiguration.Properties.class)
 public class MemberAuthConfiguration {
+    /** 게임 소유의 접속 근거 선행 정리를 실제 조립에서 요구하는 경계다. */
+    @FunctionalInterface
+    public interface PresenceCleanup {
+        /**
+         * 종료 family의 게임 접속 근거를 별도 소유 거래로 해제한다.
+         *
+         * @param limit 전체 갱신 상한 1~100
+         * @return 확정된 접속 근거 해제 수
+         * @throws RuntimeException 저장 또는 거래 소유권 검증 실패 시
+         */
+        int cleanup(int limit);
+    }
+
     @ConfigurationProperties(prefix = "app.member-auth")
     public static class Properties {
         private boolean collectionEnabled;
@@ -123,13 +136,21 @@ public class MemberAuthConfiguration {
         /**
          * 명시 활성화에만 정리 실행기를 생성하며 수집·웹 스위치는 참조하지 않는다.
          *
+         * <p>접속 근거·인증 자료·제한 창은 각각 확정되며 후속 실패가 앞 확정을 되돌리지 않는다.
+         *
+         * @param presence 게임 영역이 제공하는 필수 선행 정리
          * @param cleanup 종류별 100행 이하로 정리할 서비스
          * @return 컨텍스트가 시작·종료하는 단일 스레드 실행기
          */
         @Bean
         @ConditionalOnProperty(name = "app.member-auth.cleanup-enabled", havingValue = "true")
-        public CleanupLifecycle memberAuthCleanupLifecycle(MemberAuthCleanupService cleanup) {
-            return new CleanupLifecycle(() -> cleanup.cleanup(100));
+        public CleanupLifecycle memberAuthCleanupLifecycle(
+                PresenceCleanup presence, MemberAuthCleanupService cleanup) {
+            return new CleanupLifecycle(
+                    () -> {
+                        presence.cleanup(100);
+                        cleanup.cleanup(100);
+                    });
         }
     }
 

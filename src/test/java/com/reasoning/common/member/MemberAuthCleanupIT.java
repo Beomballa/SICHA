@@ -4,24 +4,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.reasoning.common.auth.service.AuthException;
+import com.reasoning.common.auth.service.BreachedPasswordChecker;
 import com.reasoning.common.member.auth.MemberAuthCleanupService;
+import com.reasoning.common.member.auth.MemberAuthService;
+import com.reasoning.common.member.auth.MemberPolicyGate;
+import com.reasoning.common.story.model.FrozenSnapshotCodec;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/** 폐기 PostgreSQL의 실제 가드·서비스·잠금으로 만료 보안 자료의 첫 정리 계층만 검사한다. */
+/** 폐기 PostgreSQL의 실제 가드·refresh·잠금으로 한정 family 정리와 독립 확정을 검사한다. */
 public class MemberAuthCleanupIT extends LocalMemberAuthIT {
     private static final String PASSWORD = "Synthetic-member-password-987!";
+    @Autowired private MemberPolicyGate gate;
+    @Autowired private BreachedPasswordChecker breached;
 
     /** 기존 합성 컨텍스트와 같은 연결 원천의 소유 거래를 구성한다. */
     private MemberAuthCleanupService cleanup() {
@@ -99,7 +110,7 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
     private void drain() {
         for (int i = 0; i < 100; i++) {
             var counts = cleanup().cleanup(100);
-            if (counts.equals(new MemberAuthCleanupService.Counts(0, 0, 0))) return;
+            if (counts.equals(new MemberAuthCleanupService.Counts(0, 0, 0, 0, 0))) return;
         }
         throw new AssertionError("합성 만료 후보가 반복 상한 안에 소진되지 않았습니다.");
     }
@@ -131,7 +142,8 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
         var targets = db.queryForList("SELECT * FROM privacy_target ORDER BY id");
         var families = db.queryForList("SELECT * FROM member_session ORDER BY id");
 
-        assertThat(cleanup().cleanup(100)).isEqualTo(new MemberAuthCleanupService.Counts(2, 1, 1));
+        assertThat(cleanup().cleanup(100))
+                .isEqualTo(new MemberAuthCleanupService.Counts(2, 1, 0, 0, 1));
         assertThat(
                         db.queryForList(
                                 "SELECT id FROM member_flow WHERE id IN (?,?)",
@@ -176,7 +188,8 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
                 .usingRecursiveComparison()
                 .isEqualTo(targets);
         assertThat(db.queryForList("SELECT * FROM member_session ORDER BY id")).isEqualTo(families);
-        assertThat(cleanup().cleanup(100)).isEqualTo(new MemberAuthCleanupService.Counts(0, 0, 0));
+        assertThat(cleanup().cleanup(100))
+                .isEqualTo(new MemberAuthCleanupService.Counts(0, 0, 0, 0, 0));
     }
 
     @Test
@@ -192,9 +205,12 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
         assertThatThrownBy(() -> cleanup().cleanup(0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> cleanup().cleanup(101))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(cleanup().cleanup(2)).isEqualTo(new MemberAuthCleanupService.Counts(2, 2, 2));
-        assertThat(cleanup().cleanup(2)).isEqualTo(new MemberAuthCleanupService.Counts(1, 1, 1));
-        assertThat(cleanup().cleanup(2)).isEqualTo(new MemberAuthCleanupService.Counts(0, 0, 0));
+        assertThat(cleanup().cleanup(2))
+                .isEqualTo(new MemberAuthCleanupService.Counts(2, 2, 0, 0, 2));
+        assertThat(cleanup().cleanup(2))
+                .isEqualTo(new MemberAuthCleanupService.Counts(1, 1, 0, 0, 1));
+        assertThat(cleanup().cleanup(2))
+                .isEqualTo(new MemberAuthCleanupService.Counts(0, 0, 0, 0, 0));
     }
 
     @Test
@@ -262,6 +278,15 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
         var targets = db.queryForList("SELECT * FROM privacy_target ORDER BY id");
         var account = db.queryForMap("SELECT * FROM member_account WHERE id=?", actor.memberId());
         var audit = db.queryForList("SELECT * FROM member_auth_audit ORDER BY id");
+        var families =
+                db.queryForList(
+                        "SELECT * FROM member_session WHERE member_id=? ORDER BY id",
+                        actor.memberId());
+        var tokens =
+                db.queryForList(
+                        "SELECT t.* FROM member_token t JOIN member_session s ON s.id=t.session_id"
+                                + " WHERE s.member_id=? ORDER BY t.id",
+                        actor.memberId());
         long laterEligible = flow(true, null);
         assertThat(cleanup().cleanup(1).flows()).isEqualTo(1);
         assertThat(db.queryForList("SELECT id FROM member_flow WHERE id=?", laterEligible))
@@ -275,8 +300,22 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
                 .usingRecursiveComparison()
                 .isEqualTo(targets);
         assertThat(db.queryForMap("SELECT * FROM member_account WHERE id=?", actor.memberId()))
+                .usingRecursiveComparison()
                 .isEqualTo(account);
         assertThat(db.queryForList("SELECT * FROM member_auth_audit ORDER BY id")).isEqualTo(audit);
+        assertThat(
+                        db.queryForList(
+                                "SELECT * FROM member_session WHERE member_id=? ORDER BY id",
+                                actor.memberId()))
+                .usingRecursiveComparison()
+                .isEqualTo(families);
+        assertThat(
+                        db.queryForList(
+                                "SELECT t.* FROM member_token t JOIN member_session s ON"
+                                        + " s.id=t.session_id WHERE s.member_id=? ORDER BY t.id",
+                                actor.memberId()))
+                .usingRecursiveComparison()
+                .isEqualTo(tokens);
     }
 
     @Test
@@ -382,7 +421,7 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
             statement.setLong(1, locked);
             statement.executeQuery().close();
             assertThat(cleanup().cleanup(100))
-                    .isEqualTo(new MemberAuthCleanupService.Counts(1, 0, 1));
+                    .isEqualTo(new MemberAuthCleanupService.Counts(1, 0, 0, 0, 1));
             assertThat(db.queryForList("SELECT id FROM member_flow WHERE id=?", available))
                     .isEmpty();
             assertThat(db.queryForList("SELECT id FROM member_flow WHERE id=?", locked)).hasSize(1);
@@ -463,6 +502,512 @@ public class MemberAuthCleanupIT extends LocalMemberAuthIT {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /** 불변 최초 시각과 30일/90일 산식을 신규 family에 그대로 적용한다. */
+    private long family(long member, String createdOffset, String refreshedOffset) {
+        return db.queryForObject(
+                "WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS n), times AS (SELECT"
+                    + " n+?::interval AS c,n+?::interval AS r FROM clock) INSERT INTO"
+                    + " member_session(session_key,member_id,identity_id,auth_rev,created_at,last_refresh_at,idle_until,absolute_until)"
+                    + " SELECT ?,a.id,i.id,a.auth_rev,t.c,t.r,LEAST(t.r+interval '720"
+                    + " hours',t.c+interval '2160 hours'), t.c+interval '2160 hours' FROM times"
+                    + " t,member_account a JOIN member_identity i ON i.member_id=a.id WHERE a.id=?"
+                    + " RETURNING id",
+                Long.class,
+                createdOffset,
+                refreshedOffset,
+                UUID.randomUUID(),
+                member);
+    }
+
+    /** 상태·기한이 불변인 실제 REFRESH 증거를 신규 발급 시각으로 만든다. */
+    private String refresh(
+            long session, long generation, String state, String issuedOffset, String expiryOffset) {
+        String raw = crypto.randomToken(32);
+        db.update(
+                "WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS n) INSERT INTO"
+                    + " member_token(session_id,kind,generation,token_hash,state,issued_at,expires_at,used_at)"
+                    + " SELECT ?,'REFRESH',?,?,?,n+?::interval,n+?::interval, CASE WHEN ?='USED'"
+                    + " THEN n+?::interval ELSE NULL END FROM clock",
+                session,
+                generation,
+                HexFormat.of().formatHex(crypto.tokenHash("MEMBER_REFRESH_V1", raw)),
+                state,
+                issuedOffset,
+                expiryOffset,
+                state,
+                issuedOffset);
+        return raw;
+    }
+
+    /** 만료되지 않은 REAUTH도 실제 복합 session FK에 묶는다. */
+    private long boundFlow(long session) {
+        return db.queryForObject(
+                "WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS n) INSERT INTO"
+                    + " member_flow(flow_key,binder_hash,purpose,state,provider,lookup_hash,proof_cipher,created_at,expires_at,verified_at,member_id,identity_id,auth_rev,session_id,reauth_purpose)"
+                    + " SELECT"
+                    + " ?,repeat('a',64),'REAUTH','VERIFIED','LOCAL',repeat('b',64),decode(repeat('00',32),'hex'),"
+                    + " n,n+interval '5"
+                    + " minutes',n,s.member_id,s.identity_id,s.auth_rev,s.id,'LOGOUT_ALL' FROM"
+                    + " clock,member_session s WHERE s.id=? RETURNING id",
+                Long.class,
+                UUID.randomUUID(),
+                session);
+    }
+
+    @Test
+    void expiredUsedRefreshOfLiveFamilySurvivesAndActualReplayRevokesCurrentGeneration()
+            throws Exception {
+        drain();
+        var issued = account("cleanup-replay-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        String old = refresh(actor.sessionId(), 500, "USED", "-31 days", "-1 day");
+        var before =
+                db.queryForList(
+                        "SELECT * FROM member_token WHERE session_id=? AND kind='REFRESH' ORDER BY"
+                                + " id",
+                        actor.sessionId());
+        cleanup().cleanup(100);
+        assertThat(
+                        db.queryForList(
+                                "SELECT * FROM member_token WHERE session_id=? AND kind='REFRESH'"
+                                        + " ORDER BY id",
+                                actor.sessionId()))
+                .usingRecursiveComparison()
+                .isEqualTo(before);
+        assertThatThrownBy(() -> service.refresh(old, UUID.randomUUID()))
+                .hasMessageContaining("REFRESH_UNAVAILABLE");
+        assertThat(
+                        db.queryForObject(
+                                "SELECT revoked_at IS NOT NULL FROM member_session WHERE id=?",
+                                Boolean.class,
+                                actor.sessionId()))
+                .isTrue();
+        assertThatThrownBy(
+                        () ->
+                                service.refresh(
+                                        issued.path("refreshToken").asText(), UUID.randomUUID()))
+                .hasMessageContaining("REFRESH_UNAVAILABLE");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "REVOKED,0 seconds,0 seconds",
+        "IDLE,-31 days,-31 days",
+        "ABSOLUTE,-91 days,-61 days"
+    })
+    void terminalFamiliesDrainEveryTokenStateAndLiveBoundFlowOnly(
+            String reason, String created, String refreshed) throws Exception {
+        drain();
+        var issued = account("cleanup-terminal-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        long session = family(actor.memberId(), created, refreshed);
+        long bound = boundFlow(session);
+        long unrelated = flow(false, actor.memberId());
+        access(session, 0, false);
+        refresh(session, 0, "ISSUED", "0 seconds", "30 days");
+        refresh(session, 1, "USED", "-31 days", "-1 day");
+        refresh(session, 2, "REVOKED", "0 seconds", "30 days");
+        if (reason.equals("REVOKED"))
+            db.update(
+                    "UPDATE member_session SET revoked_at=clock_timestamp(),revoke_code='LOGOUT'"
+                            + " WHERE id=?",
+                    session);
+        var counts = cleanup().cleanup(100);
+        assertThat(counts).isEqualTo(new MemberAuthCleanupService.Counts(1, 1, 3, 1, 0));
+        assertThat(db.queryForList("SELECT id FROM member_session WHERE id=?", session)).isEmpty();
+        assertThat(db.queryForList("SELECT id FROM member_flow WHERE id=?", bound)).isEmpty();
+        assertThat(db.queryForList("SELECT id FROM member_flow WHERE id=?", unrelated)).hasSize(1);
+        service.authenticate(issued.path("accessToken").asText(), false);
+    }
+
+    @Test
+    void globalCapsDrainOversizedFamiliesAcrossCallsWithoutDeletingReferencedSession()
+            throws Exception {
+        drain();
+        var issued = account("cleanup-large-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        for (int family = 0; family < 2; family++) {
+            long session = family(actor.memberId(), "-31 days", "-31 days");
+            for (int child = 0; child < 5; child++) {
+                boundFlow(session);
+                access(session, child, false);
+                refresh(session, child, "USED", "-31 days", "-1 day");
+            }
+        }
+        int flows = 0, access = 0, refresh = 0, sessions = 0;
+        for (int tick = 0; tick < 6; tick++) {
+            var counts = cleanup().cleanup(2);
+            assertThat(counts.flows()).isBetween(0, 2);
+            assertThat(counts.accessTokens()).isBetween(0, 2);
+            assertThat(counts.refreshTokens()).isBetween(0, 2);
+            assertThat(counts.sessions()).isBetween(0, 2);
+            flows += counts.flows();
+            access += counts.accessTokens();
+            refresh += counts.refreshTokens();
+            sessions += counts.sessions();
+            if (tick == 0) assertThat(counts.sessions()).isZero();
+        }
+        assertThat(flows).isEqualTo(10);
+        assertThat(access).isEqualTo(10);
+        assertThat(refresh).isEqualTo(10);
+        assertThat(sessions).isEqualTo(2);
+    }
+
+    @Test
+    void lockedSessionIsSkippedAndLaterTerminalFamilyMakesProgress() throws Exception {
+        drain();
+        var issued = account("cleanup-session-lock-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        long first = family(actor.memberId(), "-31 days", "-31 days");
+        long second = family(actor.memberId(), "-31 days", "-31 days");
+        refresh(first, 0, "USED", "-31 days", "-1 day");
+        refresh(second, 0, "USED", "-31 days", "-1 day");
+        try (Connection held = db.getDataSource().getConnection();
+                var statement =
+                        held.prepareStatement(
+                                "SELECT id FROM member_session WHERE id=? FOR UPDATE")) {
+            held.setAutoCommit(false);
+            statement.setLong(1, first);
+            statement.executeQuery().close();
+            assertThat(cleanup().cleanup(1).sessions()).isEqualTo(1);
+            assertThat(db.queryForList("SELECT id FROM member_session WHERE id=?", first))
+                    .hasSize(1);
+            held.rollback();
+        }
+        assertThat(cleanup().cleanup(1).sessions()).isEqualTo(1);
+    }
+
+    @Test
+    void lockedRefreshChildKeepsItsTerminalSessionUntilLaterDrain() throws Exception {
+        drain();
+        var issued = account("cleanup-token-lock-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        long session = family(actor.memberId(), "-31 days", "-31 days");
+        refresh(session, 0, "USED", "-31 days", "-1 day");
+        access(session, 0, false);
+        try (Connection held = db.getDataSource().getConnection();
+                var statement =
+                        held.prepareStatement(
+                                "SELECT id FROM member_token WHERE session_id=? AND kind='REFRESH'"
+                                        + " FOR UPDATE")) {
+            held.setAutoCommit(false);
+            statement.setLong(1, session);
+            statement.executeQuery().close();
+            var counts = cleanup().cleanup(100);
+            assertThat(counts.accessTokens()).isEqualTo(1);
+            assertThat(counts.refreshTokens()).isZero();
+            assertThat(counts.sessions()).isZero();
+            assertThat(db.queryForList("SELECT id FROM member_session WHERE id=?", session))
+                    .hasSize(1);
+            held.rollback();
+        }
+        var counts = cleanup().cleanup(100);
+        assertThat(counts.refreshTokens()).isEqualTo(1);
+        assertThat(counts.sessions()).isEqualTo(1);
+    }
+
+    @Test
+    void finalSessionDeleteFailureRollsBackFlowsAndBothTokenCategories() throws Exception {
+        drain();
+        var issued = account("cleanup-rollback-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        long session = family(actor.memberId(), "-31 days", "-31 days");
+        boundFlow(session);
+        access(session, 0, false);
+        refresh(session, 0, "USED", "-31 days", "-1 day");
+        var flows = db.queryForList("SELECT * FROM member_flow WHERE session_id=?", session);
+        var tokens =
+                db.queryForList(
+                        "SELECT * FROM member_token WHERE session_id=? ORDER BY id", session);
+        db.execute(
+                "CREATE FUNCTION public.fail_cleanup_session() RETURNS trigger LANGUAGE plpgsql AS"
+                        + " $$ BEGIN RAISE EXCEPTION 'synthetic failure'; END $$");
+        db.execute(
+                "CREATE TRIGGER tr_fail_cleanup_session BEFORE DELETE ON member_session FOR EACH"
+                        + " ROW EXECUTE FUNCTION public.fail_cleanup_session()");
+        try {
+            assertThatThrownBy(() -> cleanup().cleanup(100))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(db.queryForList("SELECT * FROM member_flow WHERE session_id=?", session))
+                    .usingRecursiveComparison()
+                    .isEqualTo(flows);
+            assertThat(
+                            db.queryForList(
+                                    "SELECT * FROM member_token WHERE session_id=? ORDER BY id",
+                                    session))
+                    .usingRecursiveComparison()
+                    .isEqualTo(tokens);
+            assertThat(db.queryForList("SELECT id FROM member_session WHERE id=?", session))
+                    .hasSize(1);
+        } finally {
+            db.execute("DROP TRIGGER tr_fail_cleanup_session ON member_session");
+            db.execute("DROP FUNCTION public.fail_cleanup_session()");
+        }
+    }
+
+    /** 기존 실제 refresh 경로의 조건부 SQL 송신 직전만 합성 장애 장벽으로 감싼다. */
+    private MemberAuthService pausedRefresh(CountDownLatch reached, CountDownLatch resume) {
+        JdbcTemplate intercepted =
+                new JdbcTemplate(db.getDataSource()) {
+                    @Override
+                    public <T> List<T> queryForList(String sql, Class<T> type, Object... args) {
+                        if (sql.startsWith("WITH clock AS MATERIALIZED")
+                                && sql.contains("UPDATE member_session s")) {
+                            reached.countDown();
+                            try {
+                                if (!resume.await(5, TimeUnit.SECONDS))
+                                    throw new AssertionError("합성 refresh 장벽 해제 실패");
+                            } catch (InterruptedException failure) {
+                                Thread.currentThread().interrupt();
+                                throw new AssertionError(failure);
+                            }
+                        }
+                        return super.queryForList(sql, type, args);
+                    }
+                };
+        return new MemberAuthService(
+                intercepted,
+                new DataSourceTransactionManager(db.getDataSource()),
+                crypto,
+                breached,
+                gate,
+                mail);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"IDLE", "ABSOLUTE", "TOKEN"})
+    void expiryCrossingAtActualWriteCannotConsumeIssueOrExtend(String boundary) throws Exception {
+        drain();
+        var issued = account("cleanup-cross-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        long session =
+                family(
+                        actor.memberId(),
+                        boundary.equals("ABSOLUTE") ? "-2160 hours +3 seconds" : "-31 days",
+                        boundary.equals("IDLE") || boundary.equals("ABSOLUTE")
+                                ? "-720 hours +3 seconds"
+                                : "0 seconds");
+        String raw =
+                refresh(
+                        session,
+                        0,
+                        "ISSUED",
+                        "0 seconds",
+                        boundary.equals("TOKEN") ? "3 seconds" : "30 days");
+        var familyBefore = db.queryForMap("SELECT * FROM member_session WHERE id=?", session);
+        var tokensBefore =
+                db.queryForList(
+                        "SELECT * FROM member_token WHERE session_id=? ORDER BY id", session);
+        var reached = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        var rotating = pausedRefresh(reached, resume);
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var result =
+                    pool.submit(
+                            () -> {
+                                try {
+                                    rotating.refresh(raw, UUID.randomUUID());
+                                    return "ISSUED";
+                                } catch (AuthException failure) {
+                                    return failure.code();
+                                }
+                            });
+            try {
+                assertThat(reached.await(3, TimeUnit.SECONDS)).isTrue();
+                // refresh가 루트를 소유하므로 정리는 건너뛰고, DB 시각만 실제 기한을 넘긴다.
+                cleanup().cleanup(100);
+                long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
+                while (!Boolean.TRUE.equals(
+                        db.queryForObject(
+                                "SELECT s.idle_until<=clock_timestamp() OR"
+                                    + " s.absolute_until<=clock_timestamp() OR"
+                                    + " t.expires_at<=clock_timestamp() FROM member_session s JOIN"
+                                    + " member_token t ON t.session_id=s.id WHERE s.id=? AND"
+                                    + " t.kind='REFRESH'",
+                                Boolean.class,
+                                session))) {
+                    if (System.nanoTime() >= until) throw new AssertionError("합성 DB 기한 경계 미관측");
+                    Thread.sleep(10);
+                }
+            } finally {
+                resume.countDown();
+            }
+            assertThat(result.get(8, TimeUnit.SECONDS)).isEqualTo("REFRESH_UNAVAILABLE");
+        }
+        assertThat(db.queryForMap("SELECT * FROM member_session WHERE id=?", session))
+                .usingRecursiveComparison()
+                .isEqualTo(familyBefore);
+        assertThat(
+                        db.queryForList(
+                                "SELECT * FROM member_token WHERE session_id=? ORDER BY id",
+                                session))
+                .usingRecursiveComparison()
+                .isEqualTo(tokensBefore);
+    }
+
+    @Test
+    void actualRefreshHoldingRootsWinsAndCleanupCannotRemoveItsLiveFamily() throws Exception {
+        drain();
+        var issued = account("cleanup-refresh-wins-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        access(actor.sessionId(), 700, true);
+        var reached = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        var rotating = pausedRefresh(reached, resume);
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var result =
+                    pool.submit(
+                            () ->
+                                    rotating.refresh(
+                                            issued.path("refreshToken").asText(),
+                                            UUID.randomUUID()));
+            try {
+                assertThat(reached.await(3, TimeUnit.SECONDS)).isTrue();
+                assertThat(cleanup().cleanup(100).accessTokens()).isZero();
+            } finally {
+                resume.countDown();
+            }
+            var current = result.get(8, TimeUnit.SECONDS);
+            assertThat(cleanup().cleanup(100).accessTokens()).isEqualTo(1);
+            service.authenticate(current.tokens().accessToken(), false);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT idle_until>clock_timestamp() AND revoked_at IS NULL"
+                                            + " FROM member_session WHERE id=?",
+                                    Boolean.class,
+                                    actor.sessionId()))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void terminalCleanupHoldingRootsWinsAndActualRefreshCannotMintPair() throws Exception {
+        drain();
+        var issued = account("cleanup-wins-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        long session = family(actor.memberId(), "-31 days", "-31 days");
+        String raw = refresh(session, 0, "ISSUED", "0 seconds", "30 days");
+        db.execute(
+                "CREATE FUNCTION public.pause_cleanup_refresh() RETURNS trigger LANGUAGE plpgsql AS"
+                        + " $$ BEGIN IF OLD.session_id="
+                        + session
+                        + " THEN PERFORM pg_advisory_xact_lock(8642093); END IF; RETURN OLD; END"
+                        + " $$");
+        db.execute(
+                "CREATE TRIGGER tr_pause_cleanup_refresh BEFORE DELETE ON member_token FOR EACH ROW"
+                        + " EXECUTE FUNCTION public.pause_cleanup_refresh()");
+        var pool = Executors.newFixedThreadPool(2);
+        try (Connection held = db.getDataSource().getConnection();
+                var statement = held.createStatement()) {
+            statement.execute("SELECT pg_advisory_lock(8642093)");
+            var removing = pool.submit(() -> cleanup().cleanup(100));
+            try {
+                awaitWait("WITH due AS MATERIALIZED%", "advisory");
+                var rotating =
+                        pool.submit(
+                                () -> {
+                                    try {
+                                        service.refresh(raw, UUID.randomUUID());
+                                        return "ISSUED";
+                                    } catch (AuthException failure) {
+                                        return failure.code();
+                                    }
+                                });
+                awaitWait("SELECT id,member_key,state,auth_rev FROM member_account%", null);
+                statement.execute("SELECT pg_advisory_unlock(8642093)");
+                assertThat(removing.get(8, TimeUnit.SECONDS).sessions()).isEqualTo(1);
+                assertThat(rotating.get(8, TimeUnit.SECONDS)).isEqualTo("REFRESH_UNAVAILABLE");
+                assertThat(
+                                db.queryForList(
+                                        "SELECT id FROM member_token WHERE session_id=?", session))
+                        .isEmpty();
+            } finally {
+                statement.execute("SELECT pg_advisory_unlock(8642093)");
+            }
+        } finally {
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(8, TimeUnit.SECONDS)).isTrue();
+            db.execute("DROP TRIGGER tr_pause_cleanup_refresh ON member_token");
+            db.execute("DROP FUNCTION public.pause_cleanup_refresh()");
+        }
+    }
+
+    @Test
+    void qualificationPresenceInInactiveMembershipPreventsSessionDeleteAndIsNeverWritten()
+            throws Exception {
+        drain();
+        String policyCode = playtestPolicy();
+        long policy =
+                db.queryForObject(
+                        "SELECT id FROM privacy_policy WHERE code=?", Long.class, policyCode);
+        var issued = account("cleanup-presence-" + UUID.randomUUID() + "@example.invalid");
+        var actor = service.authenticate(issued.path("accessToken").asText(), false);
+        var peer = account("cleanup-presence-peer-" + UUID.randomUUID() + "@example.invalid");
+        UUID source =
+                invitation(
+                        List.of(
+                                actor.memberKey(),
+                                service.authenticate(peer.path("accessToken").asText(), false)
+                                        .memberKey()));
+        var test =
+                db.queryForMap(
+                        "SELECT t.*,v.story_id FROM play_test t JOIN story_version v ON"
+                                + " v.id=t.version_id WHERE t.test_key=?",
+                        source);
+        var frozen =
+                FrozenSnapshotCodec.decode(
+                        db.queryForObject(
+                                        "SELECT payload::text FROM review_snapshot WHERE id=?",
+                                        String.class,
+                                        test.get("snapshot_id"))
+                                .getBytes(StandardCharsets.UTF_8));
+        long room =
+                db.queryForObject(
+                        "WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS n) INSERT INTO"
+                            + " game_room"
+                            + " (room_key,purpose,mode,qualification_kind,reviewer_id,selected_member_id,story_id,version_id,snapshot_id,runtime_id,runtime_epoch,config_hash,rubric_hash,policy_id,play_rev,state,difficulty,limit_sec,max_attempts,max_hints,created_at,lobby_until)"
+                            + " SELECT"
+                            + " ?,'REVIEW_SOLO_QUALIFICATION','SOLO','FUNCTIONAL',?,?,?,?,?,?,?,?,?,?,0,'WAITING',?,?,?,?,n,n+interval"
+                            + " '30 minutes' FROM clock RETURNING id",
+                        Long.class,
+                        UUID.randomUUID(),
+                        invitationActor.accountId(),
+                        actor.memberId(),
+                        test.get("story_id"),
+                        test.get("version_id"),
+                        test.get("snapshot_id"),
+                        test.get("runtime_id"),
+                        test.get("runtime_epoch"),
+                        test.get("config_hash"),
+                        frozen.rubricHash(),
+                        policy,
+                        frozen.payload().path("sections").path("basic").path("difficulty").asInt(),
+                        frozen.payload().path("sections").path("basic").path("limitSec").asInt(),
+                        frozen.payload().path("policy").path("attemptLimit").asInt(),
+                        frozen.payload().path("policy").path("hintsPerPerson").asInt());
+        long session = family(actor.memberId(), "-31 days", "-31 days");
+        db.update(
+                "INSERT INTO"
+                    + " game_member(room_id,member_id,identity_id,slot,policy_id,accepted_at,active_yn,last_seen_at,presence_session_id,presence_auth_rev)"
+                    + " SELECT"
+                    + " ?,s.member_id,s.identity_id,1,?,clock_timestamp(),false,clock_timestamp(),s.id,s.auth_rev"
+                    + " FROM member_session s WHERE s.id=?",
+                room,
+                policy,
+                session);
+        var membership = db.queryForList("SELECT * FROM game_member WHERE room_id=?", room);
+        var root = db.queryForMap("SELECT * FROM game_room WHERE id=?", room);
+        refresh(session, 0, "USED", "-31 days", "-1 day");
+        assertThat(cleanup().cleanup(100).refreshTokens()).isEqualTo(1);
+        assertThat(db.queryForList("SELECT id FROM member_session WHERE id=?", session)).hasSize(1);
+        assertThat(db.queryForList("SELECT * FROM game_member WHERE room_id=?", room))
+                .usingRecursiveComparison()
+                .isEqualTo(membership);
+        assertThat(db.queryForMap("SELECT * FROM game_room WHERE id=?", room))
+                .usingRecursiveComparison()
+                .isEqualTo(root);
     }
 
     /**
