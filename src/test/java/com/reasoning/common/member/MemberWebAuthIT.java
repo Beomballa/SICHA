@@ -100,7 +100,8 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                         .andExpect(status().isOk())
                         .andReturn();
         assertThat(css.getResponse().getContentType()).contains("text/css");
-        assertThat(css.getResponse().getContentAsString()).contains("--accent: #ffc700");
+        assertThat(css.getResponse().getContentAsString())
+                .contains("--accent: #eab308", "--background: #14161b");
         assertThat(css.getResponse().getHeaders("Set-Cookie")).isEmpty();
         mvc.perform(publicPage(head("/player-public.css"))).andExpect(status().isOk());
         mvc.perform(publicPage(get("/player-public.js"))).andExpect(status().is4xxClientError());

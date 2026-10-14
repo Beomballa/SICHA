@@ -53,6 +53,56 @@ let heartbeatTimer = null,
   pollTimer = null,
   deadlineTimer = null;
 let heartbeatBusy = false;
+let playTask = "investigation";
+const parallelTasks = window.matchMedia("(min-width: 900px)");
+
+/** 로컬 작업 선택은 외곽 표시만 바꾸며 서버 권위의 section.hidden·입력·명령은 건드리지 않는다. */
+function renderTasks() {
+  const focus = document.activeElement;
+  const available = {
+    investigation: !element("investigation").hidden,
+    report: !element("report-section").hidden,
+  };
+  const any = available.investigation || available.report;
+  if (any && !available[playTask])
+    playTask = available.investigation ? "investigation" : "report";
+  const parallel =
+    parallelTasks.matches && available.investigation && available.report;
+  element("play-workspace").hidden = !any;
+  element("play-workspace").dataset.parallel = String(parallel);
+  element("play-task-nav").hidden = !any;
+  element("play-task-summary").hidden = !available.report;
+  element("required-notices").hidden = !available.investigation;
+  element("report-edit-state").textContent = available.report
+    ? stale
+      ? "미저장 입력 보존 중 · 최신 저장본과 쓰기 기준 확인이 필요합니다."
+      : dirty
+        ? "미저장 입력이 있습니다. 작업 전환은 저장이나 제출이 아닙니다."
+        : "서버 저장본과 편집 입력을 구분해 확인하세요. 작업 전환은 동의가 아닙니다."
+    : "";
+  for (const button of document.querySelectorAll("[data-play-task]")) {
+    const task = button.dataset.playTask;
+    button.hidden = !available[task];
+    button.disabled = !available[task];
+    button.setAttribute("aria-pressed", String(task === playTask));
+    element(task + "-area").hidden =
+      !available[task] || (!parallel && task !== playTask);
+  }
+  if (focus?.closest("[hidden]")) {
+    const button = document.querySelector(`[data-play-task="${playTask}"]`);
+    (any ? button : element("main")).focus();
+  }
+}
+
+for (const button of document.querySelectorAll("[data-play-task]"))
+  button.addEventListener("click", () => {
+    playTask = button.dataset.playTask;
+    renderTasks();
+    element(
+      playTask === "report" ? "report-title" : "investigation-title",
+    ).focus();
+  });
+parallelTasks.addEventListener("change", renderTasks);
 
 /** 원문·DOM 입력·기본값·동의·타이머를 함께 폐기한다. 서버 상태를 추정하지 않는다. */
 function purge(reason = "SCREEN_CHANGED") {
@@ -75,6 +125,7 @@ function purge(reason = "SCREEN_CHANGED") {
   state = story = notice = materials = saved = result = null;
   cursor = null;
   dirty = stale = false;
+  playTask = "investigation";
   for (const id of [
     "story-list",
     "roles",
@@ -180,7 +231,9 @@ function render() {
   element("roles-title").textContent = coop
     ? "내 고정 역할 자료"
     : "고정된 두 역할";
-  for (const button of document.querySelectorAll("button"))
+  for (const button of document.querySelectorAll(
+    "button:not([data-play-task])",
+  ))
     button.disabled =
       busy || !authenticated || !!pending || button.dataset.denied === "true";
   element("connect").disabled = busy || !!pending || !session;
@@ -247,6 +300,7 @@ function render() {
       ? "서버 마감 시각: " + state.playDeadline
       : "대기실 서버 만료: " + state.lobbyExpiresAt;
   }
+  renderTasks();
 }
 
 /** 협동 권한은 서버의 고정 역할/제안 권한만 따르고 초대 비밀을 조회로 복원하지 않는다. */

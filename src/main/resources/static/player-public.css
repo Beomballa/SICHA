@@ -1,10 +1,23 @@
 :root {
   color-scheme: dark;
-  --background: #121417;
-  --surface: #1e2228;
-  --text: #e5e8eb;
-  --muted: #b7bec6;
-  --accent: #ffc700;
+  --background: #14161b;
+  --surface: #1e222b;
+  --surface-raised: #272d38;
+  --text: #e3e8f0;
+  --muted: #a9b3c3;
+  --accent: #eab308;
+  --accent-hover: #facc15;
+  --on-accent: #211c08;
+  --border: #3b4351;
+  --control-border: #8995a7;
+  --focus: #ffc700;
+  --space-related: 8px;
+  --space-field: 16px;
+  --space-group: 24px;
+  --space-section: 32px;
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-panel: 12px;
 }
 
 * {
@@ -20,17 +33,18 @@ body {
   background: var(--background);
   color: var(--text);
   font-family: "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-  line-height: 1.65;
+  font-size: 16px;
+  line-height: 1.7;
 }
 
 .shell {
   width: min(100%, 1280px);
   margin-inline: auto;
-  padding-inline: 32px;
+  padding-inline: var(--space-section);
 }
 
 .site-header {
-  border-bottom: 1px solid #414850;
+  border-bottom: 1px solid var(--border);
 }
 
 .site-header .shell {
@@ -38,7 +52,7 @@ body {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-field);
 }
 
 .brand {
@@ -48,7 +62,7 @@ body {
 }
 
 main {
-  padding-block: 48px 80px;
+  padding-block: 48px max(80px, env(safe-area-inset-bottom));
 }
 
 .hero,
@@ -57,27 +71,42 @@ main {
 }
 
 .hero {
-  padding-block: 32px;
+  padding-block: var(--space-section);
 }
 
 .section {
-  padding-block: 32px;
-  border-top: 1px solid #414850;
+  padding-block: var(--space-section);
+  border-top: 1px solid var(--border);
 }
 
 h1,
 h2,
-h3 {
-  line-height: 1.35;
+h3,
+h4 {
+  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
 h1 {
   max-width: 720px;
-  font-size: clamp(2rem, 4vw, 3rem);
+  font-size: 28px;
 }
 
-p {
+h2 {
+  font-size: 22px;
+}
+
+h3 {
+  font-size: 18px;
+}
+
+h4 {
+  font-size: 16px;
+}
+
+p,
+.notice-body,
+form {
   max-width: 720px;
   overflow-wrap: anywhere;
 }
@@ -89,14 +118,14 @@ p {
 
 .guide {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-field);
 }
 
 .panel {
   min-width: 0;
-  padding: 24px;
-  border-radius: 12px;
+  padding: var(--space-group);
+  border-radius: var(--radius-panel);
   background: var(--surface);
 }
 
@@ -105,7 +134,8 @@ p {
 }
 
 .note,
-.notice {
+.notice,
+.play-task-summary {
   color: var(--muted);
 }
 
@@ -116,18 +146,22 @@ p {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-block: 24px;
+  gap: var(--space-field);
+  margin-block: var(--space-group);
 }
 
 .actions a,
-.actions button {
+button {
   display: inline-flex;
   min-height: 48px;
   align-items: center;
   justify-content: center;
-  padding: 10px 20px;
-  border-radius: 6px;
+  padding: var(--space-related) var(--space-field);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  overflow-wrap: anywhere;
   text-align: center;
   text-decoration: none;
   font: inherit;
@@ -137,7 +171,8 @@ p {
 
 .primary-action {
   background: var(--accent);
-  color: var(--background);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 
 .secondary-action {
@@ -154,7 +189,7 @@ p {
   min-height: 48px;
   padding: 10px 20px;
   background: var(--accent);
-  color: var(--background);
+  color: var(--on-accent);
 }
 
 .skip-link:focus {
@@ -167,7 +202,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 4px;
 }
 
@@ -182,8 +217,8 @@ select:focus-visible,
 form label,
 .panel > label {
   display: grid;
-  gap: 8px;
-  margin-block: 16px;
+  gap: var(--space-related);
+  margin-block: var(--space-field);
 }
 
 input:not([type="checkbox"]),
@@ -193,18 +228,22 @@ select {
   min-width: 0;
   min-height: 48px;
   padding: 10px 12px;
-  border: 1px solid var(--muted);
-  border-radius: 6px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--background);
   color: var(--text);
   font: inherit;
+}
+
+textarea {
+  resize: vertical;
 }
 
 label.check-label {
   display: flex;
   align-items: center;
   min-height: 48px;
-  gap: 12px;
+  gap: var(--space-field);
   cursor: pointer;
 }
 
@@ -215,9 +254,24 @@ label.check-label {
   accent-color: var(--accent);
 }
 
-button:disabled {
-  opacity: 0.65;
-  cursor: wait;
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background: var(--surface-raised);
+  border-color: var(--control-border);
+  cursor: not-allowed;
+}
+
+[aria-busy="true"] button:disabled {
+  cursor: progress;
+}
+
+.primary-action:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 button:hover:not(:disabled),
@@ -225,28 +279,65 @@ button:hover:not(:disabled),
   text-decoration: underline;
 }
 
+a {
+  color: var(--accent);
+}
+
 #error {
   border-inline-start: 4px solid var(--accent);
   padding-inline-start: 12px;
 }
 
-@media (max-width: 1000px) {
-  .shell {
-    padding-inline: 24px;
+.play-workspace {
+  display: grid;
+  gap: var(--space-section);
+  align-items: start;
+}
+
+.play-task-area {
+  min-width: 0;
+}
+
+.play-task-area > .section {
+  max-width: none;
+}
+
+.play-task-area .panel {
+  border-radius: var(--radius-card);
+}
+
+.play-task-nav button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (min-width: 900px) {
+  .play-workspace[data-parallel="true"] {
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 1199px) {
   .shell {
-    padding-inline: 16px;
+    padding-inline: var(--space-group);
   }
+}
 
-  .guide {
-    grid-template-columns: minmax(0, 1fr);
+@media (max-width: 767px) {
+  .shell {
+    padding-inline: var(--space-field);
   }
 
   .panel {
-    padding: 16px;
+    padding: var(--space-field);
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  h2 {
+    font-size: 20px;
   }
 }
 

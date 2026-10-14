@@ -143,86 +143,132 @@
           </button>
         </div>
       </section>
-      <section
-        id="investigation"
-        class="section"
+      <nav
+        id="play-task-nav"
+        class="actions play-task-nav"
+        aria-label="조사 작업 선택"
         hidden
-        aria-labelledby="investigation-title"
       >
-        <h2 id="investigation-title">조사 자료</h2>
-        <p id="basic-intro" class="notice-body"></p>
-        <p id="basic-setting" class="notice-body"></p>
-        <h3 id="roles-title">고정된 두 역할</h3>
-        <div id="roles" class="guide"></div>
-        <h3>인물</h3>
-        <div id="persons" class="guide"></div>
-        <h3>단서</h3>
-        <div id="clues" class="guide"></div>
-        <h3>힌트</h3>
-        <div id="hints"></div>
-        <div id="required-notices"></div>
-      </section>
-      <section
-        id="report-section"
-        class="section"
-        hidden
-        aria-labelledby="report-title"
-      >
-        <h2 id="report-title">REPORT-1 보고서</h2>
-        <p>
-          편집 입력은 현재 문서에만 있습니다. 서버 저장본과 다른 입력은 제출할
-          수 없습니다.
-        </p>
-        <p id="saved-revision"></p>
-        <div id="saved-report" class="panel notice-body"></div>
-        <form id="report-form">
-          <label
-            >지목 인물<select id="culprit">
-              <option value="">미선택</option>
-            </select></label
-          ><label
-            >방법<textarea
-              id="method"
-              rows="4"
-              maxlength="10000"
-            ></textarea></label
-          ><label
-            >시간<textarea
-              id="time"
-              rows="4"
-              maxlength="10000"
-            ></textarea></label
-          ><label
-            >동기<textarea
-              id="motive"
-              rows="4"
-              maxlength="10000"
-            ></textarea></label
-          ><label
-            >근거<textarea id="evidence" rows="4" maxlength="10000"></textarea>
-          </label>
-          <div class="actions">
-            <button id="save" class="primary-action" type="submit">
-              보고서 명시 저장</button
-            ><button id="revert" class="secondary-action" type="button">
-              편집을 버리고 서버 저장본 사용
-            </button>
-            <button id="accept-latest" class="secondary-action" type="button">
-              최신 저장본을 확인하고 편집 입력 유지
-            </button>
-          </div>
-        </form>
-        <label class="check-label"
-          ><input id="submit-consent" type="checkbox" />위 서버 저장본의
-          인물·방법·시간·동기·근거를 확인했습니다. 이 저장본을 불변 제출본으로
-          접수합니다.</label
+        <button
+          type="button"
+          data-play-task="investigation"
+          aria-pressed="true"
+          aria-controls="investigation-area"
         >
-        <div class="actions">
-          <button id="submit" class="primary-action" type="button">
-            동의한 서버 저장본 제출
-          </button>
+          조사 자료 보기
+        </button>
+        <button
+          type="button"
+          data-play-task="report"
+          aria-pressed="false"
+          aria-controls="report-area"
+        >
+          보고서 보기
+        </button>
+      </nav>
+      <div
+        id="play-task-summary"
+        class="play-task-summary"
+        role="status"
+        aria-live="polite"
+        hidden
+      >
+        <p id="report-edit-state"></p>
+        <p id="saved-revision"></p>
+      </div>
+      <div id="required-notices" hidden></div>
+      <div id="play-workspace" class="play-workspace" hidden>
+        <div id="investigation-area" class="play-task-area" hidden>
+          <section
+            id="investigation"
+            class="section"
+            hidden
+            aria-labelledby="investigation-title"
+          >
+            <h2 id="investigation-title" tabindex="-1">조사 자료</h2>
+            <p id="basic-intro" class="notice-body"></p>
+            <p id="basic-setting" class="notice-body"></p>
+            <h3 id="roles-title">고정된 두 역할</h3>
+            <div id="roles" class="guide"></div>
+            <h3>인물</h3>
+            <div id="persons" class="guide"></div>
+            <h3>단서</h3>
+            <div id="clues" class="guide"></div>
+            <h3>힌트</h3>
+            <div id="hints"></div>
+          </section>
         </div>
-      </section>
+        <div id="report-area" class="play-task-area" hidden>
+          <section
+            id="report-section"
+            class="section"
+            hidden
+            aria-labelledby="report-title"
+          >
+            <h2 id="report-title" tabindex="-1">REPORT-1 보고서</h2>
+            <p>
+              편집 입력은 현재 문서에만 있습니다. 서버 저장본과 다른 입력은
+              제출할 수 없습니다.
+            </p>
+            <div id="saved-report" class="panel notice-body"></div>
+            <form id="report-form">
+              <label
+                >지목 인물<select id="culprit">
+                  <option value="">미선택</option>
+                </select></label
+              ><label
+                >방법<textarea
+                  id="method"
+                  rows="4"
+                  maxlength="10000"
+                ></textarea></label
+              ><label
+                >시간<textarea
+                  id="time"
+                  rows="4"
+                  maxlength="10000"
+                ></textarea></label
+              ><label
+                >동기<textarea
+                  id="motive"
+                  rows="4"
+                  maxlength="10000"
+                ></textarea></label
+              ><label
+                >근거<textarea
+                  id="evidence"
+                  rows="4"
+                  maxlength="10000"
+                ></textarea>
+              </label>
+              <div class="actions">
+                <button id="save" class="primary-action" type="submit">
+                  보고서 명시 저장</button
+                ><button id="revert" class="secondary-action" type="button">
+                  편집을 버리고 서버 저장본 사용
+                </button>
+                <button
+                  id="accept-latest"
+                  class="secondary-action"
+                  type="button"
+                >
+                  최신 저장본을 확인하고 편집 입력 유지
+                </button>
+              </div>
+            </form>
+            <label class="check-label"
+              ><input id="submit-consent" type="checkbox" />위 서버 저장본의
+              인물·방법·시간·동기·근거를 확인했습니다. 이 저장본을 불변
+              제출본으로 접수합니다.</label
+            >
+            <div class="actions">
+              <button id="submit" class="primary-action" type="button">
+                동의한 서버 저장본 제출
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
       <section id="lobby" class="section" hidden>
         <h2>협동 대기실</h2>
         <p id="participants"></p>
