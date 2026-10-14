@@ -9,7 +9,7 @@ import {
 const KEY = "sicha.player.auth.v1";
 const LOCK = "sicha-player-auth-v1";
 const BASE = "/api/member/browser-auth";
-const PURPOSES = new Set(["PASSWORD_CHANGE", "LOGOUT_ALL"]);
+const PURPOSES = new Set(["PASSWORD_CHANGE", "LOGOUT_ALL", "DELETE_ACCOUNT"]);
 
 /** 닫힌 응답 필드와 서버 요청 식별자를 확인한다. */
 function fields(value, names) {
@@ -139,6 +139,8 @@ export function createWebSession(browser = globalThis.window) {
   let emailFlow = null;
   let notice = null;
   let grant = null;
+  let erasure = null;
+  let erasureTimer = null;
   const listeners = new Set();
   const uuid = () => browser.crypto.randomUUID();
   const read = () => browser.localStorage.getItem(KEY);
@@ -146,6 +148,9 @@ export function createWebSession(browser = globalThis.window) {
   /** 계정 변경·배경 전환 시 원문 소비자에게 동기 폐기를 통지한다. */
   function clear(reason = "AUTH_CHANGED") {
     clearTimeout(expiryTimer);
+    clearTimeout(erasureTimer);
+    erasureTimer = null;
+    erasure = null;
     expiryTimer = null;
     access = null;
     emailFlow = null;
@@ -161,6 +166,24 @@ export function createWebSession(browser = globalThis.window) {
         );
       }
     }
+  }
+
+  /** 긴 절대 기한은 플랫폼 타이머 한도마다 재예약하며 실제 만료 때만 영수증을 폐기한다. */
+  function scheduleErasureExpiry() {
+    clearTimeout(erasureTimer);
+    if (!erasure) {
+      erasureTimer = null;
+      return;
+    }
+    const remaining = Date.parse(erasure.receiptExpiresAt) - Date.now();
+    if (remaining <= 0) {
+      clear("RECEIPT_EXPIRED");
+      return;
+    }
+    erasureTimer = setTimeout(
+      scheduleErasureExpiry,
+      Math.min(remaining, 2147483647),
+    );
   }
 
   /** 저장 실패나 다른 명령의 표지 변경을 정상 인증으로 취급하지 않는다. */
@@ -389,6 +412,9 @@ export function createWebSession(browser = globalThis.window) {
       emailFlow = null;
       notice = null;
       grant = null;
+      clearTimeout(erasureTimer);
+      erasureTimer = null;
+      erasure = null;
     },
     /** 명시 메일 시작은 이전 쿠키를 회수하며 고지·flow 비밀은 문서 메모리로만 관리한다. */
     startEmail(purpose, email) {
@@ -574,6 +600,7 @@ export function createWebSession(browser = globalThis.window) {
     completeRecent(purpose, newPassword, consented) {
       return exclusive(async () => {
         if (
+          !["PASSWORD_CHANGE", "LOGOUT_ALL"].includes(purpose) ||
           !current() ||
           !grant ||
           grant.purpose !== purpose ||
@@ -609,6 +636,137 @@ export function createWebSession(browser = globalThis.window) {
         )
           throw new WebSessionBlocked();
       });
+    },
+    /** 탈퇴 전용 단회 증명과 세 동의를 소비하고 접근 회수/접수만 채택한다. 유실 명령은 재전송하지 않는다. */
+    deleteAccount(consented, sharedConfirmed, irreversibleConfirmed) {
+      return exclusive(async () => {
+        if (
+          !current() ||
+          !grant ||
+          grant.purpose !== "DELETE_ACCOUNT" ||
+          consented !== true ||
+          sharedConfirmed !== true ||
+          irreversibleConfirmed !== true
+        )
+          throw new WebSessionBlocked();
+        expiry(grant.expiresAt);
+        const token = access.token,
+          proof = grant.reauthGrant;
+        const pending = write({
+          format: 1,
+          epoch: access.epoch,
+          operation: "blocked",
+          attempt: uuid(),
+        });
+        const marker = parseMarker(pending);
+        clear("DELETE_COMMAND");
+        const fence = generation;
+        const result = await api.request(
+          "POST",
+          "/api/member/auth/account/delete",
+          { token, body: { reauthGrant: proof, requestKey: marker.attempt } },
+        );
+        fields(result, [
+          "state",
+          "eraseKey",
+          "receiptToken",
+          "receiptExpiresAt",
+          "requestId",
+        ]);
+        if (
+          result.state !== "ACCESS_REVOKED" ||
+          !UUID4.test(result.eraseKey) ||
+          typeof result.receiptToken !== "string" ||
+          !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(result.receiptToken) ||
+          expiry(result.receiptExpiresAt) > Date.now() + 90 * 86400000 ||
+          disposed ||
+          generation !== fence ||
+          read() !== pending ||
+          browser.document.visibilityState === "hidden"
+        )
+          throw new WebSessionBlocked();
+        erasure = result;
+        scheduleErasureExpiry();
+      });
+    },
+    /** 조회 기한만 UI에 제공하며 별도 영수증 비밀과 회원 자격은 노출하지 않는다. */
+    getErasureReceipt() {
+      if (!erasure) return null;
+      if (Date.parse(erasure.receiptExpiresAt) <= Date.now()) return null;
+      return { expiresAt: erasure.receiptExpiresAt };
+    },
+    /** 현재 문서의 단회 영수증을 명시 폐기하며 주소나 저장소로 복원하지 않는다. */
+    forgetErasureReceipt() {
+      clear("RECEIPT_CLOSED");
+    },
+    /** 무쿠키·무Bearer 영수증 조회만 수행하며 부분 파기를 완료로 추정하지 않는다. */
+    async getErasureStatus() {
+      const receipt = erasure;
+      if (!receipt) throw new WebSessionBlocked();
+      expiry(receipt.receiptExpiresAt);
+      const fence = generation,
+        observed = read();
+      try {
+        const value = await api.request(
+          "POST",
+          "/api/member/privacy/erase/status",
+          {
+            epoch: uuid(),
+            body: {
+              eraseKey: receipt.eraseKey,
+              receiptToken: receipt.receiptToken,
+            },
+          },
+        );
+        fields(value, [
+          "state",
+          "accessRevoked",
+          "primaryDone",
+          "externalDone",
+          "backupDone",
+          "completedAt",
+          "requestId",
+        ]);
+        if (
+          erasure !== receipt ||
+          disposed ||
+          fence !== generation ||
+          read() !== observed ||
+          browser.document.visibilityState === "hidden" ||
+          ![
+            "REQUESTED",
+            "PROCESSING",
+            "WAITING",
+            "COMPLETE",
+            "FAILED",
+          ].includes(value.state) ||
+          value.accessRevoked !== true ||
+          ["primaryDone", "externalDone", "backupDone"].some(
+            (key) => typeof value[key] !== "boolean",
+          ) ||
+          (value.completedAt !== null &&
+            (typeof value.completedAt !== "string" ||
+              !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(
+                value.completedAt,
+              ) ||
+              !Number.isFinite(Date.parse(value.completedAt)))) ||
+          (value.state === "COMPLETE" &&
+            (!value.primaryDone ||
+              !value.externalDone ||
+              !value.backupDone ||
+              value.completedAt === null)) ||
+          (value.state !== "COMPLETE" && value.completedAt !== null)
+        )
+          throw new WebSessionBlocked();
+        return value;
+      } catch (failure) {
+        if (
+          failure instanceof WebApiError &&
+          [401, 403, 404, 410].includes(failure.status)
+        )
+          clear("RECEIPT_UNAVAILABLE");
+        throw failure;
+      }
     },
     /** 원문 소비자의 폐기 함수를 등록한다. 반환 함수는 해당 구독만 해제한다. */
     onClear(listener) {

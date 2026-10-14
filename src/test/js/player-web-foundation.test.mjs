@@ -283,6 +283,251 @@ test("login revokes first and persists only non-secret marker; logout clears cur
   session.dispose();
 });
 
+/** 탈퇴 접수/조회만 합성하며 실제 회원 삭제나 전체 파기 완료를 만들지 않는다. */
+function erasureResponses(overrides = {}) {
+  const receipt = {
+    state: "ACCESS_REVOKED",
+    eraseKey: randomUUID(),
+    receiptToken: "B".repeat(42) + "A",
+    receiptExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+    requestId: randomUUID(),
+  };
+  return (path, options) => {
+    if (overrides[path]) return overrides[path](options, receipt);
+    if (path === "/api/member/auth/reauth/local")
+      return json({
+        purpose: JSON.parse(options.body).purpose,
+        reauthGrant: randomUUID() + "." + TOKEN,
+        expiresAt: new Date(Date.now() + 120000).toISOString(),
+        requestId: randomUUID(),
+      });
+    if (path === "/api/member/auth/account/delete") return json(receipt, 202);
+    if (path === "/api/member/privacy/erase/status")
+      return json({
+        state: "WAITING",
+        accessRevoked: true,
+        primaryDone: true,
+        externalDone: false,
+        backupDone: false,
+        completedAt: null,
+        requestId: randomUUID(),
+      });
+    return success(path, options);
+  };
+}
+
+test("deletion requires its own purpose and all three explicit consents before any POST", async () => {
+  const env = environment(erasureResponses());
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent("LOGOUT_ALL", randomUUID(), "synthetic-password");
+  await assert.rejects(
+    session.deleteAccount(true, true, true),
+    WebSessionBlocked,
+  );
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  for (const flags of [
+    [false, true, true],
+    [true, false, true],
+    [true, true, false],
+  ])
+    await assert.rejects(session.deleteAccount(...flags), WebSessionBlocked);
+  assert.equal(
+    env.calls.filter(({ path }) => path.endsWith("/account/delete")).length,
+    0,
+  );
+  await session.deleteAccount(true, true, true);
+  assert.equal(session.current(), false);
+  assert.ok(session.getErasureReceipt());
+  assert.doesNotMatch(env.shared.raw, /receiptToken|eraseKey/);
+  assert.equal(Object.keys(session.getErasureReceipt()).join(), "expiresAt");
+  session.dispose();
+});
+
+test("receipt status is cookie-free without Bearer and partial erasure is not full completion", async () => {
+  const env = environment(erasureResponses());
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  await session.deleteAccount(true, true, true);
+  const status = await session.getErasureStatus();
+  assert.equal(status.state, "WAITING");
+  assert.equal(status.backupDone, false);
+  const call = env.calls.find(({ path }) => path.endsWith("/erase/status"));
+  assert.equal(call.options.credentials, "omit");
+  assert.equal(call.options.headers.Authorization, undefined);
+  const value = JSON.parse(call.options.body);
+  assert.equal(Object.keys(value).sort().join(), "eraseKey,receiptToken");
+  session.forgetErasureReceipt();
+  assert.equal(session.getErasureReceipt(), null);
+  await assert.rejects(session.getErasureStatus(), WebSessionBlocked);
+  session.dispose();
+});
+
+test("lost accepted deletion never replays or recovers an absent receipt after reload", async () => {
+  const env = environment(
+    erasureResponses({
+      "/api/member/auth/account/delete": () => {
+        throw new TypeError("synthetic lost acceptance");
+      },
+    }),
+  );
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  await assert.rejects(session.deleteAccount(true, true, true));
+  await assert.rejects(
+    session.deleteAccount(true, true, true),
+    WebSessionBlocked,
+  );
+  assert.equal(
+    env.calls.filter(({ path }) => path.endsWith("/account/delete")).length,
+    1,
+  );
+  assert.equal(session.getErasureReceipt(), null);
+  const reloaded = createWebSession(env.browser);
+  await assert.rejects(reloaded.restore(), WebSessionBlocked);
+  session.dispose();
+  reloaded.dispose();
+});
+
+test("background after deletion destroys receipt and a late status cannot restore it", async () => {
+  let finish;
+  const env = environment(
+    erasureResponses({
+      "/api/member/privacy/erase/status": () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    }),
+  );
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  await session.deleteAccount(true, true, true);
+  const pending = session.getErasureStatus();
+  const rejected = assert.rejects(pending, WebSessionBlocked);
+  env.background();
+  env.foreground();
+  finish(
+    json({
+      state: "COMPLETE",
+      accessRevoked: true,
+      primaryDone: true,
+      externalDone: true,
+      backupDone: true,
+      completedAt: new Date().toISOString(),
+      requestId: randomUUID(),
+    }),
+  );
+  await rejected;
+  assert.equal(session.getErasureReceipt(), null);
+  session.dispose();
+});
+
+test("changing account views destroys a received receipt instead of restoring it on return", async () => {
+  const env = environment(erasureResponses());
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  await session.deleteAccount(true, true, true);
+  session.cancelPending();
+  assert.equal(session.getErasureReceipt(), null);
+  await assert.rejects(session.getErasureStatus(), WebSessionBlocked);
+  assert.equal(
+    env.calls.filter(({ path }) => path.endsWith("/erase/status")).length,
+    0,
+  );
+  session.dispose();
+});
+
+test("90-day absolute receipt expiry re-arms capped timers rather than expiring at 24 days", async (context) => {
+  const now = Date.now();
+  context.mock.timers.enable({ apis: ["setTimeout", "Date"], now });
+  const lifetime = 90 * 86400000;
+  const env = environment(
+    erasureResponses({
+      "/api/member/auth/account/delete": (_, receipt) =>
+        json(
+          {
+            ...receipt,
+            receiptExpiresAt: new Date(now + lifetime).toISOString(),
+          },
+          202,
+        ),
+    }),
+  );
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  await session.deleteAccount(true, true, true);
+  context.mock.timers.tick(2147483647);
+  assert.ok(session.getErasureReceipt());
+  context.mock.timers.tick(lifetime - 2147483647);
+  assert.equal(session.getErasureReceipt(), null);
+  session.dispose();
+});
+
+test("inconsistent COMPLETE is rejected and dependency failure does not invent a completed status", async () => {
+  let failed = false;
+  const env = environment(
+    erasureResponses({
+      "/api/member/privacy/erase/status": () =>
+        failed
+          ? json(
+              { code: "DEPENDENCY_UNAVAILABLE", requestId: randomUUID() },
+              503,
+            )
+          : json({
+              state: "COMPLETE",
+              accessRevoked: true,
+              primaryDone: true,
+              externalDone: false,
+              backupDone: false,
+              completedAt: new Date().toISOString(),
+              requestId: randomUUID(),
+            }),
+    }),
+  );
+  const session = createWebSession(env.browser);
+  await session.restore();
+  await session.verifyRecent(
+    "DELETE_ACCOUNT",
+    randomUUID(),
+    "synthetic-password",
+  );
+  await session.deleteAccount(true, true, true);
+  await assert.rejects(session.getErasureStatus(), WebSessionBlocked);
+  failed = true;
+  await assert.rejects(session.getErasureStatus(), WebApiError);
+  assert.ok(session.getErasureReceipt());
+  session.dispose();
+});
+
 test("lost refresh response leaves durable blocker and reload does not refresh again", async () => {
   const epoch = randomUUID();
   const env = environment(() => {

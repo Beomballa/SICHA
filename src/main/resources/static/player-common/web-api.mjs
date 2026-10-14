@@ -19,7 +19,9 @@ const SECURITY_POSTS = new Set([
   "/api/member/auth/reauth/local",
   "/api/member/auth/password/change",
   "/api/member/auth/logout-all",
+  "/api/member/auth/account/delete",
 ]);
+PUBLIC_POSTS.add("/api/member/privacy/erase/status");
 
 /** 기존 SOLO/COOP 고정 경로만 열고 query는 사건 목록의 단일 cursor/size에만 허용한다. */
 function gameRoute(method, raw) {
@@ -249,10 +251,11 @@ export function createWebApi(browser = globalThis.window) {
             path.endsWith("/invitations") ||
             path.endsWith("/report/proposals")))
           ? 201
-          : PUBLIC_POSTS.has(path) &&
-              ["/email/signup", "/password/reset"].some((suffix) =>
-                path.endsWith(suffix),
-              )
+          : (PUBLIC_POSTS.has(path) &&
+                ["/email/signup", "/password/reset"].some((suffix) =>
+                  path.endsWith(suffix),
+                )) ||
+              path === "/api/member/auth/account/delete"
             ? 202
             : 200)
       )

@@ -172,6 +172,7 @@
           >실행할 작업<select id="security-purpose">
             <option value="PASSWORD_CHANGE">비밀번호 변경</option>
             <option value="LOGOUT_ALL">모든 기기 로그아웃</option>
+            <option value="DELETE_ACCOUNT">회원 탈퇴 접수</option>
           </select></label
         >
         <form id="recent-form">
@@ -206,6 +207,22 @@
             작업으로 현재 화면을 포함한 모든 기기에서 로그아웃되는 것에
             동의합니다.</label
           >
+          <div id="deletion-consents" hidden>
+            <p>
+              탈퇴 접수는 취소할 수 없습니다. 진행 중 게임과 공동 보고서의
+              접근/원문에 영향을 주며 상대방 기록은 최소 요약만 남을 수
+              있습니다. 접근 회수와 주 저장소·외부·백업 파기는 별개입니다.
+            </p>
+            <label class="check-label"
+              ><input id="deletion-shared" type="checkbox" />진행 게임과 공동
+              자료에 미치는 영향을 확인했습니다.</label
+            >
+            <label class="check-label"
+              ><input id="deletion-irreversible" type="checkbox" />탈퇴 접수가
+              되돌릴 수 없으며 외부·백업 파기는 별도 확인이 필요함을
+              이해합니다.</label
+            >
+          </div>
           <div class="actions">
             <button class="primary-action" type="submit">
               선택한 작업 실행
@@ -217,6 +234,33 @@
             현재 로그인 로그아웃</button
           ><button id="cancel-recent" class="secondary-action" type="button">
             본인 확인 취소
+          </button>
+        </div>
+      </section>
+      <section
+        id="erasure"
+        class="section"
+        hidden
+        aria-labelledby="erasure-title"
+      >
+        <h2 id="erasure-title" tabindex="-1">회원 탈퇴 접수·파기 상태</h2>
+        <p>
+          접근 회수는 전체 파기 완료가 아닙니다. 영수증은 이 문서 메모리에만
+          남으며 새로고침·화면 이탈·배경 전환·계정 교체 뒤에는 복구할 수
+          없습니다.
+        </p>
+        <p id="erasure-expiry"></p>
+        <p
+          id="erasure-status"
+          class="notice-body"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <div class="actions">
+          <button id="erasure-read" class="secondary-action" type="button">
+            현재 파기 상태 직접 조회</button
+          ><button id="erasure-close" class="secondary-action" type="button">
+            영수증 닫고 폐기
           </button>
         </div>
       </section>

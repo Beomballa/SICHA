@@ -3,7 +3,7 @@ import { UUID4, WebApiError } from "./web-api.mjs";
 
 const element = (id) => document.getElementById(id);
 let session;
-let view = ["login", "signup", "recover", "security"].includes(
+let view = ["login", "signup", "recover", "security", "erasure"].includes(
   location.hash.slice(1),
 )
   ? location.hash.slice(1)
@@ -26,6 +26,8 @@ function purge() {
     "notice-version",
     "notice-body",
     "notice-contact",
+    "erasure-expiry",
+    "erasure-status",
   ])
     element(id).textContent = "";
   member = null;
@@ -88,6 +90,7 @@ function render() {
   element("login").hidden = view !== "login";
   element("email").hidden = !["signup", "recover"].includes(view);
   element("security").hidden = view !== "security" || !authenticated;
+  element("erasure").hidden = view !== "erasure";
   element("email-title").textContent =
     view === "recover" ? "계정 복구" : "회원가입";
   element("email-start").hidden = emailStage !== 0;
@@ -102,6 +105,11 @@ function render() {
   element("recent-form").hidden = recentVerified;
   element("security-complete").hidden = !recentVerified;
   const changing = element("security-purpose").value === "PASSWORD_CHANGE";
+  const deleting = element("security-purpose").value === "DELETE_ACCOUNT";
+  element("deletion-consents").hidden = !deleting;
+  element("deletion-shared").required = element(
+    "deletion-irreversible",
+  ).required = deleting && recentVerified;
   element("new-password-fields").hidden = !changing;
   element("new-password").required = changing && recentVerified;
   element("new-confirm").required = changing && recentVerified;
@@ -110,6 +118,7 @@ function render() {
     : "";
   for (const button of document.querySelectorAll("button"))
     button.disabled = busy || !session;
+  element("erasure-read").disabled ||= !session?.getErasureReceipt();
   for (const input of document.querySelectorAll("input, select"))
     input.disabled = busy || !session;
   for (const button of document.querySelectorAll("[data-view]"))
@@ -138,7 +147,7 @@ function selectView(next) {
 }
 
 /** 사용자 명시 동작만 한 번 실행하며 재시도는 사용자에게 남긴다. */
-async function run(action, success) {
+async function run(action, success, deleting = false) {
   if (busy || !session) return;
   busy = true;
   element("error").hidden = true;
@@ -146,7 +155,8 @@ async function run(action, success) {
   render();
   try {
     await action();
-    element("status").textContent = success;
+    element("status").textContent =
+      typeof success === "function" ? success() : success;
   } catch (failure) {
     element("error").textContent = errorText(failure);
     element("error").hidden = false;
@@ -156,6 +166,13 @@ async function run(action, success) {
       if (view === "security") view = "login";
     }
     if (view === "signup" || view === "recover") emailStage = 0;
+    if (deleting) {
+      view = "erasure";
+      element("error").textContent =
+        "탈퇴 접수 결과를 확인하지 못했습니다. 자동 재전송하거나 로그인 결과로 탈퇴를 추정하지 않습니다. 받은 영수증이 없어 이 문서에서 파기 상태를 조회할 수 없습니다.";
+      element("erasure-status").textContent =
+        "접수 여부와 영수증 수신을 확인하지 못했습니다. 파기 완료가 아닙니다.";
+    }
     recentVerified = false;
   } finally {
     busy = false;
@@ -181,7 +198,10 @@ function newPassword(passwordId, confirmId) {
 function submit(id, handler, success) {
   element(id).addEventListener("submit", (event) => {
     event.preventDefault();
-    void run(handler, success);
+    const deleting =
+      id === "security-complete" &&
+      element("security-purpose").value === "DELETE_ACCOUNT";
+    void run(handler, success, deleting);
   });
 }
 
@@ -263,6 +283,19 @@ submit(
   "security-complete",
   async () => {
     const purpose = element("security-purpose").value;
+    if (purpose === "DELETE_ACCOUNT") {
+      await session.deleteAccount(
+        element("security-consent").checked,
+        element("deletion-shared").checked,
+        element("deletion-irreversible").checked,
+      );
+      view = "erasure";
+      element("erasure-expiry").textContent =
+        "영수증 조회 가능 기한: " + session.getErasureReceipt().expiresAt;
+      element("erasure-status").textContent =
+        "접근이 회수되고 탈퇴가 접수되었습니다. 주 저장소·외부·백업 파기는 아직 조회하지 않았습니다.";
+      return;
+    }
     const password =
       purpose === "PASSWORD_CHANGE"
         ? newPassword("new-password", "new-confirm")
@@ -274,7 +307,10 @@ submit(
     );
     view = "login";
   },
-  "선택한 작업을 완료하고 모든 기기의 로그인을 회수했습니다. 다시 로그인해 주세요.",
+  () =>
+    element("security-purpose").value === "DELETE_ACCOUNT"
+      ? "접근이 회수되고 탈퇴가 접수되었습니다. 전체 파기 완료는 별도 상태 조회로 확인합니다."
+      : "선택한 작업을 완료하고 모든 기기의 로그인을 회수했습니다. 다시 로그인해 주세요.",
 );
 element("logout").addEventListener(
   "click",
@@ -294,7 +330,39 @@ element("security-purpose").addEventListener("change", () => {
   for (const id of ["recent-password", "new-password", "new-confirm"])
     element(id).value = "";
   element("security-consent").checked = false;
+  element("deletion-shared").checked = element(
+    "deletion-irreversible",
+  ).checked = false;
   render();
+});
+element("erasure-read").addEventListener(
+  "click",
+  () =>
+    void run(async () => {
+      element("erasure-status").textContent =
+        "현재 파기 상태를 아직 확인하지 못했습니다.";
+      const value = await session.getErasureStatus();
+      element("erasure-status").textContent =
+        "서버 상태: " +
+        value.state +
+        "\n접근 회수: " +
+        value.accessRevoked +
+        "\n주 저장소 파기: " +
+        value.primaryDone +
+        "\n외부 파기: " +
+        value.externalDone +
+        "\n백업 파기: " +
+        value.backupDone +
+        "\n" +
+        (value.state === "COMPLETE"
+          ? "서버가 전체 파기 완료를 확인했습니다."
+          : "전체 파기 완료가 아닙니다. 미완료 대상은 별도 확인이 필요합니다.");
+    }, "서버가 제공한 파기 상태를 조회했습니다."),
+);
+element("erasure-close").addEventListener("click", () => {
+  session.forgetErasureReceipt();
+  element("erasure-status").textContent =
+    "이 문서의 영수증을 폐기했습니다. 새로고침이나 이전 주소로 복원할 수 없습니다.";
 });
 for (const id of ["new-password", "new-confirm"])
   element(id).addEventListener("input", () => {
@@ -302,7 +370,7 @@ for (const id of ["new-password", "new-confirm"])
   });
 window.addEventListener("hashchange", () => {
   const next = location.hash.slice(1);
-  if (["login", "signup", "recover", "security"].includes(next))
+  if (["login", "signup", "recover", "security", "erasure"].includes(next))
     selectView(next);
 });
 

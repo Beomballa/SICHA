@@ -177,6 +177,77 @@ public class NativeAccountWebIT extends LocalMemberAuthIT {
         }
     }
 
+    /** 폐기 계정만 탈퇴 접수하여 실제 HTML/HTTPS의 명시 동의·영수증·배경 폐기를 검증한다. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void nativeDeletionReceiptDoesNotClaimFullErasure(boolean loseReceipt) throws Exception {
+        String email = "erase-web-" + UUID.randomUUID() + "@example.invalid";
+        account(email);
+        Path receipt = Files.createTempFile("sicha-erasure-browser-", ".json");
+        Path errors = Files.createTempFile("sicha-erasure-browser-error-", ".txt");
+        Process browser = null;
+        try {
+            browser =
+                    new ProcessBuilder("node", "src/test/browser/native-erasure.mjs")
+                            .redirectOutput(receipt.toFile())
+                            .redirectError(errors.toFile())
+                            .start();
+            try (var input = browser.getOutputStream()) {
+                JSON.writeValue(
+                        input,
+                        Map.of(
+                                "origin",
+                                ORIGIN,
+                                "email",
+                                email,
+                                "password",
+                                "Synthetic-member-password-987!",
+                                "loseReceipt",
+                                loseReceipt));
+            }
+            if (!browser.waitFor(90, TimeUnit.SECONDS)) {
+                browser.destroyForcibly();
+                throw new AssertionError("Native erasure browser deadline exceeded");
+            }
+            assertThat(browser.exitValue())
+                    .withFailMessage("Erasure browser: %s", Files.readString(errors))
+                    .isZero();
+            var result = JSON.readTree(receipt.toFile());
+            assertThat(result.path("ok").asBoolean()).isTrue();
+            assertThat(result.path("deletionPosts").asInt()).isEqualTo(1);
+            assertThat(result.path("statusPosts").asInt()).isEqualTo(loseReceipt ? 0 : 1);
+            String lookup = java.util.HexFormat.of().formatHex(crypto.memberEmailHash(email));
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM member_identity i JOIN member_account a"
+                                            + " ON a.id=i.member_id WHERE i.lookup_hash=? AND"
+                                            + " a.state='DELETED' AND a.deleted_at IS NOT NULL",
+                                    Integer.class,
+                                    lookup))
+                    .isEqualTo(1);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM member_session s JOIN member_identity i"
+                                            + " ON i.id=s.identity_id WHERE i.lookup_hash=? AND"
+                                            + " s.revoked_at IS NULL",
+                                    Integer.class,
+                                    lookup))
+                    .isZero();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM privacy_erase p JOIN member_identity i ON"
+                                            + " i.member_id=p.member_id WHERE i.lookup_hash=? AND"
+                                            + " p.sealed_at IS NOT NULL AND p.completed_at IS NULL",
+                                    Integer.class,
+                                    lookup))
+                    .isEqualTo(1);
+        } finally {
+            if (browser != null && browser.isAlive()) browser.destroyForcibly();
+            Files.deleteIfExists(receipt);
+            Files.deleteIfExists(errors);
+        }
+    }
+
     /** 실제 회원과 제품 문서에서 수집 미준비를 가짜 빈 목록이나 공개 사건으로 바꾸지 않는다. */
     @Test
     void soloCatalogDoesNotBypassRealCollectionGate() throws Exception {
