@@ -40,11 +40,13 @@ class ReviewRecordSchemaIT {
                         jdbc.queryForObject(
                                 "SELECT max(version::integer) FROM public.flyway_schema_history"
                                         + " WHERE success",
-                                Integer.class)).isEqualTo(42);
+                                Integer.class))
+                .isEqualTo(43);
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT count(*) FROM public.flyway_schema_history WHERE success",
-                                Integer.class)).isEqualTo(42);
+                                Integer.class))
+                .isEqualTo(43);
     }
 
     @AfterAll

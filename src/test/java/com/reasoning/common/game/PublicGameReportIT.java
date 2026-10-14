@@ -38,7 +38,7 @@ class PublicGameReportIT {
                                 "SELECT max(version::integer) FROM flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(42);
+                .isEqualTo(43);
         String action =
                 db.queryForObject(
                         "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE"

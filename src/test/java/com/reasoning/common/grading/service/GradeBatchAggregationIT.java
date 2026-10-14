@@ -74,7 +74,7 @@ class GradeBatchAggregationIT {
     private UUID key;
     private FrozenSnapshot frozen;
 
-    /** 기존 helper의 digest 고정 PostgreSQL16.10과 최신 실제 V21을 사용한다. 키·설치는 SQL 밖에서 조립한다. */
+    /** 기존 helper의 digest 고정 PostgreSQL16.10과 최신 실제 V43을 사용한다. 키·설치는 SQL 밖에서 조립한다. */
     @BeforeAll
     static void open() {
         postgres = GradeSchemaIT.startDatabase();
@@ -84,7 +84,8 @@ class GradeBatchAggregationIT {
                         jdbc.queryForObject(
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
-                                Integer.class)).isEqualTo(42);
+                                Integer.class))
+                .isEqualTo(43);
         var dictionary =
                 new GradeDictionary(CODE, List.of(new GradeDictionary.Term("ONE", "개념", "합성")));
         var settings =

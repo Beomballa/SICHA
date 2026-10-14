@@ -44,7 +44,7 @@ class MemberErasureSchemaIT {
                         .dataSource(source)
                         .resourceProvider(new EmbeddedSqlResourceProvider())
                         .load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(42);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(43);
         flyway.validate();
         long admin =
                 db.queryForObject(

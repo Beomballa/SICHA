@@ -147,7 +147,10 @@ public final class OriginalSqlCatalog {
                             "20ec317a4f687bf024f893c8f7fb6ad5e16534639b6080298a69ce78ef9ce6ef"),
                     Map.entry(
                             "V42__public_game_erasure.sql",
-                            "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab"));
+                            "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab"),
+                    Map.entry(
+                            "V43__member_auth_audit_retention.sql",
+                            "6c6411750cf9cdbbf5891bb091302bb3ad012a339db67026d8d0b04fd310d0dc"));
 
     private static final List<Entry> ENTRIES =
             validate(
@@ -193,12 +196,13 @@ public final class OriginalSqlCatalog {
                             new Entry("V39__blind_eligibility.sql", sql39()),
                             new Entry("V40__exposure_source_erasure.sql", sql40()),
                             new Entry("V41__test_retention_deadlines.sql", sql41()),
-                            new Entry("V42__public_game_erasure.sql", sql42())));
+                            new Entry("V42__public_game_erasure.sql", sql42()),
+                            new Entry("V43__member_auth_audit_retention.sql", sql43())));
 
     /**
      * 완전성과 이름·바이트 해시가 검증된 원본 전체를 반환한다.
      *
-     * @return 수정 불가능한 전체 42개 원본 목록
+     * @return 수정 불가능한 전체 43개 원본 목록
      */
     public static List<Entry> entries() {
         return ENTRIES;
@@ -6901,6 +6905,144 @@ public final class OriginalSqlCatalog {
              role_name,CASE WHEN executor.grantable THEN ' WITH GRANT OPTION' ELSE '' END);
          END LOOP;
         END $$;
+        """;
+    }
+
+    /** V43 회원 인증 감사 만료와 최소 영수증 원본을 반환한다. */
+    private static String sql43() {
+        return """
+        -- 회원 인증 감사의 저장된 만료 시계만 소비한다. 운영 역할 생성·권한 부여는 하지 않는다.
+        CREATE TABLE public.member_auth_audit_cleanup (
+          operation_key uuid NOT NULL PRIMARY KEY,
+          policy_ref varchar(40) NOT NULL CHECK (policy_ref='DATA-LIFECYCLE-01'),
+          deleted_count integer NOT NULL CHECK (deleted_count BETWEEN 1 AND 100),
+          completed_at timestamptz NOT NULL,
+          success_code varchar(24) NOT NULL CHECK (success_code='EXPIRED_REMOVED'),
+          receipt_expires_at timestamptz NOT NULL,
+          CONSTRAINT ck_maac_expiry CHECK (receipt_expires_at>completed_at AND
+            receipt_expires_at<=completed_at+interval '2160 hours')
+        );
+        CREATE INDEX ix_maa_due ON public.member_auth_audit(purge_at,id);
+        CREATE INDEX ix_maa_member_due ON public.member_auth_audit(member_id,purge_at,id);
+        CREATE INDEX ix_maac_due ON public.member_auth_audit_cleanup(receipt_expires_at,operation_key);
+
+        -- 모든 상태의 파기 참조는 PRIMARY 소유다. NULL 감사에는 회원을 추측하지 않는다.
+        CREATE FUNCTION public.member_auth_audit_expiry_eligible(owner_member bigint) RETURNS boolean
+        LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+          SELECT owner_member IS NULL OR (
+            EXISTS (SELECT 1 FROM public.member_account m WHERE m.id=owner_member AND m.state IN ('ACTIVE','BLOCKED'))
+            AND NOT EXISTS (SELECT 1 FROM public.privacy_erase e WHERE e.member_id=owner_member)
+            AND NOT EXISTS (SELECT 1 FROM public.privacy_target t WHERE t.member_id=owner_member)
+            AND NOT EXISTS (SELECT 1 FROM public.game_member g JOIN public.privacy_target t
+              ON t.room_id=g.room_id OR t.game_member_id=g.id WHERE g.member_id=owner_member)
+            AND NOT EXISTS (SELECT 1 FROM public.test_member m JOIN public.test_member peer
+              ON peer.test_id=m.test_id JOIN public.privacy_erase e ON e.member_id=peer.member_id
+              WHERE m.member_id=owner_member)
+            AND NOT EXISTS (SELECT 1 FROM public.test_member m JOIN public.privacy_target t
+              ON t.test_id=m.test_id WHERE m.member_id=owner_member)
+          );
+        $$;
+
+        -- 기존 실제 PRIMARY 허가는 그대로 유지하고 감사 테이블에만 만료 권한을 추가한다.
+        CREATE FUNCTION public.guard_member_auth_audit_expiry_delete() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+        BEGIN
+          IF public.privacy_primary_delete_allowed(OLD.member_id,NULL) IS TRUE THEN
+            RETURN OLD;
+          END IF;
+          IF (current_user=(SELECT pg_catalog.pg_get_userbyid(p.proowner) FROM pg_catalog.pg_proc p
+               WHERE p.oid=pg_catalog.to_regprocedure('public.consume_member_auth_audit_expiry(integer)'))
+              AND OLD.purge_at<=pg_catalog.clock_timestamp()
+              AND public.member_auth_audit_expiry_eligible(OLD.member_id) IS TRUE) IS NOT TRUE THEN
+            RAISE EXCEPTION 'member audit expiry deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+        END;
+        $$;
+        DROP TRIGGER tr_member_auth_audit_erase ON public.member_auth_audit;
+        CREATE TRIGGER tr_member_auth_audit_erase BEFORE DELETE ON public.member_auth_audit
+        FOR EACH ROW EXECUTE FUNCTION public.guard_member_auth_audit_expiry_delete();
+
+        -- 영수증은 소유한 소비자의 INSERT와 만료 DELETE만 허용한다. 소유자·superuser의 변조 방지는 아니다.
+        CREATE FUNCTION public.guard_member_auth_audit_cleanup() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+        BEGIN
+          IF TG_OP IN ('UPDATE','TRUNCATE') OR (current_user=(SELECT pg_catalog.pg_get_userbyid(p.proowner)
+              FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_member_auth_audit_expiry(integer)'))) IS NOT TRUE THEN
+            RAISE EXCEPTION 'member audit receipt mutation unauthorized' USING ERRCODE='42501';
+          END IF;
+          IF TG_OP='DELETE' THEN
+            IF (OLD.receipt_expires_at<=pg_catalog.clock_timestamp()) IS NOT TRUE THEN
+              RAISE EXCEPTION 'member audit receipt not expired' USING ERRCODE='42501';
+            END IF;
+            RETURN OLD;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER tr_maac_row BEFORE INSERT OR UPDATE OR DELETE ON public.member_auth_audit_cleanup
+        FOR EACH ROW EXECUTE FUNCTION public.guard_member_auth_audit_cleanup();
+        CREATE TRIGGER tr_maac_truncate BEFORE TRUNCATE ON public.member_auth_audit_cleanup
+        FOR EACH STATEMENT EXECUTE FUNCTION public.guard_member_auth_audit_cleanup();
+
+        -- 1..100의 전역 감사 상한과 별도 영수증 상한이다. 영수증 정리부터 수행하며 어느 쓰기 실패도 전체 호출을 롤백한다.
+        -- audits는 삭제 감사 수, receipts는 삭제한 만료 영수증 수, operation_key는 새 감사 배치 영수증 UUID다(감사 0이면 NULL).
+        CREATE FUNCTION public.consume_member_auth_audit_expiry(batch_limit integer)
+        RETURNS TABLE(audits integer, receipts integer, operation_key uuid)
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+        DECLARE parents bigint[]; completed timestamptz;
+        BEGIN
+          IF batch_limit IS NULL OR batch_limit<1 OR batch_limit>100 THEN
+            RAISE EXCEPTION 'member audit expiry limit must be 1..100' USING ERRCODE='22023';
+          END IF;
+          WITH candidates AS MATERIALIZED (
+            SELECT r.operation_key FROM public.member_auth_audit_cleanup r
+            WHERE r.receipt_expires_at<=pg_catalog.clock_timestamp()
+            ORDER BY r.receipt_expires_at,r.operation_key LIMIT batch_limit FOR UPDATE SKIP LOCKED
+          ), removed AS (
+            DELETE FROM public.member_auth_audit_cleanup r USING candidates c
+            WHERE r.operation_key=c.operation_key AND r.receipt_expires_at<=pg_catalog.clock_timestamp() RETURNING 1
+          ) SELECT count(*)::integer INTO receipts FROM removed;
+
+          -- 적격 부모를 정렬해 최대 상한만 잠그고 이미 잠긴 부모는 건너뛴다. 이후 session/game/관리자 잠금은 없다.
+          SELECT pg_catalog.array_agg(locked.id ORDER BY locked.id) INTO parents FROM (
+            SELECT m.id FROM public.member_account m WHERE m.id IN (
+              SELECT candidate.id FROM public.member_account candidate
+              WHERE public.member_auth_audit_expiry_eligible(candidate.id) IS TRUE AND EXISTS (
+                SELECT 1 FROM public.member_auth_audit a WHERE a.member_id=candidate.id
+                  AND a.purge_at<=pg_catalog.clock_timestamp())
+              )
+            ORDER BY m.id LIMIT batch_limit FOR UPDATE OF m SKIP LOCKED
+          ) locked;
+          WITH candidates AS MATERIALIZED (
+            SELECT a.id FROM public.member_auth_audit a
+            WHERE a.purge_at<=pg_catalog.clock_timestamp()
+              AND (a.member_id IS NULL OR a.member_id=ANY(parents))
+              AND public.member_auth_audit_expiry_eligible(a.member_id) IS TRUE
+            ORDER BY a.purge_at,a.id LIMIT batch_limit FOR UPDATE OF a SKIP LOCKED
+          ), removed AS (
+            DELETE FROM public.member_auth_audit a USING candidates c
+            WHERE a.id=c.id AND a.purge_at<=pg_catalog.clock_timestamp()
+              AND (a.member_id IS NULL OR a.member_id=ANY(parents))
+              AND public.member_auth_audit_expiry_eligible(a.member_id) IS TRUE RETURNING 1
+          ) SELECT count(*)::integer INTO audits FROM removed;
+          operation_key:=NULL;
+          IF audits>0 THEN
+            operation_key:=pg_catalog.gen_random_uuid();
+            completed:=pg_catalog.clock_timestamp();
+            INSERT INTO public.member_auth_audit_cleanup(operation_key,policy_ref,deleted_count,
+              completed_at,success_code,receipt_expires_at)
+            VALUES (operation_key,'DATA-LIFECYCLE-01',audits,completed,'EXPIRED_REMOVED',completed+interval '2160 hours');
+          END IF;
+          RETURN NEXT;
+        END;
+        $$;
+        REVOKE ALL ON TABLE public.member_auth_audit_cleanup FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.consume_member_auth_audit_expiry(integer),
+          public.member_auth_audit_expiry_eligible(bigint),public.guard_member_auth_audit_expiry_delete(),
+          public.guard_member_auth_audit_cleanup() FROM PUBLIC;
+        COMMENT ON TABLE public.member_auth_audit_cleanup IS '회원 인증 감사 만료 배치의 최소 원자 영수증. 식별자·해시·원문·출처 시각 범위 없음. 최대90일.';
+        COMMENT ON FUNCTION public.consume_member_auth_audit_expiry(integer) IS '저장된 purge_at<=DB 시계인 적격 감사만 전역1..100건 삭제한다. 만료 영수증은 먼저 별도 동일 상한으로 삭제한다. 감사 삭제와 새 영수증은 원자적이며 운영 실행 권한은 별도 명시해야 한다.';
         """;
     }
 }

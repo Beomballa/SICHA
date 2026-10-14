@@ -28,7 +28,7 @@ class GeneralExecutionSchemaIT {
                                 "SELECT max(version::integer) FROM public.flyway_schema_history"
                                         + " WHERE success",
                                 Integer.class))
-                .isEqualTo(42);
+                .isEqualTo(43);
     }
 
     @AfterAll

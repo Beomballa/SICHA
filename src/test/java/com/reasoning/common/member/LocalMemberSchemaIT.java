@@ -49,7 +49,7 @@ class LocalMemberSchemaIT {
         postgres.start();
         jdbc = jdbc(postgres);
         var migration = flyway(postgres, null);
-        assertThat(migration.migrate().migrationsExecuted).isEqualTo(42);
+        assertThat(migration.migrate().migrationsExecuted).isEqualTo(43);
         assertThat(migration.migrate().migrationsExecuted).isZero();
         migration.validate();
         var properties = new AuthProperties();
@@ -415,17 +415,15 @@ class LocalMemberSchemaIT {
                 id(
                         "INSERT INTO"
                             + " public.member_auth_audit(event_key,request_id,action,result_code,created_at,purge_at)"
-                            + " VALUES (gen_random_uuid(),gen_random_uuid(),'LOGIN_LOCAL','DENIED',"
-                                + CLOCK
-                                + ","
-                                + CLOCK
-                                + "+interval '1 hour') RETURNING id");
+                            + " VALUES"
+                            + " (gen_random_uuid(),gen_random_uuid(),'LOGIN_LOCAL','DENIED',clock_timestamp(),clock_timestamp()+interval"
+                            + " '1 hour') RETURNING id");
         rejected(
                 "UPDATE public.member_auth_audit SET result_code=result_code WHERE id=" + audit,
                 "member_auth_audit append only");
         rejected(
                 "DELETE FROM public.member_auth_audit WHERE id=" + audit,
-                "primary deletion unauthorized");
+                "member audit expiry deletion unauthorized");
         rejected("TRUNCATE public.member_auth_audit", "member_auth_audit append only");
     }
 

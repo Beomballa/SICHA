@@ -34,7 +34,8 @@ class GameGradeSourceIT extends PlaytestReportFixture {
     void actualAcceptedGameReportPinsJobAndRejectsOtherParents() throws Exception {
         Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
-                .locations("filesystem:src/main/resources/db/migration")
+                .resourceProvider(new com.reasoning.common.migration.EmbeddedSqlResourceProvider())
+                .locations("classpath:db/migration")
                 .load()
                 .migrate();
         assertThat(
@@ -42,7 +43,7 @@ class GameGradeSourceIT extends PlaytestReportFixture {
                                 "SELECT max(version::integer) FROM flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(42);
+                .isEqualTo(43);
         playtestPolicy();
         var selected = account("game-grade-" + UUID.randomUUID() + "@example.invalid");
         String token = selected.path("accessToken").asText();

@@ -131,25 +131,44 @@ public class MemberAuthConfiguration {
                         java.util.Objects.requireNonNull(db.getDataSource())));
     }
 
+    /**
+     * 예약 활성화와 무관하게 같은 회원 연결 원천의 감사 만료 소비자를 조립한다.
+     *
+     * @param db 회원 저장소와 같은 연결 원천을 가진 템플릿
+     * @return SQL을 실행하지 않고 구성한 감사·영수증 소유 거래 서비스
+     * @throws NullPointerException 연결 원천이 없는 경우
+     */
+    @Bean
+    public MemberAuthAuditCleanupService memberAuthAuditCleanupService(JdbcTemplate db) {
+        return new MemberAuthAuditCleanupService(
+                db,
+                new DataSourceTransactionManager(
+                        java.util.Objects.requireNonNull(db.getDataSource())));
+    }
+
     @Configuration(proxyBeanMethods = false)
     public static class CleanupConfiguration {
         /**
          * 명시 활성화에만 정리 실행기를 생성하며 수집·웹 스위치는 참조하지 않는다.
          *
-         * <p>접속 근거·인증 자료·제한 창은 각각 확정되며 후속 실패가 앞 확정을 되돌리지 않는다.
+         * <p>접속 근거·인증 자료·제한 창·감사와 영수증은 독립 확정되며 후속 실패가 앞 확정을 되돌리지 않는다.
          *
          * @param presence 게임 영역이 제공하는 필수 선행 정리
          * @param cleanup 종류별 100행 이하로 정리할 서비스
+         * @param audit 감사와 만료 영수증 각각 100행 이하로 정리할 필수 서비스
          * @return 컨텍스트가 시작·종료하는 단일 스레드 실행기
          */
         @Bean
         @ConditionalOnProperty(name = "app.member-auth.cleanup-enabled", havingValue = "true")
         public CleanupLifecycle memberAuthCleanupLifecycle(
-                PresenceCleanup presence, MemberAuthCleanupService cleanup) {
+                PresenceCleanup presence,
+                MemberAuthCleanupService cleanup,
+                MemberAuthAuditCleanupService audit) {
             return new CleanupLifecycle(
                     () -> {
                         presence.cleanup(100);
                         cleanup.cleanup(100);
+                        audit.cleanup(100);
                     });
         }
     }

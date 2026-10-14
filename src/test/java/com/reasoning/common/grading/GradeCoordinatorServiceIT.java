@@ -72,7 +72,8 @@ class GradeCoordinatorServiceIT {
                         jdbc.queryForObject(
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
-                                Integer.class)).isEqualTo(42);
+                                Integer.class))
+                .isEqualTo(43);
     }
 
     @AfterAll

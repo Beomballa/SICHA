@@ -34,7 +34,7 @@ class PublicGameIT {
                                 "SELECT max(version::integer) FROM flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(42);
+                .isEqualTo(43);
         assertThat(db.queryForObject("SELECT to_regclass('public.story_release')", String.class))
                 .isEqualTo("story_release");
         assertThat(

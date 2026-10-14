@@ -102,7 +102,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     "dd0e83649de49ca6d1262ab3e4ba3d89bbf87546b3157cd5b8827d526f771ca2",
                     "a5773a08a2f56802175dc1730d79749e894ce6bdc238ca6de07e99458aee1a8d",
                     "20ec317a4f687bf024f893c8f7fb6ad5e16534639b6080298a69ce78ef9ce6ef",
-                    "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab");
+                    "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab",
+                    "6c6411750cf9cdbbf5891bb091302bb3ad012a339db67026d8d0b04fd310d0dc");
 
     @Container static final PostgreSQLContainer<?> postgres = database();
 
@@ -132,9 +133,9 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     void completeCatalogReadersAndIntegrityFailures() throws Exception {
         var entries = OriginalSqlCatalog.entries();
         var provider = new EmbeddedSqlResourceProvider();
-        assertThat(entries).hasSize(42);
+        assertThat(entries).hasSize(43);
         assertThat(entries.stream().map(OriginalSqlCatalog.Entry::name).distinct().count())
-                .isEqualTo(42);
+                .isEqualTo(43);
         int totalBytes = 0;
         for (int index = 0; index < entries.size(); index++) {
             var entry = entries.get(index);
@@ -157,12 +158,12 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                 assertThat(text(reopened)).isEqualTo(entry.sql());
             }
         }
-        assertThat(totalBytes).isEqualTo(364224);
+        assertThat(totalBytes).isEqualTo(372366);
         assertThat(provider.getResource("missing.sql")).isNull();
         assertThat(provider.getResource(entries.getFirst().name().toLowerCase())).isNull();
         assertThat(provider.getResource("db/migration/" + entries.getFirst().name())).isNull();
         assertThat(provider.getResource(entries.getFirst().name() + ".conf")).isNull();
-        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(42);
+        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(43);
         assertThat(provider.getResources("V1__", new String[] {".txt", ".sql"})).hasSize(1);
         assertThat(provider.getResources("R", new String[] {""})).isEmpty();
         assertThat(provider.getResources("", new String[] {})).isEmpty();
@@ -195,11 +196,11 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     /** 정상 Boot 시작 뒤 실제 Hibernate 조회와 JDBC 세션 왕복 및 원본 SQL 전체 구조를 비교한다. */
     @Test
     void freshBootSqlHistorySchemaAndSessionReadiness() throws Exception {
-        assertThat(readiness.migrations()).isEqualTo(42);
+        assertThat(readiness.migrations()).isEqualTo(43);
         assertThat(bootFlyway.getConfiguration().getResourceProvider())
                 .isInstanceOf(EmbeddedSqlResourceProvider.class);
         var before = history(jdbc);
-        assertThat(before).hasSize(42);
+        assertThat(before).hasSize(43);
         assertThat(bootFlyway.migrate().migrationsExecuted).isZero();
         bootFlyway.validate();
         assertThat(history(jdbc)).isEqualTo(before);
@@ -231,8 +232,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
         }
         try (var legacyDatabase = database()) {
             legacyDatabase.start();
-            var legacy = legacy(legacyDatabase, "42");
-            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(42);
+            var legacy = legacy(legacyDatabase, "43");
+            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(43);
             legacy.validate();
             assertSqlIdentity(bootFlyway, legacy);
             assertThat(schema(jdbc)).isEqualTo(schema(jdbc(legacyDatabase)));
@@ -330,19 +331,190 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                 StandardCharsets.UTF_8);
     }
 
-    /** 빈 폐기형 DB에 embedded SQL42를 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
+    /** 빈 폐기형 DB에 embedded SQL43을 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
     @Test
-    void freshEmbeddedFortyTwoThenZero() {
+    void freshEmbeddedFortyThreeThenZero() {
         try (var database = database()) {
             database.start();
             var embedded = embedded(database);
-            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(42);
+            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(43);
             var jdbc = jdbc(database);
             var before = history(jdbc);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
             embedded.validate();
             assertSqlIdentity(embedded, bootFlyway);
             assertThat(history(jdbc)).isEqualTo(before);
+        }
+    }
+
+    /** V42 감사·PRIMARY 권한·공통 가드는 보존하고 V43 한 건만 전진한다. */
+    @Test
+    void originalFortyTwoToAuditFortyThreePreservesHistoryAndPrimaryAuthority() throws Exception {
+        try (var database = database()) {
+            database.start();
+            assertThat(embedded(database, "42").migrate().migrationsExecuted).isEqualTo(42);
+            var jdbc = jdbc(database);
+            long policy = syntheticMemberErasurePolicy(jdbc);
+            long member = syntheticErasureMember(jdbc, policy);
+            long root =
+                    jdbc.queryForObject(
+                            """
+                            INSERT INTO public.privacy_erase(erase_key,member_id,policy_id,reason_code,locator_cipher,
+                              receipt_hash,receipt_until,backup_until)
+                            VALUES (gen_random_uuid(),?,?,'ACCOUNT_REQUEST',decode(repeat('01',32),'hex'),repeat('a',64),
+                              clock_timestamp()+interval '89 days',clock_timestamp()+interval '34 days') RETURNING id
+                            """,
+                            Long.class,
+                            member,
+                            policy);
+            long target =
+                    jdbc.queryForObject(
+                            """
+                            INSERT INTO public.privacy_target(erase_id,target_key,kind,source_kind,member_id,locator_cipher)
+                            VALUES (?,gen_random_uuid(),'PRIMARY','MEMBER',?,decode(repeat('02',32),'hex')) RETURNING id
+                            """,
+                            Long.class,
+                            root,
+                            member);
+            jdbc.update(
+                    "INSERT INTO public.privacy_target(erase_id,target_key,kind,source_kind) VALUES"
+                        + " (?,gen_random_uuid(),'BACKUP','NONE'),(?,gen_random_uuid(),'RESTORE_GUARD','NONE')",
+                    root,
+                    root);
+            jdbc.update(
+                    """
+                    WITH clock AS (SELECT clock_timestamp() AS instant)
+                    INSERT INTO public.member_auth_audit(event_key,member_id,request_id,action,result_code,created_at,purge_at,auth_rev)
+                    SELECT gen_random_uuid(),?,gen_random_uuid(),'LOGIN_LOCAL','DENIED',instant-interval '2 hours',
+                      instant+deadline,0 FROM clock CROSS JOIN (VALUES (interval '-1 second'),(interval '1 hour')) AS deadlines(deadline)
+                    """,
+                    member);
+            jdbc.update(
+                    "UPDATE public.member_account SET state='DELETED',deleted_at=clock_timestamp()"
+                            + " WHERE id=?",
+                    member);
+            jdbc.update(
+                    "UPDATE public.privacy_erase SET"
+                        + " blocked_at=clock_timestamp(),sealed_at=clock_timestamp(),target_count=3,state='PROCESSING'"
+                        + " WHERE id=?",
+                    root);
+            jdbc.update(
+                    "UPDATE public.privacy_target SET"
+                        + " state='RUNNING',lease_until=clock_timestamp()+interval '1 hour' WHERE"
+                        + " id=?",
+                    target);
+            String role = "primary_v43_" + UUID.randomUUID().toString().replace("-", "");
+            String password = "synthetic-primary-" + UUID.randomUUID();
+            jdbc.execute("CREATE ROLE " + role + " LOGIN PASSWORD '" + password + "'");
+            jdbc.execute(
+                    "GRANT EXECUTE ON FUNCTION public.consume_privacy_primary(bigint) TO " + role);
+            var limited =
+                    new JdbcTemplate(
+                            new DriverManagerDataSource(database.getJdbcUrl(), role, password));
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT NOT r.rolsuper AND NOT EXISTS (SELECT 1 FROM"
+                                        + " pg_auth_members m WHERE m.member=r.oid) FROM pg_roles r"
+                                        + " WHERE r.rolname=?",
+                                    Boolean.class,
+                                    role))
+                    .isTrue();
+            assertThat(limited.queryForObject("SELECT current_user", String.class)).isEqualTo(role);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE"
+                                        + " oid='public.consume_privacy_primary(bigint)'::regprocedure",
+                                    String.class))
+                    .isNotEqualTo(role);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT"
+                                        + " has_table_privilege(?,'public.member_auth_audit','DELETE')",
+                                    Boolean.class,
+                                    role))
+                    .isFalse();
+            assertThatThrownBy(() -> limited.execute("DELETE FROM public.member_auth_audit"))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            var before = history(jdbc);
+            var audits = jdbc.queryForList("SELECT * FROM public.member_auth_audit");
+            assertThat(audits).hasSize(2);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM public.member_auth_audit WHERE"
+                                            + " member_id=? AND purge_at<=clock_timestamp()",
+                                    Integer.class,
+                                    member))
+                    .isEqualTo(1);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM public.member_auth_audit WHERE"
+                                            + " member_id=? AND purge_at>clock_timestamp()",
+                                    Integer.class,
+                                    member))
+                    .isEqualTo(1);
+            String authority =
+                    """
+                    SELECT proname,proowner,proacl::text,prosrc FROM pg_proc WHERE oid IN
+                    ('public.consume_privacy_primary(bigint)'::regprocedure,
+                     'public.guard_privacy_primary_delete()'::regprocedure,
+                     'public.privacy_primary_delete_allowed(bigint,bigint)'::regprocedure) ORDER BY proname
+                    """;
+            var primary = jdbc.queryForList(authority);
+            var current = embedded(database);
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(history(jdbc).subList(0, 42)).isEqualTo(before);
+            assertThat(jdbc.queryForList("SELECT * FROM public.member_auth_audit"))
+                    .isEqualTo(audits);
+            assertThat(jdbc.queryForList(authority)).isEqualTo(primary);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT"
+                                        + " has_function_privilege(?,'public.consume_privacy_primary(bigint)','EXECUTE')",
+                                    Boolean.class,
+                                    role))
+                    .isTrue();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT"
+                                        + " has_function_privilege(?,'public.consume_member_auth_audit_expiry(integer)','EXECUTE')",
+                                    Boolean.class,
+                                    role))
+                    .isFalse();
+            assertThat(
+                            limited.queryForObject(
+                                    "SELECT public.consume_privacy_primary(?)",
+                                    Boolean.class,
+                                    target))
+                    .isTrue();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM public.member_auth_audit WHERE"
+                                            + " member_id=?",
+                                    Integer.class,
+                                    member))
+                    .isZero();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM public.member_account WHERE id=?",
+                                    Integer.class,
+                                    member))
+                    .isZero();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM public.member_auth_audit_cleanup",
+                                    Integer.class))
+                    .isZero();
+            assertThat(
+                            jdbc.queryForMap(
+                                    "SELECT state,result_code,member_id FROM public.privacy_target"
+                                            + " WHERE id=?",
+                                    target))
+                    .containsEntry("state", "COMPLETE")
+                    .containsEntry("result_code", "PHYSICAL_REMOVED")
+                    .containsEntry("member_id", null);
+            assertThat(jdbc.queryForList(authority)).isEqualTo(primary);
+            assertThat(current.migrate().migrationsExecuted).isZero();
+            current.validate();
         }
     }
 
@@ -688,7 +860,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
             for (long member : List.of(first, second)) {
                 jdbc.update(
                         "UPDATE member_account SET state='DELETED',deleted_at=clock_timestamp()"
-                            + " WHERE id=?",
+                                + " WHERE id=?",
                         member);
             }
             for (var targets : List.of(canonical, dependent)) {
@@ -762,8 +934,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM privacy_target WHERE erase_id IN (?,?)"
-                                        + " AND kind IN ('BACKUP','RESTORE_GUARD') AND"
-                                        + " source_kind='NONE'",
+                                            + " AND kind IN ('BACKUP','RESTORE_GUARD') AND"
+                                            + " source_kind='NONE'",
                                     Integer.class,
                                     canonical.root(),
                                     dependent.root()))
@@ -1701,7 +1873,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
      * @return 독립 파일 위치가 없는 전체 embedded SQL Flyway
      */
     private static Flyway embedded(PostgreSQLContainer<?> database) {
-        return embedded(database, "42");
+        return embedded(database, "43");
     }
 
     /** 역사적 목표도 동일한 embedded 공급원으로 실행한다. */
@@ -1915,7 +2087,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     jdbc.queryForObject(
                             "SELECT count(*) FROM public.flyway_schema_history WHERE success",
                             Integer.class);
-            assertThat(migrations).isEqualTo(42);
+            assertThat(migrations).isEqualTo(43);
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM public.spring_session", Integer.class))
