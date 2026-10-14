@@ -91,7 +91,9 @@ section {
   background: var(--color-surface-raised);
   border-left: var(--space-1) solid var(--color-control-border);
 }
-#notice.error,
+#notice.error {
+  border-color: var(--color-danger);
+}
 #comparison {
   border-color: var(--color-focus);
 }
@@ -114,15 +116,63 @@ section {
 .story-row-actions {
   margin-top: var(--gap-related);
 }
-.review-tools {
-  border-top: 1px solid var(--color-border);
-  margin-top: var(--gap-group);
-}
-.review-tools > summary {
+.workspace-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-label);
   padding: var(--panel-padding);
-  color: var(--color-info);
-  font-size: var(--font-size-section);
+  border-bottom: 1px solid var(--color-border);
+}
+.workspace-nav button {
+  flex: 1 1 144px;
+}
+.workspace-nav button[aria-pressed="true"] {
+  background: var(--color-surface-raised);
+  box-shadow: inset 0 calc(-1 * var(--space-1)) var(--color-brand);
   font-weight: 600;
+}
+.workspace-status {
+  padding: var(--panel-padding);
+  border-bottom: 1px solid var(--color-border);
+}
+.workspace-status > p,
+.workspace-basis {
+  max-width: var(--reading-max-width);
+  font-size: var(--font-size-caption);
+  line-height: 1.75;
+}
+#workspace-status-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-label) var(--gap-related);
+  padding: 0;
+  margin: var(--gap-helper) 0 0;
+  list-style: none;
+  font-size: var(--font-size-caption);
+}
+#workspace-status-links a {
+  color: var(--color-text);
+}
+#workspace-input-status {
+  flex-basis: 100%;
+}
+.workspace-basis {
+  padding-block: var(--gap-related);
+  border-block: 1px solid var(--color-border);
+  margin-block: var(--gap-related);
+}
+[data-workspace-panel] details {
+  margin-top: var(--gap-related);
+}
+[data-workspace-panel] details > form {
+  margin-top: var(--gap-related);
+}
+[data-workspace-panel] .state-action > .button-row,
+[data-workspace-panel] .reading > .button-row {
+  margin-top: var(--gap-related);
+}
+[data-action-availability] {
+  margin-top: var(--gap-helper);
 }
 .story-row h3 a {
   display: flex;
@@ -180,6 +230,7 @@ section {
   color: var(--color-text-muted);
 }
 .report-value {
+  max-width: var(--reading-max-width);
   padding: var(--gap-related);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
@@ -212,7 +263,7 @@ section {
 }
 .field .error {
   margin-top: var(--gap-helper);
-  border-left: var(--space-1) solid var(--color-focus);
+  border-left: var(--space-1) solid var(--color-danger);
   padding-left: var(--gap-label);
 }
 /* 공개/제작자 전환은 기존 필드 계약에 명시된 경계만 표시한다. */
@@ -248,10 +299,16 @@ section {
   padding-top: var(--gap-related);
   border-top: 1px solid var(--color-border);
 }
-.state-action p,
+.state-action p:not(.report-value),
 #child-state {
   font-size: var(--font-size-caption);
+}
+.state-action p:not(.error):not(.report-value),
+#child-state {
   color: var(--color-text-muted);
+}
+.state-action .report-value {
+  color: var(--color-text);
 }
 .child-toolbar {
   display: flex;
@@ -325,10 +382,6 @@ dd {
 #policy {
   grid-template-columns: minmax(0, 1fr);
 }
-#latest-values dd {
-  max-height: 240px;
-  overflow: auto;
-}
 .compare-field {
   border-top: 1px solid var(--color-border);
   padding-block: var(--gap-related);
@@ -388,8 +441,12 @@ dd {
   margin-block: var(--gap-related);
   font-size: var(--font-size-section);
 }
-.report-document > .version-panel h2 {
-  font-size: 2rem;
+#state-heading {
+  font-size: var(--font-size-title-mobile);
+  line-height: 1.4;
+}
+.editor-header h1 {
+  line-height: 1.4;
 }
 .report-status {
   display: flex;
@@ -441,7 +498,7 @@ dd {
   margin-bottom: var(--gap-helper);
 }
 .chapter-head h2 {
-  font-size: var(--font-size-title-mobile);
+  font-size: var(--font-size-section);
 }
 .section-guide {
   color: var(--color-text-muted);
@@ -562,8 +619,8 @@ form:not([data-section]) > button,
     padding: var(--gap-related);
     background: var(--color-background);
   }
-  .report-document > .version-panel h2 {
-    font-size: 2.5rem;
+  #state-heading {
+    font-size: var(--font-size-title-desktop);
   }
   .report-value:not([data-empty="true"]) {
     font-size: 1.125rem;

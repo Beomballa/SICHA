@@ -1,3 +1,5 @@
+import { selectEditorTaskFor } from "./editor-workspace.mjs";
+
 /**
  * 새 확인 창의 실제 버튼을 Puppeteer로 누르는 시험 전용 운전자를 설치한다.
  * @param {object} page 최초 이동 전의 Puppeteer 페이지. null은 허용하지 않는다.
@@ -139,6 +141,11 @@ export async function waitForConfirmation(page) {
  * @throws {Error} 실제 클릭, 확인 창 종료 또는 새 작성 준비 대기가 실패하면 전파한다.
  */
 export async function clickWithConfirmation(page, selector) {
+  // 편집기에서만 준비하며 이미 보이는 대상의 초점·동의는 건드리지 않는다.
+  if (await page.$("#editor [data-workspace-task]")) {
+    if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, selector);
+  }
   await page.click(selector);
   await waitForConfirmation(page);
 
@@ -177,6 +184,12 @@ export async function selectChildResource(page, resource) {
   );
   if (!allowed.includes(resource))
     throw new Error(`열거되지 않은 자료 종류: ${resource}`);
+  if (await page.$("#editor [data-workspace-task]")) {
+    if (
+      !(await page.$eval("#child-resource", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-resource");
+  }
   await page.select("#child-resource", resource);
   await waitForConfirmation(page);
   await page.waitForFunction(

@@ -5,14 +5,14 @@
   --color-surface: #1e2228;
   --color-surface-raised: #252a32;
   --color-text: #e5e8eb;
-  --color-text-muted: #9ca3af;
+  --color-text-muted: #adb5c0;
   --color-brand: #c91a1a;
   --color-brand-hover: #b41717;
   --color-brand-active: #a31414;
   --color-on-brand: #e5e8eb;
   --color-accent: #ffc700;
   --color-on-accent: #121417;
-  --color-border: #2b323d;
+  --color-border: #3c444f;
   --color-control-border: #9ca3af;
   --color-focus: #ffc700;
   --color-navigation: #171b24;
@@ -21,6 +21,8 @@
   --color-info-surface: #202c40;
   --color-success: #86cbb6;
   --color-success-surface: #1b3430;
+  --color-danger: #ef4444;
+  --color-error-text: #ffb4ac;
   --font-ui: "Apple SD Gothic Neo", sans-serif;
   --font-code: ui-monospace, monospace;
   --font-size-caption: 0.875rem;
@@ -130,7 +132,7 @@ h4 + p {
   margin-bottom: var(--gap-helper);
 }
 .error {
-  color: var(--color-focus);
+  color: var(--color-error-text);
 }
 label {
   display: block;
@@ -177,7 +179,7 @@ textarea[readonly] {
   color: var(--color-text-muted);
 }
 [aria-invalid="true"] {
-  border-color: var(--color-focus);
+  border-color: var(--color-danger);
 }
 button,
 .primary-link {

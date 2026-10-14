@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
+import {
+  exerciseEditorWorkspace,
+  isBrowserFaviconRequest,
+  selectEditorTaskFor,
+} from "../browser/editor-workspace.mjs";
 
 const require = createRequire(
   new URL("../browser/package.json", import.meta.url),
@@ -304,9 +309,30 @@ async function isolated(scenario, initialDetail = source()) {
   }
 }
 
-/** 숨은 장도 기존 목차를 통해 열고 실제 DOM 입력 이벤트로 변경한다. */
+/**
+ * 원고 작업을 선택한 뒤 기존 목차와 모드로 입력하며 숨은 장을 강제로 표시하지 않는다.
+ * @param {object} page 격리된 제품 편집기.
+ * @param {string} section basic/answer/reveal/child 중 기존 영역. child는 먼저 선택해야 한다.
+ * @param {string} key 해당 영역에 있는 수정 가능한 필드명.
+ * @param {string} value 실제 입력 이벤트로 전달할 값.
+ */
 async function edit(page, section, key, value) {
+  if (
+    !(await page.$eval(`#editor-nav a[href="#${section}-heading"]`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(
+      page,
+      `#editor-nav a[href="#${section}-heading"]`,
+    );
   await page.click(`#editor-nav a[href="#${section}-heading"]`);
+  if (
+    !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `#${section}-${key}-mode`);
   await page.select(`#${section}-${key}-mode`, "value");
   await page.$eval(
     `#${section}-${key}`,
@@ -318,8 +344,15 @@ async function edit(page, section, key, value) {
   );
 }
 
-/** 확인은 공통 창의 실제 버튼으로만 수행한다. */
+/**
+ * 대상 작업·조상 disclosure를 준비하고 공통 확인창의 실제 버튼으로만 동의한다.
+ * @param {object} page 격리된 제품 편집기.
+ * @param {string} selector 하나의 기존 행동. 생략하면 저장 예시 사람 확인 버튼이다.
+ * @throws {Error} 숨은 원래 필드·없는 대상·비활성 행동은 우회하지 않고 실패한다.
+ */
 async function confirm(page, selector = "#review-samples-check") {
+  if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, selector);
   await page.click(selector);
   await page.waitForSelector("#ui-confirm-dialog[open]");
   await page.click("#ui-confirm-accept");
@@ -357,6 +390,115 @@ const lanePosts = (requests) =>
       [precheckPath, checkPath].includes(request.path),
   );
 
+test("workspace separates only proven browser favicon requests from application and other requests", () => {
+  const origin = "https://review.test";
+  const favicon = `${origin}/favicon.ico`;
+  // 합성 분류 검사는 전송을 허용하지 않으며 빈 쿼리·프래그먼트 구분자도 예외로 허용하지 않는다.
+  const cases = [
+    ["GET", favicon, "other", true],
+    ["POST", favicon, "other", false],
+    ["HEAD", favicon, "other", false],
+    ...[
+      "fetch",
+      "xhr",
+      "script",
+      "image",
+      "document",
+      "stylesheet",
+      "font",
+    ].map((type) => ["GET", favicon, type, false]),
+    ["GET", "https://external.test/favicon.ico", "other", false],
+    ["GET", "https://review.test:444/favicon.ico", "other", false],
+    ["GET", "http://review.test/favicon.ico", "other", false],
+    ["GET", `${favicon}?v=1`, "other", false],
+    ["GET", `${favicon}#icon`, "other", false],
+    ["GET", `${favicon}?`, "other", false],
+    ["GET", `${favicon}#`, "other", false],
+    ["GET", `${origin}/admin/api/auth/me`, "other", false],
+    ["GET", `${origin}/admin/ui.js`, "other", false],
+    ["GET", `${origin}/other.ico`, "other", false],
+    ["GET", `${origin}/favicon.ico/`, "other", false],
+    ["GET", "not-a-url", "other", false],
+  ];
+  for (const [method, url, resourceType, expected] of cases) {
+    const request = {
+      method: () => method,
+      url: () => url,
+      resourceType: () => resourceType,
+    };
+    assert.equal(
+      isBrowserFaviconRequest(request, origin),
+      expected,
+      `${method} ${url} ${resourceType}`,
+    );
+  }
+});
+
+test("five editor tasks preserve DOM, keep buffers and disabled forms with native keyboard navigation and zero application/other requests", async () => {
+  await isolated(async ({ page, requests, identityRequests }) => {
+    assert.equal(
+      await page.$eval('[data-workspace-task="write"]', (node) =>
+        node.getAttribute("aria-pressed"),
+      ),
+      "true",
+    );
+    const before = {
+      business: requests.length,
+      identity: identityRequests.length,
+    };
+    const disabledForms = [
+      "#review-withdraw-form",
+      "#review-changes-form",
+      "#manual-form",
+      "#issue-resolution-form",
+    ];
+    for (const selector of disabledForms) {
+      assert.equal(
+        await page.$eval(selector, (node) => node.closest("details").open),
+        false,
+      );
+    }
+    const result = await exerciseEditorWorkspace(page, {
+      keepBuffer: {
+        section: "basic",
+        field: "intro",
+        value: "작업 왕복 뒤에도 남는 원고 버퍼",
+      },
+      disabledForms,
+    });
+    assert.deepEqual(result, {
+      tasks: ["write", "review", "read", "evidence", "version"],
+      requests: 0,
+      browserResourceRequests: 0,
+      sameDom: true,
+      keyboard: true,
+      focus: true,
+      keepBuffer: "verified",
+      unknownTarget: "not-requested",
+      disabledForms,
+    });
+    assert.equal(await leavePrevented(page), true);
+    assert.equal(
+      await page.$eval("#basic-intro-mode", (node) => node.value),
+      "keep",
+    );
+    assert.equal(await page.$eval("#basic-intro", (node) => node.hidden), true);
+    // 작업 준비는 원래 숨은 입력·선택하지 않은 자식 영역까지 열지 않는다.
+    await assert.rejects(
+      selectEditorTaskFor(page, "#basic-intro"),
+      /원래 숨겨진 대상/,
+    );
+    await assert.rejects(
+      selectEditorTaskFor(page, "#child-new"),
+      /원래 숨겨진 대상/,
+    );
+    assert.deepEqual(
+      { business: requests.length, identity: identityRequests.length },
+      before,
+    );
+  });
+});
+
 test("all four sections, clear intents and hidden keep buffers block both POSTs", async () => {
   await isolated(async ({ page, requests }) => {
     for (const [section, key] of [
@@ -370,8 +512,20 @@ test("all four sections, clear intents and hidden keep buffers block both POSTs"
       );
       await edit(page, section, key, "미저장 합성 입력");
       await forceActions(page);
+      if (
+        !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `#${section}-${key}-mode`);
       await page.select(`#${section}-${key}-mode`, "clear");
       await forceActions(page);
+      if (
+        !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `#${section}-${key}-mode`);
       await page.select(`#${section}-${key}-mode`, "keep");
       await forceActions(page);
       assert.equal(
@@ -388,7 +542,15 @@ test("all four sections, clear intents and hidden keep buffers block both POSTs"
         original,
       );
     }
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#child-new");
     await page.click("#child-new");
     await edit(page, "child", "name", "새 자료 입력");
     await forceActions(page);
@@ -403,6 +565,10 @@ test("all four sections, clear intents and hidden keep buffers block both POSTs"
 
 test("large revisions, safe full-count diagnostics, repair focus and narrow invalidation", async () => {
   await isolated(async ({ page, requests }) => {
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await message(page, "구조 진단입니다");
     const request = lanePosts(requests)[0];
@@ -423,11 +589,27 @@ test("large revisions, safe full-count diagnostics, repair focus and narrow inva
         .then((nodes) => nodes.length),
       0,
     );
-    await page.click("#review-check-diagnostics button");
+    if (
+      !(await page.$eval(
+        "#review-check-diagnostics > ul:first-of-type > li:first-child button",
+        (node) => node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        "#review-check-diagnostics > ul:first-of-type > li:first-child button",
+      );
+    await page.click(
+      "#review-check-diagnostics > ul:first-of-type > li:first-child button",
+    );
     assert.equal(
       await page.evaluate(() => document.activeElement.id),
       "basic-intro-mode",
     );
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "value");
     assert.equal(
       await page.$eval(
@@ -436,9 +618,23 @@ test("large revisions, safe full-count diagnostics, repair focus and narrow inva
       ),
       0,
     );
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await message(page, "구조 진단입니다");
+    if (
+      !(await page.$eval("#review-samples-open", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-open");
     await page.click("#review-samples-open");
     await page.waitForFunction(
       () => document.getElementById("child-resource").value === "grade-samples",
@@ -461,6 +657,10 @@ test("large revisions, safe full-count diagnostics, repair focus and narrow inva
 test("late diagnostics and stale finally cannot restore results or unlock a newer request", async () => {
   await isolated(async ({ page, hold }) => {
     const first = hold(precheckPath);
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await first.ready;
     await edit(page, "basic", "intro", "응답 대기 중 입력");
@@ -476,17 +676,39 @@ test("late diagnostics and stale finally cannot restore results or unlock a newe
       0,
     );
     await edit(page, "basic", "intro", "저장 도입");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     const old = hold(precheckPath);
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await old.ready;
     // 보이는 자료 종류 선택으로 작업 세대를 교체하며 새 작성 입력을 만들지 않는다.
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (
+      !(await page.$eval("#child-resource", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-resource");
     await page.select("#child-resource", "grade-samples");
     await page.waitForFunction(
       () => !document.getElementById("review-precheck").disabled,
     );
     const newer = hold(precheckPath);
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await newer.ready;
     await old.respond({ code: "EDIT_CONFLICT" }, 409);
@@ -509,6 +731,12 @@ test("late diagnostics and stale finally cannot restore results or unlock a newe
 test("Cancel, Escape, focus trap, edit during CSRF acquisition and disabled activation probes", async () => {
   await isolated(async ({ page, requests, hold, queue, json }) => {
     for (const cancel of ["button", "escape"]) {
+      if (
+        !(await page.$eval("#review-samples-check", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-samples-check");
       await page.focus("#review-samples-check");
       await page.keyboard.press("Enter");
       await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -543,6 +771,10 @@ test("Cancel, Escape, focus trap, edit during CSRF acquisition and disabled acti
     queue(precheckPath, "POST", (request) =>
       json(request, { code: "CSRF_INVALID" }, 403),
     );
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await message(page, "요청에 실패했습니다");
     const beforeConsent = lanePosts(requests).length;
@@ -556,8 +788,18 @@ test("Cancel, Escape, focus trap, edit during CSRF acquisition and disabled acti
     );
     assert.equal(lanePosts(requests).length, beforeConsent);
     await edit(page, "basic", "intro", "저장 도입");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     const pending = hold(checkPath);
+    if (
+      !(await page.$eval("#review-samples-check", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-check");
     await page.click("#review-samples-check");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     assert.equal(
@@ -589,12 +831,22 @@ test("Cancel, Escape, focus trap, edit during CSRF acquisition and disabled acti
 
 test("receipt revision GET preserves edits including keep buffers and requires fresh explicit SR01", async () => {
   await isolated(async ({ page, state, hold, requests }) => {
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await message(page, "구조 진단입니다");
     const post = hold(checkPath);
     await confirm(page);
     await post.ready;
     await edit(page, "answer", "methodAnswer", "전송 중 새 원고");
+    if (
+      !(await page.$eval("#answer-methodAnswer-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#answer-methodAnswer-mode");
     await page.select("#answer-methodAnswer-mode", "keep");
     const read = hold(root, "GET");
     state.detail.editRev = nextRev;
@@ -654,12 +906,24 @@ test("lost response and failed GET never resend or infer completion from a chang
       "유실 후 자동 GET도 없음",
     );
     const failed = hold(root, "GET");
+    if (
+      !(await page.$eval("#review-check-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-check-refresh");
     await page.click("#review-check-refresh");
     await failed.ready;
     await failed.respond({ code: "STORY_UNAVAILABLE" }, 503);
     await message(page, "조회 실패");
     await forceActions(page);
     assert.equal(lanePosts(requests).length, 1);
+    if (
+      !(await page.$eval("#review-check-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-check-refresh");
     await page.click("#review-check-refresh");
     await page.waitForFunction(
       () => !document.getElementById("accept-latest").disabled,
@@ -670,6 +934,12 @@ test("lost response and failed GET never resend or infer completion from a chang
     );
     await confirm(page, "#accept-latest");
     assert.equal(lanePosts(requests).length, 1);
+    if (
+      !(await page.$eval("#review-samples-check", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-check");
     await page.click("#review-samples-check");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.keyboard.press("Escape");
@@ -686,22 +956,38 @@ test("confirmed receipt survives failed refresh; CSRF and revision conflicts req
     queue(precheckPath, "POST", (request) =>
       json(request, { code: "CSRF_INVALID" }, 403),
     );
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await page.waitForFunction(
       () => !document.getElementById("review-precheck").disabled,
     );
     assert.equal(lanePosts(requests).length, 1);
     const tokenReads = state.csrfReads;
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await message(page, "구조 진단입니다");
     assert.equal(state.csrfReads, tokenReads + 1);
     queue(precheckPath, "POST", (request) =>
       json(request, { code: "EDIT_CONFLICT" }, 409),
     );
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await page.waitForSelector("#comparison:not([hidden])");
     await forceActions(page);
     assert.equal(lanePosts(requests).length, 3);
+    if (
+      !(await page.$eval("#refresh-latest", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#refresh-latest");
     await page.click("#refresh-latest");
     await page.waitForFunction(
       () => !document.getElementById("accept-latest").disabled,
@@ -724,8 +1010,18 @@ test("confirmed receipt survives failed refresh; CSRF and revision conflicts req
 
 test("auth revocation clears diagnostics, receipt, confirmation and ignores late responses", async () => {
   await isolated(async ({ page, queue, json, hold }) => {
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await message(page, "구조 진단입니다");
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
     queue(`${root}/persons`, "GET", (request) =>
       json(request, {
@@ -735,6 +1031,8 @@ test("auth revocation clears diagnostics, receipt, confirmation and ignores late
         nextAfterKey: null,
       }),
     );
+    if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#child-list");
     await page.click("#child-list");
     await page.waitForSelector('[data-child-key="P"]');
     const delayed = hold(checkPath);
@@ -743,6 +1041,12 @@ test("auth revocation clears diagnostics, receipt, confirmation and ignores late
     queue(root, "GET", (request) =>
       json(request, { code: "AUTH_REQUIRED" }, 401),
     );
+    if (
+      !(await page.$eval('[data-child-key="P"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '[data-child-key="P"]');
     await page.click('[data-child-key="P"]');
     await page.waitForSelector("#editor[hidden]");
     await delayed.respond({
@@ -768,7 +1072,8 @@ test("auth revocation clears diagnostics, receipt, confirmation and ignores late
 
 test("saved check panel uses shared layout at 360/768/1440 with labelled keyboard targets", async () => {
   await isolated(async ({ page }) => {
-    for (const width of [360, 768, 1440]) {
+    await selectEditorTaskFor(page, "#review-check");
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900 });
       const layout = await page.$eval("#review-check", (panel) => ({
         named: Boolean(
@@ -788,6 +1093,12 @@ test("saved check panel uses shared layout at 360/768/1440 with labelled keyboar
       assert.equal(layout.overflow, false, `${width}px 가로 넘침`);
       for (const button of layout.buttons)
         assert.ok(button.text && button.width >= 48 && button.height >= 48);
+      if (
+        !(await page.$eval("#review-precheck", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-precheck");
       await page.focus("#review-precheck");
       await page.keyboard.press("Tab");
       assert.equal(
@@ -805,10 +1116,28 @@ test("saved check panel uses shared layout at 360/768/1440 with labelled keyboar
 
 test("saved-example navigation retains the existing dirty-child discard confirmation", async () => {
   await isolated(async ({ page, requests }) => {
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#child-new");
     await page.click("#child-new");
     await edit(page, "child", "name", "버리지 않을 인물 입력");
+    if (
+      !(await page.$eval("#child-name-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-name-mode");
     await page.select("#child-name-mode", "keep");
+    if (
+      !(await page.$eval("#review-samples-open", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-open");
     await page.click("#review-samples-open");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     assert.match(
@@ -839,10 +1168,24 @@ test("saved-example navigation retains the existing dirty-child discard confirma
 test("pending visible list revision or access loss cancels consent without a POST", async () => {
   for (const status of [200, 403, 404]) {
     await isolated(async ({ page, requests, hold }) => {
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
       await page.click('#editor-nav a[href="#child-heading"]');
       const list = hold(`${root}/persons`, "GET");
+      if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-list");
       await page.click("#child-list");
       await list.ready;
+      if (
+        !(await page.$eval("#review-samples-check", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-samples-check");
       await page.click("#review-samples-check");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       await list.respond(
@@ -878,6 +1221,16 @@ test("ordinary save CSRF rejection retains its original revocation recovery", as
     queue(`${root}/sections/basic`, "PATCH", (request) =>
       json(request, { code: "CSRF_INVALID" }, 403),
     );
+    if (
+      !(await page.$eval(
+        'form[data-section="basic"] button[type="submit"]',
+        (node) => node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        'form[data-section="basic"] button[type="submit"]',
+      );
     await page.click('form[data-section="basic"] button[type="submit"]');
     await page.waitForSelector("#editor[hidden]");
     assert.equal(
@@ -895,9 +1248,23 @@ test("ordinary save CSRF rejection retains its original revocation recovery", as
 test("a changed target ignores a late result, and 503 requires GET rather than automatic resend", async () => {
   await isolated(async ({ page, hold, requests }) => {
     const old = hold(precheckPath);
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await old.ready;
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (
+      !(await page.$eval("#child-resource", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-resource");
     await page.select("#child-resource", "grade-samples");
     await page.waitForFunction(
       () => document.getElementById("child-resource").value === "grade-samples",
@@ -1114,8 +1481,20 @@ async function selectSnapshot({ page, queue, json }, more = false) {
       nextAfterId: more ? currentId : null,
     }),
   );
+  if (
+    !(await page.$eval("#saved-history-first", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#saved-history-first");
   await page.click("#saved-history-first");
   await savedState(page, "history", "success-populated");
+  if (
+    !(await page.$eval(`[data-snapshot-id="${savedId}"]`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `[data-snapshot-id="${savedId}"]`);
   await page.click(`[data-snapshot-id="${savedId}"]`);
 }
 
@@ -1192,6 +1571,12 @@ test("SR03 is explicit payload-free bounded DESC history with exact independent 
     queue(historyPath, "GET", (request) =>
       json(request, { items: [], hasNext: false, nextAfterId: null }),
     );
+    if (
+      !(await page.$eval("#saved-history-next", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-next");
     await page.click("#saved-history-next");
     await savedState(page, "history", "success-empty");
     assert.equal(
@@ -1225,6 +1610,12 @@ test("SR04/SR06 preserve original private JSON integers, literal references, old
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, payload),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
     assert.equal(
@@ -1240,6 +1631,12 @@ test("SR04/SR06 preserve original private JSON integers, literal references, old
     queue(`${historyPath}/${savedId}/records`, "GET", (request) =>
       raw(request, records),
     );
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     await savedState(page, "records", "success-populated");
     assert.equal(
@@ -1256,7 +1653,7 @@ test("SR04/SR06 preserve original private JSON integers, literal references, old
     );
     assert.equal(
       await page.$$eval(
-        "#saved-review img, #saved-review script, #saved-review a",
+        ":is(#saved-payload-result, #saved-preview-result, #saved-records-result, #saved-issues-result) :is(img, script, a)",
         (nodes) => nodes.length,
       ),
       0,
@@ -1274,6 +1671,12 @@ test("SR04/SR06 preserve original private JSON integers, literal references, old
     queue(`${historyPath}/${savedId}/records`, "GET", (request) =>
       raw(request, savedRecordsText({ empty: true })),
     );
+    if (
+      !(await page.$eval("#saved-records-next", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-next");
     await page.click("#saved-records-next");
     await savedState(page, "records", "success-empty");
     assert.equal(
@@ -1292,6 +1695,12 @@ test("SR04/SR06 preserve original private JSON integers, literal references, old
     queue(historyPath, "GET", (request) =>
       json(request, { items: [], hasNext: false, nextAfterId: null }),
     );
+    if (
+      !(await page.$eval("#saved-history-next", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-next");
     await page.click("#saved-history-next");
     await savedState(page, "history", "success-empty");
     assert.equal(
@@ -1308,7 +1717,19 @@ test("SR04/SR06 preserve original private JSON integers, literal references, old
 test("SR08 uses server-only allowlists, exclusive exact source params, null versus empty and local role validation", async () => {
   await isolated(async (context) => {
     const { page, queue, json, requests } = context;
+    if (
+      !(await page.$eval("#saved-preview-role", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-role");
     await page.type("#saved-preview-role", "bad-role");
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "failure");
     assert.equal(savedRequests(requests).length, 0);
@@ -1322,7 +1743,17 @@ test("SR08 uses server-only allowlists, exclusive exact source params, null vers
     });
     queue(previewPath, "GET", (request) => json(request, previewResponse()));
     await edit(page, "basic", "intro", "미저장 투영 금지");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "success-populated");
     let query = new URLSearchParams(savedRequests(requests).at(-1).query);
@@ -1357,6 +1788,12 @@ test("SR08 uses server-only allowlists, exclusive exact source params, null vers
       0,
     );
     await selectSnapshot(context);
+    if (
+      !(await page.$eval("#saved-preview-source", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-source");
     await page.select("#saved-preview-source", "SNAPSHOT");
     queue(previewPath, "GET", (request) =>
       json(
@@ -1368,6 +1805,12 @@ test("SR08 uses server-only allowlists, exclusive exact source params, null vers
         }),
       ),
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "success-populated");
     query = new URLSearchParams(savedRequests(requests).at(-1).query);
@@ -1377,6 +1820,12 @@ test("SR08 uses server-only allowlists, exclusive exact source params, null vers
       snapshotId: savedId,
       roleCode: "A",
     });
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     assert.equal(
       await page.$eval("#saved-preview-result", (node) => node.textContent),
@@ -1394,6 +1843,12 @@ test("SR08 uses server-only allowlists, exclusive exact source params, null vers
         }),
       ),
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "success-populated");
     query = new URLSearchParams(savedRequests(requests).at(-1).query);
@@ -1428,16 +1883,30 @@ test("selection and source/mode/role changes immediately purge every private buf
     const { page, queue, raw, hold, requests } = context;
     await selectSnapshot(context);
     await edit(page, "answer", "methodAnswer", "선택 전환에도 보존");
+    if (
+      !(await page.$eval("#answer-methodAnswer-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#answer-methodAnswer-mode");
     await page.select("#answer-methodAnswer-mode", "keep");
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, savedPayloadText()),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
     for (const [selector, value] of [
       ["#saved-preview-source", "SNAPSHOT"],
       ["#saved-preview-mode", "REVEAL"],
     ]) {
+      if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, selector);
       await page.select(selector, value);
       assert.equal(
         await page.$eval("#saved-payload-result", (node) => node.textContent),
@@ -1446,15 +1915,39 @@ test("selection and source/mode/role changes immediately purge every private buf
       queue(`${historyPath}/${savedId}`, "GET", (request) =>
         raw(request, savedPayloadText()),
       );
+      if (
+        !(await page.$eval("#saved-payload-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-payload-read");
       await page.click("#saved-payload-read");
       await savedState(page, "payload", "success-populated");
     }
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "ROLE");
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, savedPayloadText()),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
+    if (
+      !(await page.$eval("#saved-preview-role", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-role");
     await page.type("#saved-preview-role", "A");
     assert.equal(
       await page.$eval("#saved-payload-result", (node) => node.textContent),
@@ -1462,11 +1955,29 @@ test("selection and source/mode/role changes immediately purge every private buf
     );
     const oldPayload = hold(`${historyPath}/${savedId}`, "GET");
     const oldRecords = hold(`${historyPath}/${savedId}/records`, "GET");
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await oldPayload.ready;
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     await oldRecords.ready;
     const before = savedRequests(requests).length;
+    if (
+      !(await page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${currentId}"]`);
     await page.click(`[data-snapshot-id="${currentId}"]`);
     assert.equal(
       savedRequests(requests).length,
@@ -1511,21 +2022,53 @@ test("preview late responses cannot cross source, mode, role or a newer in-fligh
     await isolated(async (context) => {
       const { page, hold } = context;
       await selectSnapshot(context);
+      if (
+        !(await page.$eval("#saved-preview-role", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-role");
       await page.type("#saved-preview-role", "A");
       const old = hold(previewPath, "GET");
+      if (
+        !(await page.$eval("#saved-preview-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-read");
       await page.click("#saved-preview-read");
       await old.ready;
-      if (change === "role") await page.type("#saved-preview-role", "B");
-      else
+      if (change === "role") {
+        if (
+          !(await page.$eval("#saved-preview-role", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-preview-role");
+        await page.type("#saved-preview-role", "B");
+      } else {
+        if (
+          !(await page.$eval(`#saved-preview-${change}`, (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, `#saved-preview-${change}`);
         await page.select(
           `#saved-preview-${change}`,
           change === "source" ? "SNAPSHOT" : "REVEAL",
         );
+      }
       assert.equal(
         await page.$eval("#saved-preview-result", (node) => node.textContent),
         "",
       );
       const newer = hold(previewPath, "GET");
+      if (
+        !(await page.$eval("#saved-preview-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-read");
       await page.click("#saved-preview-read");
       await newer.ready;
       await old.respond({ code: "AUTH_REQUIRED" }, 401);
@@ -1571,10 +2114,22 @@ test("read audit 503 and mismatching echoes are failures, purge private data and
     await isolated(async (context) => {
       const { page, queue, json, raw, requests } = context;
       await selectSnapshot(context);
+      if (
+        !(await page.$eval("#saved-preview-role", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-role");
       await page.type("#saved-preview-role", "A");
       queue(`${historyPath}/${savedId}`, "GET", (request) =>
         raw(request, savedPayloadText()),
       );
+      if (
+        !(await page.$eval("#saved-payload-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-payload-read");
       await page.click("#saved-payload-read");
       await savedState(page, "payload", "success-populated");
       const response = previewResponse();
@@ -1591,6 +2146,12 @@ test("read audit 503 and mismatching echoes are failures, purge private data and
           mismatch === "audit" ? 503 : 200,
         ),
       );
+      if (
+        !(await page.$eval("#saved-preview-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-read");
       await page.click("#saved-preview-read");
       await savedState(page, "preview", "failure");
       assert.equal(
@@ -1630,12 +2191,24 @@ test("late private reads are purged across revocation, comparison, unavailabilit
       const { page, queue, json, hold, state } = context;
       await selectSnapshot(context);
       const pending = hold(`${historyPath}/${savedId}`, "GET");
+      if (
+        !(await page.$eval("#saved-payload-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-payload-read");
       await page.click("#saved-payload-read");
       await pending.ready;
       if (transition === "unavailable") {
         queue(`${historyPath}/${savedId}/records`, "GET", (request) =>
           json(request, { code: "STORY_UNAVAILABLE" }, 503),
         );
+        if (
+          !(await page.$eval("#saved-records-first", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-records-first");
         await page.click("#saved-records-first");
         await savedState(page, "records", "failure");
       } else if (transition === "replacement") {
@@ -1645,6 +2218,10 @@ test("late private reads are purged across revocation, comparison, unavailabilit
           state.detail.sections.basic.intro = "새 저장본";
           return json(request, { editRev: nextRev, changed: true });
         });
+        if (
+          !(await page.$eval("#basic-save", (node) => node.checkVisibility()))
+        )
+          await selectEditorTaskFor(page, "#basic-save");
         await page.click("#basic-save");
         await page.waitForFunction(
           (revision) =>
@@ -1655,10 +2232,25 @@ test("late private reads are purged across revocation, comparison, unavailabilit
           nextRev,
         );
       } else {
+        if (
+          !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(
+            page,
+            '#editor-nav a[href="#child-heading"]',
+          );
         await page.click('#editor-nav a[href="#child-heading"]');
-        if (transition === "generation")
+        if (transition === "generation") {
+          if (
+            !(await page.$eval("#child-resource", (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(page, "#child-resource");
           await page.select("#child-resource", "grade-samples");
-        else {
+        } else {
           queue(`${root}/persons`, "GET", (request) =>
             json(
               request,
@@ -1673,6 +2265,10 @@ test("late private reads are purged across revocation, comparison, unavailabilit
               transition === "revoke" ? 403 : 200,
             ),
           );
+          if (
+            !(await page.$eval("#child-list", (node) => node.checkVisibility()))
+          )
+            await selectEditorTaskFor(page, "#child-list");
           await page.click("#child-list");
           await page.waitForSelector(
             transition === "revoke"
@@ -1715,33 +2311,53 @@ test("late private reads are purged across revocation, comparison, unavailabilit
   }
 });
 
-test("saved-review ordinary controls stay labelled and within all five widths", async () => {
+test("saved read and evidence controls stay labelled and within all six widths", async () => {
   await isolated(async (context) => {
     const { page, queue, raw } = context;
     await selectSnapshot(context);
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, savedPayloadText()),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900 });
-      const metrics = await page.$eval("#saved-review", (panel) => ({
-        overflow: document.documentElement.scrollWidth > innerWidth,
-        reading: panel.querySelector(".reading").getBoundingClientRect().width,
-        small: [...panel.querySelectorAll("button,input,select")].filter(
-          (node) =>
-            node.getClientRects().length &&
-            node.getBoundingClientRect().height < 48,
-        ).length,
-        labelled: [...panel.querySelectorAll("input,select")].every(
-          (node) => node.labels.length > 0,
-        ),
-      }));
-      assert.equal(metrics.overflow, false);
-      assert.ok(metrics.reading <= 720);
-      assert.equal(metrics.small, 0);
-      assert.equal(metrics.labelled, true);
+      for (const selector of ["#saved-review", "#workspace-evidence"]) {
+        await selectEditorTaskFor(page, selector);
+        if (selector === "#workspace-evidence") {
+          await selectEditorTaskFor(page, "#manual-form");
+          await selectEditorTaskFor(page, "#issue-resolution-form");
+        }
+        const metrics = await page.$eval(selector, (panel) => ({
+          overflow: document.documentElement.scrollWidth > innerWidth,
+          reading: panel.querySelector(".reading").getBoundingClientRect()
+            .width,
+          small: [...panel.querySelectorAll("button,input,select")].filter(
+            (node) =>
+              node.getClientRects().length &&
+              node.getBoundingClientRect().height < 48,
+          ).length,
+          labelled: [...panel.querySelectorAll("input,select")].every(
+            (node) => node.labels.length > 0,
+          ),
+        }));
+        assert.equal(metrics.overflow, false);
+        assert.ok(metrics.reading > 0 && metrics.reading <= 720);
+        assert.equal(metrics.small, 0);
+        assert.equal(metrics.labelled, true);
+      }
+      if (
+        !(await page.$eval("#saved-history-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-history-first");
       await page.focus("#saved-history-first");
       await page.keyboard.press("Tab");
       assert.equal(
@@ -1785,6 +2401,16 @@ test("private read audit failures and mismatching snapshot envelopes never expos
                   );
           queue(path, "GET", (request) => raw(request, body));
         }
+        if (
+          !(await page.$eval(
+            lane === "payload" ? "#saved-payload-read" : "#saved-records-first",
+            (node) => node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(
+            page,
+            lane === "payload" ? "#saved-payload-read" : "#saved-records-first",
+          );
         await page.click(
           lane === "payload" ? "#saved-payload-read" : "#saved-records-first",
         );
@@ -1817,11 +2443,33 @@ test("private read audit failures and mismatching snapshot envelopes never expos
 test("history generation fence discards late metadata and does not unlock a newer page", async () => {
   await isolated(async ({ page, hold, requests }) => {
     const first = hold(historyPath, "GET");
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await first.ready;
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (
+      !(await page.$eval("#child-resource", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-resource");
     await page.select("#child-resource", "grade-samples");
     const second = hold(historyPath, "GET");
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await second.ready;
     await first.respond({
@@ -1873,7 +2521,19 @@ test("ordinary saved reads do not infer write or execution capabilities from REV
       true,
     );
     await selectSnapshot(context);
+    if (
+      !(await page.$eval("#saved-preview-source", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-source");
     await page.select("#saved-preview-source", "SNAPSHOT");
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     queue(previewPath, "GET", (request) =>
       json(
@@ -1887,6 +2547,12 @@ test("ordinary saved reads do not infer write or execution capabilities from REV
         }),
       ),
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "success-populated");
     assert.equal(
@@ -1929,6 +2595,12 @@ test("known non-DRAFT and inactive versions reject DRAFT preview without locking
       await page.waitForFunction(
         () => !document.getElementById("saved-history-first").disabled,
       );
+      if (
+        !(await page.$eval("#saved-preview-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-mode");
       await page.select("#saved-preview-mode", "REVEAL");
       assert.equal(
         await page.$eval("#saved-preview-source", (node) => node.value),
@@ -1950,6 +2622,12 @@ test("known non-DRAFT and inactive versions reject DRAFT preview without locking
         false,
       );
       await selectSnapshot(context);
+      if (
+        !(await page.$eval("#saved-preview-source", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-source");
       await page.select("#saved-preview-source", "SNAPSHOT");
       assert.equal(
         await page.$eval("#saved-preview-read", (node) => node.disabled),
@@ -1967,6 +2645,12 @@ test("DRAFT with a current snapshot also rejects preview at the UI and request b
     await page.waitForFunction(
       () => !document.getElementById("saved-history-first").disabled,
     );
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     assert.equal(
       await page.$eval("#saved-preview-read", (node) => node.disabled),
@@ -1992,25 +2676,73 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, savedPayloadText()),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#child-new");
     await page.click("#child-new");
     await edit(page, "child", "name", "열람 복구 중 보존할 새 인물");
+    if (
+      !(await page.$eval("#child-name-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-name-mode");
     await page.select("#child-name-mode", "keep");
     await edit(page, "basic", "intro", "열람 복구 중 보존할 도입");
     await edit(page, "answer", "methodAnswer", "유지 뒤에 남은 정답 수정");
+    if (
+      !(await page.$eval("#answer-methodAnswer-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#answer-methodAnswer-mode");
     await page.select("#answer-methodAnswer-mode", "keep");
     await edit(page, "reveal", "revealText", "비우기 뒤 보존할 해설");
+    if (
+      !(await page.$eval("#reveal-revealText-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#reveal-revealText-mode");
     await page.select("#reveal-revealText-mode", "clear");
     await selectSnapshot(context);
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, savedPayloadText()),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
     const late = hold(`${historyPath}/${savedId}/records`, "GET");
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     await late.ready;
     const buffers = await page.$$eval("[data-field]", (nodes) =>
@@ -2022,6 +2754,12 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
     );
     const start = requests.length;
     const failed = hold(previewPath, "GET");
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await failed.ready;
     state.detail = {
@@ -2052,6 +2790,12 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
       ),
       false,
     );
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "success");
     assert.equal(
@@ -2121,10 +2865,22 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
       "",
     );
     await selectSnapshot(context);
+    if (
+      !(await page.$eval("#saved-preview-source", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-source");
     await page.select("#saved-preview-source", "SNAPSHOT");
     queue(`${historyPath}/${savedId}`, "GET", (request) =>
       raw(request, savedPayloadText()),
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     await savedState(page, "payload", "success-populated");
     assert.equal(
@@ -2134,6 +2890,12 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
     queue(`${historyPath}/${savedId}/records`, "GET", (request) =>
       raw(request, savedRecordsText()),
     );
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     await savedState(page, "records", "success-populated");
     assert.equal(
@@ -2152,6 +2914,12 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
         }),
       ),
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "success-populated");
     assert.deepEqual(
@@ -2201,14 +2969,32 @@ test("initial DRAFT racing REVIEW recovers explicit saved reads without adopting
 test("current DRAFT read revision can advance while old write revision stays locked until comparison consent", async () => {
   await isolated(async ({ page, state, queue, json, requests }) => {
     await edit(page, "basic", "intro", "쓰기 번호는 자동 승계하지 않음");
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     queue(previewPath, "GET", (request) =>
       json(request, { code: "EDIT_CONFLICT" }, 409),
     );
     const start = requests.length;
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "failure");
     state.detail.editRev = nextRev;
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "success");
     queue(previewPath, "GET", (request) =>
@@ -2221,6 +3007,12 @@ test("current DRAFT read revision can advance while old write revision stays loc
         }),
       ),
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "success-populated");
     const reads = requests.slice(start);
@@ -2252,6 +3044,10 @@ test("current DRAFT read revision can advance while old write revision stays loc
       ),
     );
     assert.equal(requests.length, start + 3);
+    if (
+      !(await page.$eval("#refresh-latest", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#refresh-latest");
     await page.click("#refresh-latest");
     await page.waitForFunction(
       () => !document.getElementById("accept-latest").disabled,
@@ -2328,8 +3124,20 @@ test("read metadata recovery retains confirmed versus unknown SR09 receipts and 
         receiptKnown ? /사람 확인 영수증.*확인 5건/ : /결과 미확인/,
       );
       await edit(page, "answer", "methodAnswer", "미확인 중 수정 버퍼");
+      if (
+        !(await page.$eval("#answer-methodAnswer-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#answer-methodAnswer-mode");
       await page.select("#answer-methodAnswer-mode", "keep");
       const start = requests.length;
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
       await page.click("#saved-metadata-refresh");
       await savedState(page, "metadata", "success");
       assert.deepEqual(
@@ -2381,11 +3189,29 @@ test("failed or invalid metadata recovery remains a visible failure with no auto
   for (const failure of ["unavailable", "revision", "pointer", "target"]) {
     await isolated(async ({ page, state, queue, json, requests }) => {
       await edit(page, "basic", "intro", "실패에도 보존");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
       await page.select("#basic-intro-mode", "keep");
+      if (
+        !(await page.$eval("#saved-preview-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-mode");
       await page.select("#saved-preview-mode", "REVEAL");
       queue(previewPath, "GET", (request) =>
         json(request, { code: "STATE_CONFLICT" }, 409),
       );
+      if (
+        !(await page.$eval("#saved-preview-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-read");
       await page.click("#saved-preview-read");
       await savedState(page, "preview", "failure");
       const invalid = { ...source(), editRev: nextRev };
@@ -2400,6 +3226,12 @@ test("failed or invalid metadata recovery remains a visible failure with no auto
         ),
       );
       const start = requests.length;
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
       await page.click("#saved-metadata-refresh");
       await savedState(page, "metadata", "failure");
       assert.equal(requests.length, start + 1);
@@ -2429,6 +3261,12 @@ test("failed or invalid metadata recovery remains a visible failure with no auto
         status: "REVIEW",
         currentSnapshotId: currentId,
       };
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
       await page.click("#saved-metadata-refresh");
       await savedState(page, "metadata", "success");
       assert.equal(requests.length, start + 2);
@@ -2447,10 +3285,22 @@ test("failed or invalid metadata recovery remains a visible failure with no auto
 test("late metadata cannot cross comparison ownership or unlock a newer read; current access loss purges buffers", async () => {
   await isolated(async ({ page, state, queue, json, hold, requests }) => {
     await edit(page, "basic", "intro", "회수 전 미저장");
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     queue(previewPath, "GET", (request) =>
       json(request, { code: "STATE_CONFLICT" }, 409),
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await savedState(page, "preview", "failure");
     state.detail = {
@@ -2460,9 +3310,19 @@ test("late metadata cannot cross comparison ownership or unlock a newer read; cu
       currentSnapshotId: currentId,
     };
     const old = hold(root, "GET");
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await old.ready;
     const comparison = hold(root, "GET");
+    if (
+      !(await page.$eval("#refresh-latest", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#refresh-latest");
     await page.click("#refresh-latest");
     await comparison.ready;
     await comparison.respond(state.detail);
@@ -2477,6 +3337,12 @@ test("late metadata cannot cross comparison ownership or unlock a newer read; cu
       true,
     );
     const newer = hold(root, "GET");
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await newer.ready;
     const start = requests.length;
@@ -2508,6 +3374,12 @@ test("late metadata cannot cross comparison ownership or unlock a newer read; cu
       true,
     );
     queue(root, "GET", (request) => json(request, { code: "FORBIDDEN" }, 403));
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await page.waitForSelector("#editor[hidden]");
     assert.equal(
@@ -2553,6 +3425,12 @@ async function lifecycleMessage(page, fragment) {
  * @throws {Error} 조회·확인·비교 수락이 완료되지 않으면 기존 대기 제한으로 실패한다.
  */
 async function acceptLifecycle(page) {
+  if (
+    !(await page.$eval("#review-lifecycle-refresh", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#review-lifecycle-refresh");
   await page.click("#review-lifecycle-refresh");
   await page.waitForFunction(
     () => !document.getElementById("accept-latest").disabled,
@@ -2646,6 +3524,10 @@ test("SR02 owner request freezes a UUID v4 and revision and confirmed receipt su
     );
     assert.ok(Buffer.byteLength(sent[0].body) < 8192);
     await edit(page, "basic", "intro", "전송 뒤 유지할 입력");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     await post.respond(lifecycleResponse(), 201);
     await lifecycleMessage(page, "영수증은 확정됐으나");
@@ -2685,6 +3567,12 @@ test("SR02 response loss replays only the original exact body and historical rec
     await lifecycleMessage(page, "결과 미확인");
     const original = lifecyclePosts(requests)[0].body;
     state.detail = { ...source(), editRev: "9007199254740993129" };
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "success");
     assert.ok(
@@ -2756,7 +3644,19 @@ test("SR07 reviewer-only changes-required uses current pointer not selected hist
         true,
       );
       await selectSnapshot(context);
+      if (
+        !(await page.$eval("#review-changes-reason", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-changes-reason");
       await page.select("#review-changes-reason", reasonCode);
+      if (
+        !(await page.$eval("#review-changes-ref", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-changes-ref");
       await page.type("#review-changes-ref", "review_ref_123");
       const post = hold(returnPath);
       await confirm(page, "#review-changes-required");
@@ -2797,6 +3697,10 @@ test("SR07 reviewer-only changes-required uses current pointer not selected hist
 test("SR07 owner withdraw works in READY without review authority and return never changes manuscript buffers", async () => {
   await isolated(async ({ page, state, requests, hold }) => {
     await edit(page, "basic", "intro", "반환까지 보존할 원고");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     state.detail = {
       ...source(),
@@ -2812,6 +3716,12 @@ test("SR07 owner withdraw works in READY without review authority and return nev
       await page.$eval("#review-changes-required", (node) => node.disabled),
       true,
     );
+    if (
+      !(await page.$eval("#review-withdraw-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-withdraw-ref");
     await page.type("#review-withdraw-ref", "author_ref_123");
     const post = hold(returnPath);
     await confirm(page, "#review-withdraw");
@@ -2852,8 +3762,20 @@ test("SR07 reason and caller reference are required and never synthesized or fet
     currentSnapshotId: currentId,
   };
   await isolated(async ({ page, requests, state }) => {
+    if (
+      !(await page.$eval("#review-changes-required", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-required");
     await page.click("#review-changes-required");
     assert.equal(await page.$("#ui-confirm-dialog"), null);
+    if (
+      !(await page.$eval("#review-changes-reason", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-reason");
     await page.select("#review-changes-reason", "CONTENT_DEFECT");
     for (const value of ["short", "invalid reference", "a".repeat(65)]) {
       await page.$eval(
@@ -2864,6 +3786,12 @@ test("SR07 reason and caller reference are required and never synthesized or fet
         },
         value,
       );
+      if (
+        !(await page.$eval("#review-changes-required", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-changes-required");
       await page.click("#review-changes-required");
       assert.equal(await page.$("#ui-confirm-dialog"), null);
     }
@@ -2875,6 +3803,12 @@ test("SR07 reason and caller reference are required and never synthesized or fet
 test("SR07 unknown outcome only offers current read and comparison and DRAFT cannot fabricate a receipt", async () => {
   const data = { ...source(), status: "REVIEW", currentSnapshotId: currentId };
   await isolated(async ({ page, state, requests, hold }) => {
+    if (
+      !(await page.$eval("#review-withdraw-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-withdraw-ref");
     await page.type("#review-withdraw-ref", "unknown_return");
     const post = hold(returnPath);
     await confirm(page, "#review-withdraw");
@@ -2907,8 +3841,18 @@ test("SR07 unknown outcome only offers current read and comparison and DRAFT can
 test("permission-only loss survives metadata reset and true reobservation until explicit same-revision baseline acceptance", async () => {
   await isolated(async ({ page, state, requests }) => {
     await edit(page, "basic", "intro", "권한 상실에도 보존");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     state.detail.permissions = { edit: false, review: true, publish: false };
+    if (
+      !(await page.$eval("#review-lifecycle-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-lifecycle-refresh");
     await page.click("#review-lifecycle-refresh");
     await page.waitForFunction(() =>
       document
@@ -2920,6 +3864,12 @@ test("permission-only loss survives metadata reset and true reobservation until 
       true,
     );
     state.detail.permissions = { edit: true, review: false, publish: false };
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "success");
     assert.equal(
@@ -2958,11 +3908,23 @@ test("permission-only loss survives metadata reset and true reobservation until 
 
 test("malformed current metadata denies old positive authority across resets without adopting a revision", async () => {
   await isolated(async ({ page, state }) => {
+    if (
+      !(await page.$eval("#review-lifecycle-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-lifecycle-refresh");
     await page.click("#review-lifecycle-refresh");
     await page.waitForFunction(
       () => !document.getElementById("accept-latest").disabled,
     );
     state.detail = { ...source(null), editRev: nextRev };
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "failure");
     assert.match(
@@ -2979,6 +3941,12 @@ test("malformed current metadata denies old positive authority across resets wit
       true,
     );
     state.detail = source();
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "success");
     assert.equal(
@@ -3000,14 +3968,32 @@ test("pending list replacement and same-revision permission loss cancel lifecycl
         queue(precheckPath, "POST", (request) =>
           json(request, { code: "CSRF_INVALID" }, 403),
         );
+        if (
+          !(await page.$eval("#review-precheck", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-precheck");
         await page.click("#review-precheck");
         await message(page, "요청에 실패");
       }
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
       await page.click('#editor-nav a[href="#child-heading"]');
       const list = hold(`${root}/persons`, "GET");
+      if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-list");
       await page.click("#child-list");
       await list.ready;
       const csrf = duringCsrf ? hold("/admin/api/auth/csrf", "GET") : null;
+      if (
+        !(await page.$eval("#review-request", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#review-request");
       await page.click("#review-request");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       if (duringCsrf) {
@@ -3053,8 +4039,15 @@ test("lifecycle CSRF exceptions retain original request and return fields while 
       const path = action === "REQUEST" ? requestPath : returnPath;
       const selector =
         action === "REQUEST" ? "#review-request" : "#review-withdraw";
-      if (action === "WITHDRAW")
+      if (action === "WITHDRAW") {
+        if (
+          !(await page.$eval("#review-withdraw-ref", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-withdraw-ref");
         await page.type("#review-withdraw-ref", "csrf_reference");
+      }
       queue(path, "POST", (request) =>
         json(request, { code: "CSRF_INVALID" }, 403),
       );
@@ -3087,8 +4080,16 @@ test("lifecycle CSRF exceptions retain original request and return fields while 
 test("lifecycle current 401 ordinary403 and404 purge pending receipts fields and late callback ownership", async () => {
   for (const code of [401, 403, 404]) {
     await isolated(async ({ page, requests, hold, queue, json }) => {
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
       await page.click('#editor-nav a[href="#child-heading"]');
       const list = hold(`${root}/persons`, "GET");
+      if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-list");
       await page.click("#child-list");
       await list.ready;
       const post = hold(requestPath);
@@ -3109,8 +4110,12 @@ test("lifecycle current 401 ordinary403 and404 purge pending receipts fields and
 
 test("lifecycle Cancel Escape keyboard focus and shared layout retain real visible controls at five widths", async () => {
   await isolated(async ({ page, requests }) => {
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+      if (
+        !(await page.$eval("#review-request", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#review-request");
       await page.focus("#review-request");
       await page.keyboard.press("Enter");
       await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -3197,6 +4202,12 @@ test("SR02 rejects all manuscript child and hidden keep buffers before opening c
       );
       await edit(page, section, key, "검수 전 미저장");
       for (const mode of ["value", "clear", "keep"]) {
+        if (
+          !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, `#${section}-${key}-mode`);
         await page.select(`#${section}-${key}-mode`, mode);
         assert.equal(
           await page.$eval("#review-request", (node) => node.disabled),
@@ -3209,11 +4220,29 @@ test("SR02 rejects all manuscript child and hidden keep buffers before opening c
         assert.equal(await page.$("#ui-confirm-dialog"), null);
       }
       await edit(page, section, key, original);
+      if (
+        !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `#${section}-${key}-mode`);
       await page.select(`#${section}-${key}-mode`, "keep");
     }
+    if (
+      !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
     await page.click('#editor-nav a[href="#child-heading"]');
+    if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#child-new");
     await page.click("#child-new");
     await edit(page, "child", "name", "새 자료 미저장");
+    if (
+      !(await page.$eval("#child-name-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-name-mode");
     await page.select("#child-name-mode", "keep");
     assert.equal(
       await page.$eval("#review-request", (node) => node.disabled),
@@ -3231,6 +4260,12 @@ test("SR07 confirmed receipt survives refresh failure or edit-permission loss wi
       currentSnapshotId: currentId,
     };
     await isolated(async ({ page, state, requests, hold, queue, json }) => {
+      if (
+        !(await page.$eval("#review-withdraw-ref", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-withdraw-ref");
       await page.type("#review-withdraw-ref", "confirmed_return");
       const post = hold(returnPath);
       if (refreshFails)
@@ -3280,8 +4315,16 @@ test("SR07 confirmed receipt survives refresh failure or edit-permission loss wi
 test("SR02 invalid full JSON is unknown and late successful JSON cannot cross a replacement generation", async () => {
   for (const replacement of [false, true]) {
     await isolated(async ({ page, requests, hold }) => {
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
       await page.click('#editor-nav a[href="#child-heading"]');
       const list = hold(`${root}/persons`, "GET");
+      if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-list");
       await page.click("#child-list");
       await list.ready;
       const post = hold(requestPath);
@@ -3333,6 +4376,12 @@ test("SR02 invalid full JSON is unknown and late successful JSON cannot cross a 
 test("SR07 reference edits during CSRF acquisition invalidate consent without a second POST", async () => {
   const data = { ...source(), status: "REVIEW", currentSnapshotId: currentId };
   await isolated(async ({ page, requests, hold, queue, json }) => {
+    if (
+      !(await page.$eval("#review-withdraw-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-withdraw-ref");
     await page.type("#review-withdraw-ref", "original_reference");
     queue(returnPath, "POST", (request) =>
       json(request, { code: "CSRF_INVALID" }, 403),
@@ -3343,6 +4392,12 @@ test("SR07 reference edits during CSRF acquisition invalidate consent without a 
     const csrf = hold("/admin/api/auth/csrf", "GET");
     await confirm(page, "#review-withdraw");
     await csrf.ready;
+    if (
+      !(await page.$eval("#review-withdraw-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-withdraw-ref");
     await page.type("#review-withdraw-ref", "_changed");
     await csrf.respond({
       headerName: "X-CSRF-TOKEN",
@@ -3372,6 +4427,9 @@ test("SR07 reference edits during CSRF acquisition invalidate consent without a 
  * @throws {Error} 입력 표시 대기·클릭·키보드 조작이 실패하거나 비운 값·최종 값 검증이 실패한다.
  */
 async function replaceVisibleInput(page, selector, value) {
+  await page.waitForSelector(selector);
+  if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, selector);
   await page.waitForSelector(selector, { visible: true });
   await page.click(selector);
   const originalLength = await page.$eval(
@@ -3396,7 +4454,11 @@ async function replaceVisibleInput(page, selector, value) {
     "",
     `${selector} 전체 비우기`,
   );
-  if (value) await page.type(selector, value);
+  if (value) {
+    if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, selector);
+    await page.type(selector, value);
+  }
   assert.equal(
     await page.$eval(selector, (node) => node.value),
     value,
@@ -3452,6 +4514,12 @@ test("H3 identity establishes explicit Me without private prefetch or global cap
         queue(historyPath, "GET", (request) =>
           json(request, { items: [], hasNext: false, nextAfterId: null }),
         );
+        if (
+          !(await page.$eval("#saved-history-first", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-history-first");
         await page.click("#saved-history-first");
         await savedState(page, "history", "success-empty");
         assert.equal(
@@ -3478,6 +4546,10 @@ test("H3 identity same permissions account or absolute anchor change during cons
       queue(requestPath, "POST", (request) =>
         json(request, lifecycleResponse(), 201),
       );
+      if (
+        !(await page.$eval("#review-request", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#review-request");
       await page.click("#review-request");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       const permissions = { ...state.detail.permissions };
@@ -3519,6 +4591,12 @@ test("H3 identity same permissions account or absolute anchor change during CSRF
       queue(precheckPath, "POST", (request) =>
         json(request, { code: "CSRF_INVALID" }, 403),
       );
+      if (
+        !(await page.$eval("#review-precheck", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-precheck");
       await page.click("#review-precheck");
       await message(page, "요청에 실패");
       const csrf = hold("/admin/api/auth/csrf", "GET");
@@ -3564,8 +4642,15 @@ test("H3 identity late SR02 and SR07 receipts cannot restore prior actor buffers
         ? source()
         : { ...source(), status: "REVIEW", currentSnapshotId: currentId };
     await isolated(async ({ page, state, requests, hold }) => {
-      if (action === "WITHDRAW")
+      if (action === "WITHDRAW") {
+        if (
+          !(await page.$eval("#review-withdraw-ref", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-withdraw-ref");
         await page.type("#review-withdraw-ref", "prior_actor_reference");
+      }
       const post = hold(action === "REQUEST" ? requestPath : returnPath);
       await confirm(
         page,
@@ -3574,7 +4659,19 @@ test("H3 identity late SR02 and SR07 receipts cannot restore prior actor buffers
       await post.ready;
       if (action === "REQUEST") {
         await edit(page, "basic", "intro", "PRIOR_ACTOR_KEEP_BUFFER");
+        if (
+          !(await page.$eval("#basic-intro-mode", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#basic-intro-mode");
         await page.select("#basic-intro-mode", "keep");
+        if (
+          !(await page.$eval("#review-withdraw-ref", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-withdraw-ref");
         await page.type("#review-withdraw-ref", "prior_actor_reference");
       }
       state.me = identityResponse({
@@ -3619,26 +4716,58 @@ test("H3 identity late metadata payload records and preview cannot adopt across 
     await isolated(async (context) => {
       const { page, state, requests, hold, queue, raw } = context;
       await edit(page, "answer", "methodAnswer", "PRIOR_PRIVATE_KEEP_BUFFER");
+      if (
+        !(await page.$eval("#answer-methodAnswer-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#answer-methodAnswer-mode");
       await page.select("#answer-methodAnswer-mode", "keep");
+      if (
+        !(await page.$eval("#review-changes-ref", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-changes-ref");
       await page.type("#review-changes-ref", "prior_private_reference");
       await selectSnapshot(context);
       queue(`${historyPath}/${savedId}`, "GET", (request) =>
         raw(request, savedPayloadText()),
       );
+      if (
+        !(await page.$eval("#saved-payload-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-payload-read");
       await page.click("#saved-payload-read");
       await savedState(page, "payload", "success-populated");
       assert.match(
         await page.$eval("#saved-payload-result", (node) => node.textContent),
         /PRIVATE_ANSWER/,
       );
-      if (lane === "preview")
+      if (lane === "preview") {
+        if (
+          !(await page.$eval("#saved-preview-mode", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-preview-mode");
         await page.select("#saved-preview-mode", "REVEAL");
+      }
       if (lane === "metadata") {
         // 실제 현재 GET·비교로 쓰기가 잠긴 뒤 공개되는 열람 복구 버튼을 사용한다.
+        if (
+          !(await page.$eval("#review-lifecycle-refresh", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-lifecycle-refresh");
         await page.click("#review-lifecycle-refresh");
         await page.waitForFunction(
           () => !document.getElementById("accept-latest").disabled,
         );
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
         await page.waitForSelector("#saved-metadata-refresh", {
           visible: true,
         });
@@ -3650,6 +4779,24 @@ test("H3 identity late metadata payload records and preview cannot adopt across 
         preview: previewPath,
       }[lane];
       const pending = hold(path, "GET");
+      if (
+        !(await page.$eval(
+          lane === "metadata"
+            ? "#saved-metadata-refresh"
+            : lane === "records"
+              ? "#saved-records-first"
+              : `#saved-${lane}-read`,
+          (node) => node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(
+          page,
+          lane === "metadata"
+            ? "#saved-metadata-refresh"
+            : lane === "records"
+              ? "#saved-records-first"
+              : `#saved-${lane}-read`,
+        );
       await page.click(
         lane === "metadata"
           ? "#saved-metadata-refresh"
@@ -3696,10 +4843,22 @@ test("H3 identity malformed or failed Me is fail closed at a protected read boun
   ]) {
     await isolated(async ({ page, state, requests }) => {
       await edit(page, "basic", "intro", "UNVERIFIED_IDENTITY_BUFFER");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
       await page.select("#basic-intro-mode", "keep");
       state.me = body;
       state.meStatus = status;
       // 신선한 상세에서는 복구 버튼이 숨겨져 있으므로 보이는 현재 GET을 사용한다.
+      if (
+        !(await page.$eval("#review-lifecycle-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-lifecycle-refresh");
       await page.click("#review-lifecycle-refresh");
       await page.waitForSelector("#editor[hidden]");
       assert.equal(
@@ -3723,11 +4882,23 @@ test("H3 identity rolling idle and reauth changes preserve same-context CSRF rec
       await lifecycleMessage(page, "CSRF 확인 거절");
       const original = lifecyclePosts(requests)[0].body;
       await edit(page, "basic", "intro", "ROLLING_IDENTITY_KEEP_BUFFER");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
       await page.select("#basic-intro-mode", "keep");
       state.me = identityResponse({
         idleExpiresAt: "2026-10-04T03:10:00Z",
         reauthExpiresAt: "2026-10-04T02:45:00Z",
       });
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
       await page.click("#saved-metadata-refresh");
       await savedState(page, "metadata", "success");
       assert.equal(await page.$eval("#editor", (node) => node.hidden), false);
@@ -3752,6 +4923,12 @@ test("H3 identity rolling idle and reauth changes preserve same-context CSRF rec
         "rolling 기한 갱신은 자동 재시도가 아님",
       );
       await edit(page, "basic", "intro", "저장 도입");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
       await page.select("#basic-intro-mode", "keep");
       const post = hold(requestPath);
       await confirm(page, "#review-request-replay");
@@ -3815,6 +4992,12 @@ test("H3 rejection explicit reconcile correction save and new SR02 use a fresh k
         true,
         "확정 거절 본문은 재전송 복구 경로가 아님",
       );
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
       await page.click("#saved-metadata-refresh");
       await savedState(page, "metadata", "success");
       assert.equal(
@@ -3835,6 +5018,8 @@ test("H3 rejection explicit reconcile correction save and new SR02 use a fresh k
         state.detail.sections.basic.intro = "거절 뒤 실제 수정 저장";
         return json(request, { editRev: nextRev, changed: true });
       });
+      if (!(await page.$eval("#basic-save", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#basic-save");
       await page.click("#basic-save");
       await page.waitForFunction(() =>
         document
@@ -3921,6 +5106,12 @@ test("H3 rejection unknown SR02 remains frozen through reconcile correction and 
           failure === "malformed-success" ? 201 : 422,
         );
       await lifecycleMessage(page, "결과 미확인");
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
       await page.click("#saved-metadata-refresh");
       await savedState(page, "metadata", "success");
       await acceptLifecycle(page);
@@ -3939,6 +5130,8 @@ test("H3 rejection unknown SR02 remains frozen through reconcile correction and 
         state.detail.sections.basic.intro = "미확인 뒤 별도 수정";
         return json(request, { editRev: nextRev, changed: true });
       });
+      if (!(await page.$eval("#basic-save", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#basic-save");
       await page.click("#basic-save");
       await page.waitForFunction(() =>
         document
@@ -4030,12 +5223,24 @@ test("H3 beforeunload synthetic predicate covers dirty return reason and refs wi
   };
   await isolated(async ({ page, requests }) => {
     assert.equal(await leavePrevented(page), false, "깨끗한 최초 화면");
+    if (
+      !(await page.$eval("#review-changes-reason", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-reason");
     await page.select("#review-changes-reason", "CONTENT_DEFECT");
     assert.equal(
       await leavePrevented(page),
       true,
       "참조 없이 사유만 바꿔도 미저장 반환 입력",
     );
+    if (
+      !(await page.$eval("#review-changes-reason", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-reason");
     await page.select("#review-changes-reason", "");
     assert.equal(await leavePrevented(page), false, "최초 값으로 명시 복원");
     for (const selector of ["#review-withdraw-ref", "#review-changes-ref"]) {
@@ -4088,6 +5293,12 @@ test("H3 beforeunload synthetic predicate retains unknown SR02 across metadata a
     const original = lifecyclePosts(requests)[0].body;
     await post.lose();
     await lifecycleMessage(page, "결과 미확인");
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await savedState(page, "metadata", "success");
     await acceptLifecycle(page);
@@ -4171,6 +5382,12 @@ test("H3 beforeunload synthetic predicate acknowledges confirmed SR07 fields but
     currentSnapshotId: currentId,
   };
   await isolated(async ({ page, state, requests, hold }) => {
+    if (
+      !(await page.$eval("#review-changes-reason", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-reason");
     await page.select("#review-changes-reason", "FAIRNESS_ISSUE");
     await replaceVisibleInput(
       page,
@@ -4224,6 +5441,10 @@ test("H3 beforeunload synthetic predicate preserves manuscript and hidden keep b
     assert.equal(await leavePrevented(page), false);
     await edit(page, "basic", "intro", "기존 원고 이탈 보호");
     assert.equal(await leavePrevented(page), true);
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     assert.equal(
       await leavePrevented(page),
@@ -4231,6 +5452,10 @@ test("H3 beforeunload synthetic predicate preserves manuscript and hidden keep b
       "숨은 keep 입력도 기존처럼 보호",
     );
     await edit(page, "basic", "intro", "저장 도입");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
     assert.equal(await leavePrevented(page), false);
     assert.equal(lifecyclePosts(requests).length, 0);
@@ -4242,7 +5467,18 @@ test("H3 child consent resource-kind change preserves edits made during the seco
   for (const variant of ["unchanged", "value", "keep"]) {
     await isolated(
       async ({ page, state, requests, identityRequests, hold }) => {
+        if (
+          !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(
+            page,
+            '#editor-nav a[href="#child-heading"]',
+          );
         await page.click('#editor-nav a[href="#child-heading"]');
+        if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+          await selectEditorTaskFor(page, "#child-new");
         await page.click("#child-new");
         await replaceVisibleInput(page, "#child-name", "BEFORE_CONSENT");
         assert.equal(
@@ -4256,6 +5492,12 @@ test("H3 child consent resource-kind change preserves edits made during the seco
         const sameMe = structuredClone(state.me);
         const samePermissions = structuredClone(state.detail.permissions);
 
+        if (
+          !(await page.$eval("#child-resource", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#child-resource");
         await page.select("#child-resource", "grade-samples");
         await page.waitForSelector("#ui-confirm-dialog[open]");
         assert.equal(identityRequests.length, beforeMe + 1);
@@ -4273,7 +5515,15 @@ test("H3 child consent resource-kind change preserves edits made during the seco
         assert.equal(identityRequests.length, beforeMe + 2);
         if (variant !== "unchanged") {
           await replaceVisibleInput(page, "#child-name", "AFTER_CONSENT");
-          if (variant === "keep") await page.select("#child-name-mode", "keep");
+          if (variant === "keep") {
+            if (
+              !(await page.$eval("#child-name-mode", (node) =>
+                node.checkVisibility(),
+              ))
+            )
+              await selectEditorTaskFor(page, "#child-name-mode");
+            await page.select("#child-name-mode", "keep");
+          }
         }
         await held.respond(sameMe);
 
@@ -4367,7 +5617,18 @@ test("H3 child consent new-child selection preserves edits made during the secon
   for (const variant of ["unchanged", "value", "keep"]) {
     await isolated(
       async ({ page, state, requests, identityRequests, hold }) => {
+        if (
+          !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(
+            page,
+            '#editor-nav a[href="#child-heading"]',
+          );
         await page.click('#editor-nav a[href="#child-heading"]');
+        if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+          await selectEditorTaskFor(page, "#child-new");
         await page.click("#child-new");
         await replaceVisibleInput(page, "#child-name", "BEFORE_CONSENT");
         assert.equal(
@@ -4381,6 +5642,8 @@ test("H3 child consent new-child selection preserves edits made during the secon
         const sameMe = structuredClone(state.me);
         const samePermissions = structuredClone(state.detail.permissions);
 
+        if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+          await selectEditorTaskFor(page, "#child-new");
         await page.click("#child-new");
         await page.waitForSelector("#ui-confirm-dialog[open]");
         assert.equal(identityRequests.length, beforeMe + 1);
@@ -4398,7 +5661,15 @@ test("H3 child consent new-child selection preserves edits made during the secon
         assert.equal(identityRequests.length, beforeMe + 2);
         if (variant !== "unchanged") {
           await replaceVisibleInput(page, "#child-name", "AFTER_CONSENT");
-          if (variant === "keep") await page.select("#child-name-mode", "keep");
+          if (variant === "keep") {
+            if (
+              !(await page.$eval("#child-name-mode", (node) =>
+                node.checkVisibility(),
+              ))
+            )
+              await selectEditorTaskFor(page, "#child-name-mode");
+            await page.select("#child-name-mode", "keep");
+          }
         }
         await held.respond(sameMe);
 
@@ -4503,8 +5774,20 @@ async function prepareManual(context) {
       nextAfterId: null,
     }),
   );
+  if (
+    !(await page.$eval("#saved-history-first", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#saved-history-first");
   await page.click("#saved-history-first");
   await page.waitForSelector(`[data-snapshot-id="${currentId}"]`);
+  if (
+    !(await page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `[data-snapshot-id="${currentId}"]`);
   await page.click(`[data-snapshot-id="${currentId}"]`);
   await confirm(page, "#manual-baseline");
   await page.waitForFunction(
@@ -4534,11 +5817,21 @@ async function fillManual(page, values = {}) {
     ...values,
   };
   for (const [key, value] of Object.entries(fields)) {
-    if (["kind", "result", "separateContext", "formatNo"].includes(key))
+    if (["kind", "result", "separateContext", "formatNo"].includes(key)) {
+      if (
+        !(await page.$eval(`#manual-${key}`, (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, `#manual-${key}`);
       await page.select(`#manual-${key}`, value);
-    else if (["evidence", "notes"].includes(key))
+    } else if (["evidence", "notes"].includes(key))
       await replaceVisibleInput(page, `#manual-${key}`, value);
     else {
+      if (
+        !(await page.$eval(`#manual-${key}-mode`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `#manual-${key}-mode`);
       await page.select(
         `#manual-${key}-mode`,
         value === null ? "null" : "value",
@@ -4586,6 +5879,8 @@ test("SR05 visible field errors prevent POST and focus the actual kind and nulla
   await isolated(async (context) => {
     const { page, requests } = context;
     await prepareManual(context);
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.click("#manual-submit");
     await manualMessage(page, "입력 오류");
     assert.equal(
@@ -4596,8 +5891,14 @@ test("SR05 visible field errors prevent POST and focus the actual kind and nulla
       await page.$eval("#manual-kind-error", (node) => node.textContent),
       /MODEL/,
     );
+    if (!(await page.$eval("#manual-kind", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-kind");
     await page.select("#manual-kind", "MODEL");
+    if (!(await page.$eval("#manual-result", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-result");
     await page.select("#manual-result", "INCOMPLETE");
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.click("#manual-submit");
     await manualMessage(page, "입력 오류");
     assert.equal(
@@ -4665,6 +5966,10 @@ test("SR05 honest unperformed MODEL and APPROVAL require explicit null metadata 
       const { page, requests, queue, json } = context;
       await prepareManual(context);
       await fillManual(page, { kind, notes: "" });
+      if (
+        !(await page.$eval("#manual-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#manual-submit");
       await page.click("#manual-submit");
       await manualMessage(page, "입력 오류");
       assert.equal(
@@ -4733,6 +6038,10 @@ test("SR05 MODEL APPROVAL policy combinations expose specific user errors before
       const { page, requests } = context;
       await prepareManual(context);
       await fillManual(page, values);
+      if (
+        !(await page.$eval("#manual-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#manual-submit");
       await page.click("#manual-submit");
       await manualMessage(page, "입력 오류");
       assert.ok(
@@ -4764,23 +6073,64 @@ test("SR05 format2 fieldwise resolutions preserve closed rows and reject duplica
       }),
     );
     for (let index = 0; index < 2; index++) {
+      if (
+        !(await page.$eval("#manual-resolution-add", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#manual-resolution-add");
       await page.click("#manual-resolution-add");
       const row = `[data-manual-resolution]:nth-child(${index + 1})`;
+      if (
+        !(await page.$eval(`${row} [name="recordId"]`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `${row} [name="recordId"]`);
       await page.type(`${row} [name="recordId"]`, recordId);
+      if (
+        !(await page.$eval(`${row} [name="reasonCode"]`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `${row} [name="reasonCode"]`);
       await page.select(`${row} [name="reasonCode"]`, "ISSUE_VERIFIED");
+      if (
+        !(await page.$eval(`${row} [name="verificationRef"]`, (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, `${row} [name="verificationRef"]`);
       await page.type(`${row} [name="verificationRef"]`, "synthetic_fix");
     }
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.click("#manual-submit");
     await manualMessage(page, "입력 오류");
     assert.match(
       await page.$eval("#manual-resolves-error", (node) => node.textContent),
       /중복/,
     );
+    if (
+      !(await page.$eval("[data-manual-resolution]:last-child button", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        "[data-manual-resolution]:last-child button",
+      );
     await page.click("[data-manual-resolution]:last-child button");
+    if (!(await page.$eval("#manual-result", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-result");
     await page.select("#manual-result", "FAIL");
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.click("#manual-submit");
     await manualMessage(page, "입력 오류");
     assert.equal(manualPosts(requests).length, 0);
+    if (!(await page.$eval("#manual-result", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-result");
     await page.select("#manual-result", "PASS");
     queue(manualPath, "POST", (request) => json(request, manualReceipt(), 201));
     await confirm(page, "#manual-submit");
@@ -4808,6 +6158,14 @@ test("SR05 transport unknown and later rejected reconfirm retain the original bo
     await lost.lose();
     await manualMessage(page, "결과 미확인");
     const original = manualPosts(requests)[0].body;
+    const workspace = await exerciseEditorWorkspace(page, {
+      unknownTarget: "#manual-receipt",
+    });
+    assert.equal(workspace.unknownTarget, "verified");
+    assert.equal(workspace.sameDom, true);
+    assert.equal(workspace.requests, 0);
+    // Node 합성 fixture의 브라우저 정적 favicon은 0이며 실제 HTTPS 서버 건수와 혼동하지 않는다.
+    assert.equal(workspace.browserResourceRequests, 0);
     await replaceVisibleInput(page, "#manual-notes", "Newer unsent notes.");
     queue(manualPath, "POST", (request) =>
       json(request, { code: "EDIT_CONFLICT" }, 409),
@@ -4927,6 +6285,8 @@ test("SR05 newer input during post-consent Me or CSRF cancels an unsent intent w
       const count = manualPosts(requests).length;
       const button =
         boundary === "csrf" ? "#manual-reconfirm" : "#manual-submit";
+      if (!(await page.$eval(button, (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, button);
       await page.click(button);
       await page.waitForSelector("#ui-confirm-dialog[open]");
       const waiting = hold(
@@ -5036,6 +6396,10 @@ test("SR05 confirmed receipt survives explicit GET failure and permission-only d
     queue(root, "GET", (request) =>
       json(request, { code: "STORY_UNAVAILABLE" }, 503),
     );
+    if (
+      !(await page.$eval("#manual-refresh", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#manual-refresh");
     await page.click("#manual-refresh");
     await manualMessage(page, "현재 GET 조회 실패");
     assert.equal(
@@ -5088,6 +6452,12 @@ test("SR05 malformed success and 503 remain unknown and SR06 raw history never r
         current: true,
       });
       queue(manualPath, "GET", (request) => raw(request, original));
+      if (
+        !(await page.$eval("#saved-records-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-records-first");
       await page.click("#saved-records-first");
       await page.waitForFunction(
         () =>
@@ -5114,6 +6484,12 @@ test("SR05 selection history and Cancel protect drafts while explicit discard re
     await prepareManual(context);
     await fillManual(page);
     const reads = savedRequests(requests).length;
+    if (
+      !(await page.$eval(`[data-snapshot-id="${savedId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${savedId}"]`);
     await page.click(`[data-snapshot-id="${savedId}"]`);
     await manualMessage(page, "보호했습니다");
     assert.ok(
@@ -5121,9 +6497,19 @@ test("SR05 selection history and Cancel protect drafts while explicit discard re
         await page.$eval("#saved-review-selected", (node) => node.textContent)
       ).includes(currentId),
     );
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await manualMessage(page, "명시 폐기");
     assert.equal(savedRequests(requests).length, reads);
+    if (
+      !(await page.$eval("#manual-discard", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#manual-discard");
     await page.click("#manual-discard");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-cancel");
@@ -5143,6 +6529,12 @@ test("SR05 selection history and Cancel protect drafts while explicit discard re
       false,
       "합성 술어이며 실제 native 경고 증거 아님",
     );
+    if (
+      !(await page.$eval(`[data-snapshot-id="${savedId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${savedId}"]`);
     await page.click(`[data-snapshot-id="${savedId}"]`);
     assert.equal(
       await page.$eval("#manual-submit", (node) => node.disabled),
@@ -5163,6 +6555,12 @@ test("SR05 permission drift cancels unsent consent but cannot discard a still-ow
         waiting = hold(manualPath);
         await confirm(page, "#manual-submit");
       } else {
+        if (
+          !(await page.$eval("#manual-submit", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#manual-submit");
         await page.click("#manual-submit");
         await page.waitForSelector("#ui-confirm-dialog[open]");
         waiting = hold(mePath, "GET");
@@ -5173,6 +6571,12 @@ test("SR05 permission drift cancels unsent consent but cannot discard a still-ow
         () => !document.getElementById("ui-confirm-dialog"),
       );
       state.detail.permissions = { edit: true, review: false, publish: false };
+      if (
+        !(await page.$eval("#review-lifecycle-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-lifecycle-refresh");
       await page.click("#review-lifecycle-refresh");
       await page.waitForFunction(
         () => !document.getElementById("comparison").hidden,
@@ -5213,9 +6617,19 @@ test("SR05 read-only metadata cannot adopt a newer revision or unlock a new writ
     queue(root, "GET", (request) =>
       json(request, { code: "STORY_UNAVAILABLE" }, 503),
     );
+    if (
+      !(await page.$eval("#manual-refresh", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#manual-refresh");
     await page.click("#manual-refresh");
     await manualMessage(page, "현재 GET 조회 실패");
     state.detail = { ...manualSource(), editRev: nextRev };
+    if (
+      !(await page.$eval("#saved-metadata-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
     await page.click("#saved-metadata-refresh");
     await page.waitForFunction(
       () =>
@@ -5229,8 +6643,20 @@ test("SR05 read-only metadata cannot adopt a newer revision or unlock a new writ
         nextAfterId: null,
       }),
     );
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await savedState(page, "history", "success-populated");
+    if (
+      !(await page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${currentId}"]`);
     await page.click(`[data-snapshot-id="${currentId}"]`);
     assert.equal(
       await page.$eval("#manual-baseline", (node) => node.disabled),
@@ -5311,6 +6737,8 @@ test("SR05 Unicode field limits and total UTF8 payload bound fail visibly before
       input.value = "가".repeat(20001);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.click("#manual-submit");
     await manualMessage(page, "입력 오류");
     assert.match(
@@ -5325,6 +6753,8 @@ test("SR05 Unicode field limits and total UTF8 payload bound fail visibly before
       input.value = "A" + "\u0001".repeat(3999);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.click("#manual-submit");
     await manualMessage(page, "입력 오류");
     assert.match(
@@ -5428,6 +6858,12 @@ test("SR05 first snapshot binding preserves preselection evidence and notes with
         nextAfterId: null,
       }),
     );
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await savedState(page, "history", "success-populated");
     await page.waitForFunction(
@@ -5435,6 +6871,12 @@ test("SR05 first snapshot binding preserves preselection evidence and notes with
       {},
       currentId,
     );
+    if (
+      !(await page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${currentId}"]`);
     await page.click(`[data-snapshot-id="${currentId}"]`);
     // 선택 성공 또는 보호 안내가 표시되어야 클릭 처리의 완료로 본다.
     await page.waitForFunction(
@@ -5485,6 +6927,12 @@ test("SR05 first snapshot binding preserves preselection evidence and notes with
     assert.ok(target.includes(`상세 쓰기 번호 ${rev}`));
     assert.ok(target.includes(`선택 ${currentId}`));
     assert.match(target, /명시 수락됨/);
+    if (
+      !(await page.$eval(`[data-snapshot-id="${savedId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${savedId}"]`);
     await page.click(`[data-snapshot-id="${savedId}"]`);
     await manualMessage(page, "보호했습니다");
     assert.equal(
@@ -5564,6 +7012,10 @@ for (const boundary of [
         (nodes) => nodes.map((node) => [node.id, node.value]),
       );
       const start = requests.length;
+      if (
+        !(await page.$eval("#manual-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#manual-submit");
       await page.click("#manual-submit");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       assert.equal(
@@ -5599,6 +7051,12 @@ for (const boundary of [
           review: false,
           publish: false,
         };
+        if (
+          !(await page.$eval("#review-lifecycle-refresh", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-lifecycle-refresh");
         await page.click("#review-lifecycle-refresh");
         await page.waitForFunction(
           () =>
@@ -5678,6 +7136,7 @@ for (const boundary of [
           receipt,
         );
       }
+      await selectEditorTaskFor(page, "#manual-reconfirm");
       await page.waitForSelector("#manual-reconfirm", { visible: true });
       assert.equal(
         await page.$eval("#manual-reconfirm", (node) => node.disabled),
@@ -5811,8 +7270,11 @@ async function readIssuePage(
   state,
 ) {
   const { page, queue, json } = context;
-  await page.waitForSelector(`${selector}:not(:disabled)`, { visible: true });
+  await page.waitForSelector(`${selector}:not(:disabled)`);
   queue(issuesPath, "GET", (request) => json(request, data));
+  if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, selector);
+  await page.waitForSelector(`${selector}:not(:disabled)`, { visible: true });
   await page.click(selector);
   await savedState(
     page,
@@ -5874,8 +7336,23 @@ test("PT-A11 requires selected positive BIGINT and exact observed REVIEW without
         nextAfterId: null,
       }),
     );
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await savedState(page, "history", "success-populated");
+    if (
+      !(await page.$eval('[data-snapshot-id="9223372036854775808"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        '[data-snapshot-id="9223372036854775808"]',
+      );
     await page.click('[data-snapshot-id="9223372036854775808"]');
     await page.evaluate(() =>
       document
@@ -5962,6 +7439,12 @@ test("PT-A11 synthetic populated metadata is literal allowlisted one-page histor
     );
     for (const filter of ["OPEN", "RESOLVED", "ALL"]) {
       const count = issueRequests(requests).length;
+      if (
+        !(await page.$eval("#saved-issues-filter", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-filter");
       await page.select("#saved-issues-filter", filter);
       await savedState(page, "issues", "stale");
       assert.equal(
@@ -5987,7 +7470,7 @@ test("PT-A11 synthetic populated metadata is literal allowlisted one-page histor
       await page.evaluate(() => localStorage.length + sessionStorage.length),
       0,
     );
-    for (const width of [360, 768, 1440]) {
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
       assert.equal(
         await page.evaluate(
@@ -6006,6 +7489,12 @@ test("PT-A11 synthetic populated metadata is literal allowlisted one-page histor
             (node) => node.getBoundingClientRect().height >= 48,
           ),
         );
+      if (
+        !(await page.$eval("#saved-issues-filter", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-filter");
       await page.focus("#saved-issues-filter");
       await page.keyboard.press("Tab");
       assert.equal(
@@ -6097,6 +7586,12 @@ test("PT-A11 malformed envelopes items cursors and filter echoes fail closed wit
       ["OPEN", resolvedIssue()],
       ["RESOLVED", issueItem()],
     ]) {
+      if (
+        !(await page.$eval("#saved-issues-filter", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-filter");
       await page.select("#saved-issues-filter", filter);
       await readIssuePage(
         context,
@@ -6106,6 +7601,12 @@ test("PT-A11 malformed envelopes items cursors and filter echoes fail closed wit
       );
     }
     queue(issuesPath, "GET", (request) => raw(request, '{"items":'));
+    if (
+      !(await page.$eval("#saved-issues-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-first");
     await page.click("#saved-issues-first");
     await savedState(page, "issues", "failure");
     assert.equal(issueRequests(requests).length, malformed.length + 3);
@@ -6135,6 +7636,12 @@ test("PT-A11 late selection filter and post-body identity boundaries cannot over
       const { page, requests, hold } = context;
       await selectSnapshot(context);
       const old = hold(issuesPath, "GET");
+      if (
+        !(await page.$eval("#saved-issues-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-first");
       await page.click("#saved-issues-first");
       await old.ready;
       await savedState(page, "issues", "loading");
@@ -6144,9 +7651,23 @@ test("PT-A11 late selection filter and post-body identity boundaries cannot over
         await old.respond(issuePage([issueItem()], null));
         await afterBody.ready;
       }
-      if (boundary === "selection")
+      if (boundary === "selection") {
+        if (
+          !(await page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, `[data-snapshot-id="${currentId}"]`);
         await page.click(`[data-snapshot-id="${currentId}"]`);
-      else await page.select("#saved-issues-filter", "RESOLVED");
+      } else {
+        if (
+          !(await page.$eval("#saved-issues-filter", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-issues-filter");
+        await page.select("#saved-issues-filter", "RESOLVED");
+      }
       await savedState(page, "issues", "stale");
       assert.equal(issueRequests(requests).length, 1);
       assert.equal(
@@ -6184,6 +7705,12 @@ test("PT-A11 current detail metadata permission and generation replacement purge
       const { page, state, hold } = context;
       await selectSnapshot(context);
       const old = hold(issuesPath, "GET");
+      if (
+        !(await page.$eval("#saved-issues-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-first");
       await page.click("#saved-issues-first");
       await old.ready;
       state.detail = {
@@ -6195,6 +7722,12 @@ test("PT-A11 current detail metadata permission and generation replacement purge
           publish: false,
         },
       };
+      if (
+        !(await page.$eval("#review-lifecycle-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-lifecycle-refresh");
       await page.click("#review-lifecycle-refresh");
       await page.waitForFunction(
         () => !document.getElementById("comparison").hidden,
@@ -6208,6 +7741,12 @@ test("PT-A11 current detail metadata permission and generation replacement purge
         true,
       );
       if (boundary === "metadata") {
+        if (
+          !(await page.$eval("#saved-metadata-refresh", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-metadata-refresh");
         await page.click("#saved-metadata-refresh");
         await savedState(page, "metadata", "success");
         assert.ok(
@@ -6293,6 +7832,12 @@ test("PT-A11 401 403 404 audit503 and lost responses remain failures without ret
       await selectSnapshot(context);
       await readIssuePage(context, issuePage([issueItem()]));
       const pending = hold(issuesPath, "GET");
+      if (
+        !(await page.$eval("#saved-issues-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-first");
       await page.click("#saved-issues-first");
       await pending.ready;
       assert.equal(
@@ -6352,8 +7897,20 @@ test("PT-A11 actor or absolute auth-context drift after parsed history purges al
     await isolated(async (context) => {
       const { page, hold, requests } = context;
       await selectSnapshot(context);
+      if (
+        !(await page.$eval("#manual-evidence", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#manual-evidence");
       await page.type("#manual-evidence", "Old actor sensitive draft");
       const pending = hold(issuesPath, "GET");
+      if (
+        !(await page.$eval("#saved-issues-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-first");
       await page.click("#saved-issues-first");
       await pending.ready;
       const identity = hold(mePath, "GET");
@@ -6377,26 +7934,66 @@ test("PT-A11 filter and failure preserve manuscript child keep buffers and nativ
     async (context) => {
       const { page, requests, hold } = context;
       await edit(page, "basic", "intro", "ISSUE_HISTORY_KEEP");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
       await page.select("#basic-intro-mode", "keep");
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
       await page.click('#editor-nav a[href="#child-heading"]');
+      if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-new");
       await page.click("#child-new");
       await page.waitForSelector("#child-name");
+      if (!(await page.$eval("#child-name", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-name");
       await page.type("#child-name", "ISSUE_CHILD_BUFFER");
+      if (
+        !(await page.$eval("#child-name-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#child-name-mode");
       await page.select("#child-name-mode", "keep");
       const before = await page.$$eval("[data-field], [data-value]", (nodes) =>
         nodes.map((node) => [node.id, node.value]),
       );
       // 새 자료 작성이 초기화한 사본 선택은 버퍼 준비 뒤 공개 이력 조회로 다시 설정한다.
       await selectSnapshot(context);
+      if (
+        !(await page.$eval("#saved-issues-filter", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-filter");
       await page.select("#saved-issues-filter", "OPEN");
       await page.waitForSelector("#saved-issues-first:not(:disabled)", {
         visible: true,
       });
       const pending = hold(issuesPath, "GET");
+      if (
+        !(await page.$eval("#saved-issues-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-first");
       await page.click("#saved-issues-first");
       await pending.ready;
       await pending.lose();
       await savedState(page, "issues", "failure");
+      if (
+        !(await page.$eval("#saved-issues-filter", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-filter");
       await page.select("#saved-issues-filter", "ALL");
       await readIssuePage(context, issuePage());
       assert.deepEqual(
@@ -6429,16 +8026,34 @@ test("PT-A11 preserves manual A receipt exact replay and newer B draft across fi
       (node) => node.textContent,
     );
     await replaceVisibleInput(page, "#manual-notes", "Newer B remains unsent.");
+    if (
+      !(await page.$eval("#saved-issues-filter", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-filter");
     await page.select("#saved-issues-filter", "RESOLVED");
     await readIssuePage(
       context,
       issuePage([resolvedIssue({ snapshotId: currentId })]),
     );
     const lost = hold(issuesPath, "GET");
+    if (
+      !(await page.$eval("#saved-issues-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-first");
     await page.click("#saved-issues-first");
     await lost.ready;
     await lost.lose();
     await savedState(page, "issues", "failure");
+    if (
+      !(await page.$eval("#saved-issues-filter", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-filter");
     await page.select("#saved-issues-filter", "ALL");
     assert.equal(
       await page.$eval("#manual-receipt", (node) => node.textContent),
@@ -6471,8 +8086,15 @@ test("PT-A11 reads keep unknown SR02 and SR07 intents separate from empty histor
       async (context) => {
         const { page, hold, requests } = context;
         const path = action === "REQUEST" ? requestPath : returnPath;
-        if (action === "WITHDRAW")
+        if (action === "WITHDRAW") {
+          if (
+            !(await page.$eval("#review-withdraw-ref", (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(page, "#review-withdraw-ref");
           await page.type("#review-withdraw-ref", "synthetic_unknown");
+        }
         const pending = hold(path);
         await confirm(
           page,
@@ -6482,9 +8104,21 @@ test("PT-A11 reads keep unknown SR02 and SR07 intents separate from empty histor
         await pending.lose();
         await lifecycleMessage(page, "결과 미확인");
         const original = lifecyclePosts(requests)[0].body;
+        if (
+          !(await page.$eval("#saved-metadata-refresh", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-metadata-refresh");
         await page.click("#saved-metadata-refresh");
         await savedState(page, "metadata", "success");
         await selectSnapshot(context);
+        if (
+          !(await page.$eval("#saved-issues-filter", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-issues-filter");
         await page.select("#saved-issues-filter", "OPEN");
         await readIssuePage(context, issuePage());
         assert.equal(
@@ -6540,6 +8174,12 @@ test("PT-A11 next cursor must descend and a lost next page never reuses its curs
     }
     await readIssuePage(context, issuePage(items, issueCursor));
     const pending = hold(issuesPath, "GET");
+    if (
+      !(await page.$eval("#saved-issues-next", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-next");
     await page.click("#saved-issues-next");
     await pending.ready;
     assert.equal(
@@ -6572,6 +8212,12 @@ test("PT-A11 path replacement purges displayed and pending pages without crossin
       let old;
       if (pending) {
         old = hold(issuesPath, "GET");
+        if (
+          !(await page.$eval("#saved-issues-first", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-issues-first");
         await page.click("#saved-issues-first");
         await old.ready;
       }
@@ -6629,6 +8275,12 @@ test("PT-A11 permission drift purges history and unsent consent but retains owne
         waiting = hold(manualPath);
         await confirm(page, "#manual-submit");
       } else {
+        if (
+          !(await page.$eval("#manual-submit", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#manual-submit");
         await page.click("#manual-submit");
         await page.waitForSelector("#ui-confirm-dialog[open]");
         waiting = hold(mePath, "GET");
@@ -6639,6 +8291,12 @@ test("PT-A11 permission drift purges history and unsent consent but retains owne
         () => !document.getElementById("ui-confirm-dialog"),
       );
       state.detail.permissions = { edit: true, review: false, publish: false };
+      if (
+        !(await page.$eval("#review-lifecycle-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-lifecycle-refresh");
       await page.click("#review-lifecycle-refresh");
       await page.waitForFunction(
         () => !document.getElementById("comparison").hidden,
@@ -6748,6 +8406,8 @@ async function cloneMessage(page, text) {
 
 /** 명시 복제 GET의 완료를 기다리며 원고 비교 수락을 대신하지 않는다. */
 async function refreshCloneCandidate(page) {
+  if (!(await page.$eval("#clone-refresh", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#clone-refresh");
   await page.click("#clone-refresh");
   await cloneMessage(page, "후보만 갱신");
 }
@@ -6866,6 +8526,10 @@ test("SP05 Cancel and Escape preserve input and restore shared keyboard focus wi
       "clone_cancel_buffer",
     );
     for (const escape of [false, true]) {
+      if (
+        !(await page.$eval("#clone-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#clone-submit");
       await page.focus("#clone-submit");
       await page.keyboard.press("Enter");
       await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -6892,6 +8556,10 @@ test("SP05 Cancel and Escape preserve input and restore shared keyboard focus wi
 test("SP05 rechecks input and observed permission drift after consent while preserving unsent buffers", async () => {
   for (const drift of ["input", "permission"]) {
     await isolated(async ({ page, state, requests, hold }) => {
+      if (
+        !(await page.$eval("#clone-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#clone-submit");
       await page.click("#clone-submit");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       const me = hold(mePath, "GET");
@@ -6908,6 +8576,12 @@ test("SP05 rechecks input and observed permission drift after consent while pres
         );
       else {
         state.detail.permissions = { edit: false, review: true, publish: true };
+        if (
+          !(await page.$eval("#review-lifecycle-refresh", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#review-lifecycle-refresh");
         await page.click("#review-lifecycle-refresh");
         await page.waitForFunction(
           () => !document.getElementById("comparison").hidden,
@@ -6935,8 +8609,16 @@ test("SP05 fixed actor or absolute deadline drift purges all before consent and 
       await replaceVisibleInput(page, "#review-withdraw-ref", "private_buffer");
       if (stage === "before") {
         state.me = identityResponse(changed);
+        if (
+          !(await page.$eval("#clone-submit", (node) => node.checkVisibility()))
+        )
+          await selectEditorTaskFor(page, "#clone-submit");
         await page.click("#clone-submit");
       } else if (stage === "after") {
+        if (
+          !(await page.$eval("#clone-submit", (node) => node.checkVisibility()))
+        )
+          await selectEditorTaskFor(page, "#clone-submit");
         await page.click("#clone-submit");
         await page.waitForSelector("#ui-confirm-dialog[open]");
         state.me = identityResponse(changed);
@@ -7089,6 +8771,10 @@ test("SP05 prior unknown survives a later rejection and current GET with only fr
         }),
       ),
     );
+    if (
+      !(await page.$eval("#clone-reconfirm", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#clone-reconfirm");
     await page.click("#clone-reconfirm");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     assert.match(
@@ -7388,6 +9074,12 @@ test("SP05 owned inflight receipt survives current permission and generation dri
     await confirm(page, "#clone-submit");
     await pending.ready;
     state.detail.permissions = { edit: false, review: false, publish: false };
+    if (
+      !(await page.$eval("#review-lifecycle-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-lifecycle-refresh");
     await page.click("#review-lifecycle-refresh");
     await page.waitForFunction(
       () => !document.getElementById("comparison").hidden,
@@ -7411,10 +9103,30 @@ test("SP05 candidate-only GET and success preserve manuscript child hidden keep 
   await isolated(
     async ({ page, state, requests, queue, json }) => {
       await edit(page, "basic", "intro", "원고 미저장");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
       await page.select("#basic-intro-mode", "keep");
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
       await page.click('#editor-nav a[href="#child-heading"]');
+      if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-new");
       await page.click("#child-new");
       await edit(page, "child", "name", "자식 미저장");
+      if (
+        !(await page.$eval("#child-name-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#child-name-mode");
       await page.select("#child-name-mode", "keep");
       await fillManual(page, { notes: "별도 기록 입력 B" });
       const before = await page.$eval(
@@ -7573,6 +9285,8 @@ test("SP05 explicit safe link preserves the real native unsaved-navigation guard
     const dialog = new Promise((resolve) =>
       page.once("dialog", (value) => resolve(value.type())),
     );
+    if (!(await page.$eval("#clone-link", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#clone-link");
     await page.click("#clone-link");
     assert.equal(await dialog, "beforeunload");
     assert.equal(page.url(), url, "기존 핸들러가 네이티브 이탈을 취소함");
@@ -7626,6 +9340,12 @@ for (const status of [401, 403, 404]) {
           const identity = { ...state.me };
           // 편집 가능한 실제 DRAFT에서 입력한 뒤 복제 후보만 PUBLISHED로 조회한다.
           await edit(page, "basic", "intro", "접근 종료 전 비공개 원고");
+          if (
+            !(await page.$eval("#basic-intro-mode", (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(page, "#basic-intro-mode");
           await page.select("#basic-intro-mode", "keep");
           await edit(
             page,
@@ -7633,10 +9353,35 @@ for (const status of [401, 403, 404]) {
             "methodAnswer",
             "접근 종료 전 비공개 정답",
           );
+          if (
+            !(await page.$eval("#answer-methodAnswer-mode", (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(page, "#answer-methodAnswer-mode");
           await page.select("#answer-methodAnswer-mode", "keep");
+          if (
+            !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(
+              page,
+              '#editor-nav a[href="#child-heading"]',
+            );
           await page.click('#editor-nav a[href="#child-heading"]');
+          if (
+            !(await page.$eval("#child-new", (node) => node.checkVisibility()))
+          )
+            await selectEditorTaskFor(page, "#child-new");
           await page.click("#child-new");
           await edit(page, "child", "name", "접근 종료 전 비공개 자식");
+          if (
+            !(await page.$eval("#child-name-mode", (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(page, "#child-name-mode");
           await page.select("#child-name-mode", "keep");
           await replaceVisibleInput(
             page,
@@ -7710,6 +9455,12 @@ for (const status of [401, 403, 404]) {
 
           // 소유 중인 복제 응답이 접근을 종료한 뒤, 이미 전송한 상세 GET도 폐기해야 한다.
           const late = hold(root, "GET");
+          if (
+            !(await page.$eval("#review-lifecycle-refresh", (node) =>
+              node.checkVisibility(),
+            ))
+          )
+            await selectEditorTaskFor(page, "#review-lifecycle-refresh");
           await page.click("#review-lifecycle-refresh");
           await late.ready;
           const identityReads = identityRequests.length;
@@ -7921,7 +9672,8 @@ test("SP05 safety confirmed boundary still allows unconfirmed unknown to initial
 
 test("SP05 panel and real shared confirmation keep five-width accessibility without new styles", async () => {
   await isolated(async ({ page }) => {
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    await selectEditorTaskFor(page, "#clone-panel");
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900 });
       const layout = await page.$eval("#clone-panel", (panel) => ({
         labelled: Boolean(
@@ -7945,6 +9697,10 @@ test("SP05 panel and real shared confirmation keep five-width accessibility with
           (button) => button.text && button.width >= 48 && button.height >= 48,
         ),
       );
+      if (
+        !(await page.$eval("#clone-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#clone-submit");
       await page.focus("#clone-submit");
       await page.keyboard.press("Enter");
       await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -7989,43 +9745,109 @@ const resolutionBatchPath = `${root}/regressions/${resolutionBatchKey}`;
 /** PT-A12 실제 API 성공을 주장하지 않는 닫힌 합성 영수증이다. */
 function resolutionReceipt(replayed = false, overrides = {}) {
   const original = {
-    issueKey: resolutionIssueKey, snapshotId: currentId, editRev: rev,
-    state: "RESOLVED", targetBatchKey: resolutionBatchKey, resolvedAt: "2026-10-02T00:00:00Z",
+    issueKey: resolutionIssueKey,
+    snapshotId: currentId,
+    editRev: rev,
+    state: "RESOLVED",
+    targetBatchKey: resolutionBatchKey,
+    resolvedAt: "2026-10-02T00:00:00Z",
   };
-  return { action: "ISSUE_RESOLVE", replayed, changed: !replayed,
-    original, current: { ...original }, requestId: "88888888-8888-4888-8888-888888888888", ...overrides };
+  return {
+    action: "ISSUE_RESOLVE",
+    replayed,
+    changed: !replayed,
+    original,
+    current: { ...original },
+    requestId: "88888888-8888-4888-8888-888888888888",
+    ...overrides,
+  };
 }
 
 /** 실제 실행·운영 유효성을 만들지 않는 전체 비민감 BatchDetail 합성 전송이다. */
 function resolutionBatchFixture() {
   return {
-    batchKey: resolutionBatchKey, purpose: "REVIEW", snapshotId: currentId,
-    runtimeConfigId: "SYNTHETIC_REVIEW", runtimeEpoch: "9007199254740993000",
-    datasetHash: "a".repeat(64), state: "COMPLETED", passed: true,
-    repeatCount: 3, totalJobs: 3, completedJobs: 3, failedComparisons: 0, unresolvedJobs: 0,
-    createdAt: "2026-10-01T00:00:00Z", batchDeadline: "2026-10-02T00:00:00Z",
-    completedAt: "2026-10-01T00:01:00Z", validUntil: null,
+    batchKey: resolutionBatchKey,
+    purpose: "REVIEW",
+    snapshotId: currentId,
+    runtimeConfigId: "SYNTHETIC_REVIEW",
+    runtimeEpoch: "9007199254740993000",
+    datasetHash: "a".repeat(64),
+    state: "COMPLETED",
+    passed: true,
+    repeatCount: 3,
+    totalJobs: 3,
+    completedJobs: 3,
+    failedComparisons: 0,
+    unresolvedJobs: 0,
+    createdAt: "2026-10-01T00:00:00Z",
+    batchDeadline: "2026-10-02T00:00:00Z",
+    completedAt: "2026-10-01T00:01:00Z",
+    validUntil: null,
     items: [1, 2, 3].map((repeatNo) => ({
-      sampleCode: "SAMPLE", repeatNo, jobKey: `99999999-9999-4999-8999-99999999999${repeatNo}`,
-      state: "COMPLETED", comparison: "PASS", errorCode: null,
+      sampleCode: "SAMPLE",
+      repeatNo,
+      jobKey: `99999999-9999-4999-8999-99999999999${repeatNo}`,
+      state: "COMPLETED",
+      comparison: "PASS",
+      errorCode: null,
     })),
     requestId: "88888888-8888-4888-8888-888888888888",
   };
 }
 
-/** 실제 입력 이벤트로 비개인 해소 버퍼만 변경한다. */
+/**
+ * 근거 작업의 해소 입력만 펼친 뒤 실제 입력 이벤트로 비개인 버퍼를 변경한다.
+ * @param {object} page 격리된 제품 편집기.
+ * @param {string} id batch 또는 ref인 기존 입력 접미사.
+ * @param {string} value 검증할 원문 값. 잘못된 값도 제품 검증을 위해 그대로 전달한다.
+ */
 async function resolutionInput(page, id, value) {
-  await page.$eval(`#issue-resolution-${id}`, (node, text) => {
-    node.value = text;
-    node.dispatchEvent(new Event("input", { bubbles: true }));
-  }, value);
+  if (
+    !(await page.$eval(`#issue-resolution-${id}`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `#issue-resolution-${id}`);
+  await page.$eval(
+    `#issue-resolution-${id}`,
+    (node, text) => {
+      node.value = text;
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+    value,
+  );
 }
 
 /** 실제 이력 조회·선택·보이는 지적 버튼만으로 현재 새 해소 후보를 준비한다. */
 async function prepareResolution(context, kind = "GRADING") {
   await selectSnapshot(context);
+  if (
+    !(await context.page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(
+      context.page,
+      `[data-snapshot-id="${currentId}"]`,
+    );
   await context.page.click(`[data-snapshot-id="${currentId}"]`);
-  await readIssuePage(context, issuePage([issueItem({ snapshotId: currentId, kind })]));
+  await readIssuePage(
+    context,
+    issuePage([issueItem({ snapshotId: currentId, kind })]),
+  );
+  await context.page.waitForSelector(
+    `[data-resolution-issue="${resolutionIssueKey}"]`,
+  );
+  if (
+    !(await context.page.$eval(
+      `[data-resolution-issue="${resolutionIssueKey}"]`,
+      (node) => node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(
+      context.page,
+      `[data-resolution-issue="${resolutionIssueKey}"]`,
+    );
   await context.page.click(`[data-resolution-issue="${resolutionIssueKey}"]`);
   await resolutionInput(context.page, "batch", resolutionBatchKey);
   await resolutionInput(context.page, "ref", "synthetic_verified");
@@ -8033,15 +9855,23 @@ async function prepareResolution(context, kind = "GRADING") {
 
 /** 공개 상태와 작업 종료를 함께 기다려 후속 재확인과 경쟁하지 않는다. */
 async function resolutionMessage(page, text) {
-  await page.waitForFunction((fragment) =>
-    document.getElementById("issue-resolution-status")?.textContent.includes(fragment) &&
-    document.getElementById("issue-resolution").getAttribute("aria-busy") === "false",
-  {}, text);
+  await page.waitForFunction(
+    (fragment) =>
+      document
+        .getElementById("issue-resolution-status")
+        ?.textContent.includes(fragment) &&
+      document.getElementById("issue-resolution").getAttribute("aria-busy") ===
+        "false",
+    {},
+    text,
+  );
 }
 
 /** PT-A12 전송만 분리하며 신원 관측은 업무 자동 조회로 세지 않는다. */
 function resolutionPosts(requests) {
-  return requests.filter(({ method, path }) => method === "POST" && path.endsWith("/resolve"));
+  return requests.filter(
+    ({ method, path }) => method === "POST" && path.endsWith("/resolve"),
+  );
 }
 
 test("PT-A12 explicit detail and NEW use exact six fields without revision adoption, prefetch or XSS", async () => {
@@ -8050,31 +9880,91 @@ test("PT-A12 explicit detail and NEW use exact six fields without revision adopt
       const { page, queue, json, requests } = context;
       const initial = requests.length;
       await prepareResolution(context, kind);
-      assert.equal(requests.filter(({ path }) => path.includes("/regressions/")).length, 0);
+      assert.equal(
+        requests.filter(({ path }) => path.includes("/regressions/")).length,
+        0,
+      );
       assert.equal(await page.evaluate(() => window.injected), undefined);
-      queue(resolutionBatchPath, "GET", (request) => json(request, resolutionBatchFixture()));
+      queue(resolutionBatchPath, "GET", (request) =>
+        json(request, resolutionBatchFixture()),
+      );
+      if (
+        !(await page.$eval("#issue-resolution-batch-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#issue-resolution-batch-read");
       await page.click("#issue-resolution-batch-read");
       await page.waitForFunction(() =>
-        document.getElementById("issue-resolution-batch-status").textContent.includes("관측 완료"));
-      assert.deepEqual(JSON.parse(await page.$eval("#issue-resolution-batch-detail", (node) => node.textContent)), resolutionBatchFixture());
-      const before = await page.$eval("#saved-review-current", (node) => node.textContent);
-      queue(resolutionPath, "POST", (request) => json(request, resolutionReceipt()));
+        document
+          .getElementById("issue-resolution-batch-status")
+          .textContent.includes("관측 완료"),
+      );
+      assert.deepEqual(
+        JSON.parse(
+          await page.$eval(
+            "#issue-resolution-batch-detail",
+            (node) => node.textContent,
+          ),
+        ),
+        resolutionBatchFixture(),
+      );
+      const before = await page.$eval(
+        "#saved-review-current",
+        (node) => node.textContent,
+      );
+      queue(resolutionPath, "POST", (request) =>
+        json(request, resolutionReceipt()),
+      );
       await confirm(page, "#issue-resolution-submit");
       await resolutionMessage(page, "영수증을 확인");
       const posts = resolutionPosts(requests);
       assert.equal(posts.length, 1);
       const body = JSON.parse(posts[0].body);
-      assert.deepEqual(Object.keys(body).sort(), ["expectedRev", "requestKey", "reasonCode", "verificationRef", "targetBatchKey", "targetReviewId"].sort());
+      assert.deepEqual(
+        Object.keys(body).sort(),
+        [
+          "expectedRev",
+          "requestKey",
+          "reasonCode",
+          "verificationRef",
+          "targetBatchKey",
+          "targetReviewId",
+        ].sort(),
+      );
       assert.equal(body.expectedRev, rev);
       assert.equal(body.targetBatchKey, resolutionBatchKey);
       assert.equal(body.targetReviewId, null);
-      assert.equal(body.reasonCode, kind === "INFRA" ? "INFRA_RECOVERED" : "GRADING_FIX_VERIFIED");
-      assert.match(body.requestKey, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-      assert.equal(await page.$eval("#saved-review-current", (node) => node.textContent), before);
-      assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "confirmed");
+      assert.equal(
+        body.reasonCode,
+        kind === "INFRA" ? "INFRA_RECOVERED" : "GRADING_FIX_VERIFIED",
+      );
+      assert.match(
+        body.requestKey,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      assert.equal(
+        await page.$eval("#saved-review-current", (node) => node.textContent),
+        before,
+      );
+      assert.equal(
+        await page.$eval(
+          "#issue-resolution-receipt",
+          (node) => node.dataset.state,
+        ),
+        "confirmed",
+      );
       assert.equal(await leavePrevented(page), false);
-      assert.deepEqual(requests.slice(initial).filter(({ path }) => /preview|\/records|\/regressions$/.test(path)), []);
-      assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
+      assert.deepEqual(
+        requests
+          .slice(initial)
+          .filter(({ path }) => /preview|\/records|\/regressions$/.test(path)),
+        [],
+      );
+      assert.equal(
+        await page.evaluate(() => localStorage.length + sessionStorage.length),
+        0,
+      );
     }, manualSource());
   }
 });
@@ -8088,31 +9978,74 @@ test("PT-A12 unknown A retains immutable replay through B edits, vanished page, 
     await lost.lose();
     await resolutionMessage(page, "결과 미확인");
     const first = resolutionPosts(requests)[0];
-    await resolutionInput(page, "batch", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    await resolutionInput(
+      page,
+      "batch",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
     await resolutionInput(page, "ref", "buffer_B_verified");
+    await selectEditorTaskFor(page, "#manual-notes");
     await page.$eval("#manual-notes", (node) => {
       node.value = "보존된 별도 수동 입력";
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    if (
+      !(await page.$eval("#saved-issues-filter", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-filter");
     await page.select("#saved-issues-filter", "RESOLVED");
     await readIssuePage(context, issuePage());
-    assert.match(await page.$eval("#issue-resolution-source", (node) => node.textContent), new RegExp(resolutionIssueKey));
-    queue(resolutionPath, "POST", (request) => json(request, { code: "EDIT_CONFLICT" }, 409));
+    assert.match(
+      await page.$eval("#issue-resolution-source", (node) => node.textContent),
+      new RegExp(resolutionIssueKey),
+    );
+    queue(resolutionPath, "POST", (request) =>
+      json(request, { code: "EDIT_CONFLICT" }, 409),
+    );
     await confirm(page, "#issue-resolution-replay");
     await resolutionMessage(page, "요청 거절");
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "unknown");
-    state.detail = { ...state.detail, status: "DRAFT", editRev: nextRev, currentSnapshotId: null };
+    assert.equal(
+      await page.$eval(
+        "#issue-resolution-receipt",
+        (node) => node.dataset.state,
+      ),
+      "unknown",
+    );
+    state.detail = {
+      ...state.detail,
+      status: "DRAFT",
+      editRev: nextRev,
+      currentSnapshotId: null,
+    };
     await acceptLifecycle(page);
     const replayed = resolutionReceipt(true);
     replayed.current.editRev = nextRev;
     queue(resolutionPath, "POST", (request) => json(request, replayed));
     await confirm(page, "#issue-resolution-replay");
     await resolutionMessage(page, "영수증을 확인");
-    assert.ok(resolutionPosts(requests).every((post) => post.path === first.path && post.body === first.body));
-    assert.match(await page.$eval("#issue-resolution-receipt", (node) => node.textContent), new RegExp(`최초 수정번호 ${rev} / 현재 관측 수정번호 ${nextRev}`));
-    assert.equal(await page.$eval("#issue-resolution-batch", (node) => node.value), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    assert.equal(await page.$eval("#issue-resolution-ref", (node) => node.value), "buffer_B_verified");
-    assert.equal(await page.$eval("#manual-notes", (node) => node.value), "보존된 별도 수동 입력");
+    assert.ok(
+      resolutionPosts(requests).every(
+        (post) => post.path === first.path && post.body === first.body,
+      ),
+    );
+    assert.match(
+      await page.$eval("#issue-resolution-receipt", (node) => node.textContent),
+      new RegExp(`최초 수정번호 ${rev} / 현재 관측 수정번호 ${nextRev}`),
+    );
+    assert.equal(
+      await page.$eval("#issue-resolution-batch", (node) => node.value),
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    assert.equal(
+      await page.$eval("#issue-resolution-ref", (node) => node.value),
+      "buffer_B_verified",
+    );
+    assert.equal(
+      await page.$eval("#manual-notes", (node) => node.value),
+      "보존된 별도 수동 입력",
+    );
     assert.equal(await leavePrevented(page), true);
   }, manualSource());
 });
@@ -8123,32 +10056,71 @@ test("PT-A12 malformed successes never become receipts and confirmed original ca
     await prepareResolution(context);
     const valid = resolutionReceipt();
     const invalid = [
-      { ...valid, extra: "PRIVATE" }, { ...valid, requestId: undefined },
-      { ...valid, changed: false }, { ...valid, action: "BATCH_CREATE" },
+      { ...valid, extra: "PRIVATE" },
+      { ...valid, requestId: undefined },
+      { ...valid, changed: false },
+      { ...valid, action: "BATCH_CREATE" },
       { ...valid, original: { ...valid.original, editRev: 9007199254740992 } },
       { ...valid, original: { ...valid.original, snapshotId: "01" } },
-      { ...valid, current: { ...valid.current, editRev: "9223372036854775808" } },
+      {
+        ...valid,
+        current: { ...valid.current, editRev: "9223372036854775808" },
+      },
       { ...valid, current: { ...valid.current, extra: "PRIVATE" } },
       { ...valid, current: { ...valid.current, state: "OPEN" } },
-      { ...valid, original: { ...valid.original, resolvedAt: "2026-02-30T00:00:00Z" } },
-      { ...valid, current: { ...valid.current, targetBatchKey: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" } },
+      {
+        ...valid,
+        original: { ...valid.original, resolvedAt: "2026-02-30T00:00:00Z" },
+      },
+      {
+        ...valid,
+        current: {
+          ...valid.current,
+          targetBatchKey: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+        },
+      },
     ];
     for (const [index, data] of invalid.entries()) {
       queue(resolutionPath, "POST", (request) => json(request, data));
-      await confirm(page, index ? "#issue-resolution-replay" : "#issue-resolution-submit");
+      await confirm(
+        page,
+        index ? "#issue-resolution-replay" : "#issue-resolution-submit",
+      );
       await resolutionMessage(page, "결과 미확인");
-      assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "unknown");
-      assert.doesNotMatch(await page.$eval("#issue-resolution-receipt", (node) => node.textContent), /PRIVATE/);
+      assert.equal(
+        await page.$eval(
+          "#issue-resolution-receipt",
+          (node) => node.dataset.state,
+        ),
+        "unknown",
+      );
+      assert.doesNotMatch(
+        await page.$eval(
+          "#issue-resolution-receipt",
+          (node) => node.textContent,
+        ),
+        /PRIVATE/,
+      );
     }
     queue(resolutionPath, "POST", (request) => json(request, valid));
     await confirm(page, "#issue-resolution-replay");
     await resolutionMessage(page, "영수증을 확인");
-    const receipt = await page.$eval("#issue-resolution-receipt", (node) => node.textContent);
+    const receipt = await page.$eval(
+      "#issue-resolution-receipt",
+      (node) => node.textContent,
+    );
     queue(resolutionPath, "POST", (request) => json(request, valid));
     await confirm(page, "#issue-resolution-replay");
     await resolutionMessage(page, "결과 미확인");
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.textContent), receipt);
-    assert.ok(resolutionPosts(requests).every((post) => post.body === resolutionPosts(requests)[0].body));
+    assert.equal(
+      await page.$eval("#issue-resolution-receipt", (node) => node.textContent),
+      receipt,
+    );
+    assert.ok(
+      resolutionPosts(requests).every(
+        (post) => post.body === resolutionPosts(requests)[0].body,
+      ),
+    );
   }, manualSource());
 });
 
@@ -8157,7 +10129,16 @@ test("PT-A12 unsupported kinds, historical and resolved rows stay read-only whil
     const { page, requests } = context;
     await selectSnapshot(context);
     await readIssuePage(context, issuePage([issueItem()]));
-    assert.equal(await page.$eval("[data-resolution-issue]", (node) => node.disabled), true);
+    assert.equal(
+      await page.$eval("[data-resolution-issue]", (node) => node.disabled),
+      true,
+    );
+    if (
+      !(await page.$eval(`[data-snapshot-id="${currentId}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-snapshot-id="${currentId}"]`);
     await page.click(`[data-snapshot-id="${currentId}"]`);
     for (const item of [
       issueItem({ snapshotId: currentId, kind: "CONTENT" }),
@@ -8166,14 +10147,22 @@ test("PT-A12 unsupported kinds, historical and resolved rows stay read-only whil
     ]) {
       await readIssuePage(context, issuePage([item]));
       assert.equal(await page.$("[data-resolution-issue]"), null);
-      assert.equal(await page.$eval("#issue-resolution-submit", (node) => node.disabled), true);
-      const stored = JSON.parse(await page.$eval("#saved-issues-result", (node) => node.textContent));
+      assert.equal(
+        await page.$eval("#issue-resolution-submit", (node) => node.disabled),
+        true,
+      );
+      const stored = JSON.parse(
+        await page.$eval("#saved-issues-result", (node) => node.textContent),
+      );
       assert.ok(stored[0].runtimeConfigId.includes(hostile));
       assert.equal(await page.$("#saved-issues-result img"), null);
     }
     assert.equal(await page.evaluate(() => window.injected), undefined);
     assert.deepEqual(resolutionPosts(requests), []);
-    assert.equal(requests.some(({ path }) => path.includes("/regressions/")), false);
+    assert.equal(
+      requests.some(({ path }) => path.includes("/regressions/")),
+      false,
+    );
   }, manualSource());
 });
 
@@ -8181,21 +10170,44 @@ test("PT-A12 cancel, form mutation and CSRF acquisition mutation never authorize
   await isolated(async (context) => {
     const { page, hold, queue, json, requests } = context;
     await prepareResolution(context);
+    if (
+      !(await page.$eval("#issue-resolution-submit", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-submit");
     await page.focus("#issue-resolution-submit");
     await page.keyboard.press("Enter");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.keyboard.press("Escape");
     await resolutionMessage(page, "전송하지 않았");
-    assert.equal(await page.evaluate(() => document.activeElement.id), "issue-resolution-submit");
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "issue-resolution-submit",
+    );
+    if (
+      !(await page.$eval("#issue-resolution-submit", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-submit");
     await page.click("#issue-resolution-submit");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await resolutionInput(page, "ref", "changed_in_consent");
     await resolutionMessage(page, "전송하지 않았");
     assert.deepEqual(resolutionPosts(requests), []);
-    queue(resolutionPath, "POST", (request) => json(request, { code: "CSRF_INVALID" }, 403));
+    queue(resolutionPath, "POST", (request) =>
+      json(request, { code: "CSRF_INVALID" }, 403),
+    );
     await confirm(page, "#issue-resolution-submit");
     await resolutionMessage(page, "CSRF 거절");
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "csrf");
+    assert.equal(
+      await page.$eval(
+        "#issue-resolution-receipt",
+        (node) => node.dataset.state,
+      ),
+      "csrf",
+    );
     const token = hold("/admin/api/auth/csrf", "GET");
     await confirm(page, "#issue-resolution-replay");
     await token.ready;
@@ -8203,11 +10215,19 @@ test("PT-A12 cancel, form mutation and CSRF acquisition mutation never authorize
     await token.respond({ headerName: "X-CSRF-TOKEN", token: "new-synthetic" });
     await resolutionMessage(page, "전송하지 않았");
     assert.equal(resolutionPosts(requests).length, 1);
-    queue(resolutionPath, "POST", (request) => json(request, resolutionReceipt()));
+    queue(resolutionPath, "POST", (request) =>
+      json(request, resolutionReceipt()),
+    );
     await confirm(page, "#issue-resolution-replay");
     await resolutionMessage(page, "영수증을 확인");
-    assert.equal(resolutionPosts(requests)[1].body, resolutionPosts(requests)[0].body);
-    assert.equal(await page.$eval("#issue-resolution-ref", (node) => node.value), "changed_during_csrf");
+    assert.equal(
+      resolutionPosts(requests)[1].body,
+      resolutionPosts(requests)[0].body,
+    );
+    assert.equal(
+      await page.$eval("#issue-resolution-ref", (node) => node.value),
+      "changed_during_csrf",
+    );
   }, manualSource());
 });
 
@@ -8221,13 +10241,29 @@ test("PT-A12 generation replacement rejects late success while keeping original 
     await resolutionInput(page, "ref", "buffer_after_send");
     await acceptLifecycle(page);
     await pending.respond(resolutionReceipt());
-    queue(resolutionPath, "POST", (request) => json(request, resolutionReceipt(true)));
-    await page.waitForFunction(() => !document.getElementById("issue-resolution-replay").disabled);
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "unknown");
+    queue(resolutionPath, "POST", (request) =>
+      json(request, resolutionReceipt(true)),
+    );
+    await page.waitForFunction(
+      () => !document.getElementById("issue-resolution-replay").disabled,
+    );
+    assert.equal(
+      await page.$eval(
+        "#issue-resolution-receipt",
+        (node) => node.dataset.state,
+      ),
+      "unknown",
+    );
     await confirm(page, "#issue-resolution-replay");
     await resolutionMessage(page, "영수증을 확인");
-    assert.equal(resolutionPosts(requests)[1].body, resolutionPosts(requests)[0].body);
-    assert.equal(await page.$eval("#issue-resolution-ref", (node) => node.value), "buffer_after_send");
+    assert.equal(
+      resolutionPosts(requests)[1].body,
+      resolutionPosts(requests)[0].body,
+    );
+    assert.equal(
+      await page.$eval("#issue-resolution-ref", (node) => node.value),
+      "buffer_after_send",
+    );
   }, manualSource());
 });
 
@@ -8236,20 +10272,44 @@ for (const changed of ["account", "absoluteExpiry", "permission"]) {
     await isolated(async (context) => {
       const { page, state, requests } = context;
       await prepareResolution(context);
+      if (
+        !(await page.$eval("#issue-resolution-submit", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#issue-resolution-submit");
       await page.click("#issue-resolution-submit");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       if (changed === "permission") {
-        state.detail = { ...state.detail, permissions: { edit: true, review: false, publish: false } };
+        state.detail = {
+          ...state.detail,
+          permissions: { edit: true, review: false, publish: false },
+        };
         await page.$eval("#review-lifecycle-refresh", (node) => node.click());
-        await page.waitForFunction(() => document.getElementById("review-permissions").textContent.includes("검수 없음"));
-        assert.equal(await page.$eval("#issue-resolution-submit", (node) => node.disabled), true);
-        assert.equal(await page.$eval("#issue-resolution-ref", (node) => node.value), "synthetic_verified");
+        await page.waitForFunction(() =>
+          document
+            .getElementById("review-permissions")
+            .textContent.includes("검수 없음"),
+        );
+        assert.equal(
+          await page.$eval("#issue-resolution-submit", (node) => node.disabled),
+          true,
+        );
+        assert.equal(
+          await page.$eval("#issue-resolution-ref", (node) => node.value),
+          "synthetic_verified",
+        );
       } else {
-        state.me = { ...state.me, ...(changed === "account"
-          ? { accountKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }
-          : { absoluteExpiresAt: "2026-10-05T10:00:00Z" }) };
+        state.me = {
+          ...state.me,
+          ...(changed === "account"
+            ? { accountKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }
+            : { absoluteExpiresAt: "2026-10-05T10:00:00Z" }),
+        };
         await page.click("#ui-confirm-accept");
-        await page.waitForFunction(() => document.getElementById("editor").hidden);
+        await page.waitForFunction(
+          () => document.getElementById("editor").hidden,
+        );
         assert.equal(await page.$("#issue-resolution-form"), null);
       }
       assert.deepEqual(resolutionPosts(requests), []);
@@ -8264,7 +10324,10 @@ test("PT-A12 late JSON identity change never restores receipt or input", async (
     const pending = hold(resolutionPath);
     await confirm(page, "#issue-resolution-submit");
     await pending.ready;
-    state.me = { ...state.me, accountKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    state.me = {
+      ...state.me,
+      accountKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    };
     await pending.respond(resolutionReceipt());
     await page.waitForFunction(() => document.getElementById("editor").hidden);
     assert.equal(await page.$("#issue-resolution-receipt"), null);
@@ -8277,24 +10340,63 @@ test("PT-A12 explicit STAGED pending detail is observation only without POST or 
     const { page, queue, json, requests } = context;
     await prepareResolution(context);
     const detail = resolutionBatchFixture();
-    Object.assign(detail, { state: "RUNNING", passed: null, completedJobs: 0,
-      unresolvedJobs: detail.totalJobs, completedAt: null });
-    for (const item of detail.items) Object.assign(item, { state: "STAGED", comparison: "PENDING" });
+    Object.assign(detail, {
+      state: "RUNNING",
+      passed: null,
+      completedJobs: 0,
+      unresolvedJobs: detail.totalJobs,
+      completedAt: null,
+    });
+    for (const item of detail.items)
+      Object.assign(item, { state: "STAGED", comparison: "PENDING" });
     const start = requests.length;
-    const before = await page.$eval("#saved-review-current", (node) => node.textContent);
-    const receipt = await page.$eval("#issue-resolution-receipt", (node) => node.textContent);
+    const before = await page.$eval(
+      "#saved-review-current",
+      (node) => node.textContent,
+    );
+    const receipt = await page.$eval(
+      "#issue-resolution-receipt",
+      (node) => node.textContent,
+    );
     queue(resolutionBatchPath, "GET", (request) => json(request, detail));
+    if (
+      !(await page.$eval("#issue-resolution-batch-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-batch-read");
     await page.click("#issue-resolution-batch-read");
-    await page.waitForFunction(() => document.getElementById("issue-resolution-batch-status").textContent.includes("관측 완료"));
-    const observed = JSON.parse(await page.$eval("#issue-resolution-batch-detail", (node) => node.textContent));
+    await page.waitForFunction(() =>
+      document
+        .getElementById("issue-resolution-batch-status")
+        .textContent.includes("관측 완료"),
+    );
+    const observed = JSON.parse(
+      await page.$eval(
+        "#issue-resolution-batch-detail",
+        (node) => node.textContent,
+      ),
+    );
     assert.equal(observed.state, "RUNNING");
     assert.equal(observed.passed, null);
-    assert.ok(observed.items.every((item) => item.state === "STAGED" && item.comparison === "PENDING"));
-    assert.equal(await page.$eval("#saved-review-current", (node) => node.textContent), before);
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.textContent), receipt);
+    assert.ok(
+      observed.items.every(
+        (item) => item.state === "STAGED" && item.comparison === "PENDING",
+      ),
+    );
+    assert.equal(
+      await page.$eval("#saved-review-current", (node) => node.textContent),
+      before,
+    );
+    assert.equal(
+      await page.$eval("#issue-resolution-receipt", (node) => node.textContent),
+      receipt,
+    );
     assert.deepEqual(resolutionPosts(requests), []);
-    assert.deepEqual(requests.slice(start).map(({ method, path }) => ({ method, path })),
-      [{ method: "GET", path: resolutionBatchPath }]);
+    assert.deepEqual(
+      requests.slice(start).map(({ method, path }) => ({ method, path })),
+      [{ method: "GET", path: resolutionBatchPath }],
+    );
   }, manualSource());
 });
 
@@ -8304,17 +10406,46 @@ test("PT-A12 explicit batch detail rejects missing extra unsafe and hostile fiel
     await prepareResolution(context);
     const valid = resolutionBatchFixture();
     for (const bad of [
-      { ...valid, extra: hostile }, { ...valid, validUntil: undefined },
-      { ...valid, runtimeEpoch: 9007199254740992 }, { ...valid, totalJobs: 1.5 },
-      { ...valid, items: [{ ...valid.items[0], extra: hostile }, ...valid.items.slice(1)] },
-      { ...valid, items: [{ ...valid.items[0], sampleCode: hostile }, ...valid.items.slice(1)] },
+      { ...valid, extra: hostile },
+      { ...valid, validUntil: undefined },
+      { ...valid, runtimeEpoch: 9007199254740992 },
+      { ...valid, totalJobs: 1.5 },
+      {
+        ...valid,
+        items: [{ ...valid.items[0], extra: hostile }, ...valid.items.slice(1)],
+      },
+      {
+        ...valid,
+        items: [
+          { ...valid.items[0], sampleCode: hostile },
+          ...valid.items.slice(1),
+        ],
+      },
     ]) {
       queue(resolutionBatchPath, "GET", (request) => json(request, bad));
+      if (
+        !(await page.$eval("#issue-resolution-batch-read", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#issue-resolution-batch-read");
       await page.click("#issue-resolution-batch-read");
-      await page.waitForFunction(() =>
-        document.getElementById("issue-resolution-batch-status").textContent.includes("조회 실패") &&
-        document.getElementById("issue-resolution").getAttribute("aria-busy") === "false");
-      assert.equal(await page.$eval("#issue-resolution-batch-detail", (node) => node.textContent), "");
+      await page.waitForFunction(
+        () =>
+          document
+            .getElementById("issue-resolution-batch-status")
+            .textContent.includes("조회 실패") &&
+          document
+            .getElementById("issue-resolution")
+            .getAttribute("aria-busy") === "false",
+      );
+      assert.equal(
+        await page.$eval(
+          "#issue-resolution-batch-detail",
+          (node) => node.textContent,
+        ),
+        "",
+      );
     }
     assert.deepEqual(resolutionPosts(requests), []);
     assert.equal(await page.evaluate(() => window.injected), undefined);
@@ -8322,65 +10453,156 @@ test("PT-A12 explicit batch detail rejects missing extra unsafe and hostile fiel
 });
 
 test("PT-A12 read metadata and replacement preserve parent child buffers and unknown original without adopting write rev", async () => {
-  await isolated(async (context) => {
-    const { page, state, queue, json, hold, requests } = context;
-    await page.click('#editor-nav a[href="#child-heading"]');
-    await page.click("#child-new");
-    await edit(page, "child", "name", "보존할 자식 입력");
-    await edit(page, "basic", "intro", "보존할 부모 입력");
-    await page.select("#basic-intro-mode", "keep");
-    state.detail = manualSource();
-    await acceptLifecycle(page);
-    await prepareResolution(context);
-    const pending = hold(resolutionPath);
-    await confirm(page, "#issue-resolution-submit");
-    await pending.lose();
-    await resolutionMessage(page, "결과 미확인");
-    const command = resolutionPosts(requests)[0].body;
-    await resolutionInput(page, "ref", "replacement_buffer_B");
-    queue(root, "GET", (request) => json(request, { code: "STORY_UNAVAILABLE" }, 503));
-    await page.click("#review-lifecycle-refresh");
-    await page.waitForSelector("#saved-metadata-refresh:not(:disabled)", { visible: true });
-    state.detail = { ...manualSource(), editRev: nextRev, currentSnapshotId: savedId };
-    await page.click("#saved-metadata-refresh");
-    await savedState(page, "metadata", "success");
-    const text = await page.$eval("#saved-review-current", (node) => node.textContent);
-    assert.match(text, new RegExp(`현재 상세 수정번호${nextRev}`));
-    assert.match(text, new RegExp(`원고 쓰기 기준 수정번호 \\(자동 변경 없음\\)${rev}`));
-    assert.equal(await page.$eval("#issue-resolution-submit", (node) => node.disabled), true);
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "unknown");
-    const receipt = resolutionReceipt(true);
-    receipt.current.editRev = nextRev;
-    queue(resolutionPath, "POST", (request) => json(request, receipt));
-    await confirm(page, "#issue-resolution-replay");
-    await resolutionMessage(page, "영수증을 확인");
-    assert.equal(resolutionPosts(requests)[1].body, command);
-    assert.equal(await page.$eval("#basic-intro", (node) => node.value), "보존할 부모 입력");
-    assert.equal(await page.$eval("#child-name", (node) => node.value), "보존할 자식 입력");
-    assert.equal(await page.$eval("#issue-resolution-ref", (node) => node.value), "replacement_buffer_B");
-    assert.equal(await page.$eval("#saved-review-current", (node) => node.textContent), text);
-  }, source({ edit: true, review: true, publish: false }));
+  await isolated(
+    async (context) => {
+      const { page, state, queue, json, hold, requests } = context;
+      if (
+        !(await page.$eval('#editor-nav a[href="#child-heading"]', (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, '#editor-nav a[href="#child-heading"]');
+      await page.click('#editor-nav a[href="#child-heading"]');
+      if (!(await page.$eval("#child-new", (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, "#child-new");
+      await page.click("#child-new");
+      await edit(page, "child", "name", "보존할 자식 입력");
+      await edit(page, "basic", "intro", "보존할 부모 입력");
+      if (
+        !(await page.$eval("#basic-intro-mode", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#basic-intro-mode");
+      await page.select("#basic-intro-mode", "keep");
+      state.detail = manualSource();
+      await acceptLifecycle(page);
+      await prepareResolution(context);
+      const pending = hold(resolutionPath);
+      await confirm(page, "#issue-resolution-submit");
+      await pending.lose();
+      await resolutionMessage(page, "결과 미확인");
+      const command = resolutionPosts(requests)[0].body;
+      await resolutionInput(page, "ref", "replacement_buffer_B");
+      queue(root, "GET", (request) =>
+        json(request, { code: "STORY_UNAVAILABLE" }, 503),
+      );
+      if (
+        !(await page.$eval("#review-lifecycle-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-lifecycle-refresh");
+      await page.click("#review-lifecycle-refresh");
+      await page.waitForSelector("#saved-metadata-refresh:not(:disabled)");
+      await selectEditorTaskFor(page, "#saved-metadata-refresh");
+      await page.waitForSelector("#saved-metadata-refresh:not(:disabled)", {
+        visible: true,
+      });
+      state.detail = {
+        ...manualSource(),
+        editRev: nextRev,
+        currentSnapshotId: savedId,
+      };
+      if (
+        !(await page.$eval("#saved-metadata-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-metadata-refresh");
+      await page.click("#saved-metadata-refresh");
+      await savedState(page, "metadata", "success");
+      const text = await page.$eval(
+        "#saved-review-current",
+        (node) => node.textContent,
+      );
+      assert.match(text, new RegExp(`현재 상세 수정번호${nextRev}`));
+      assert.match(
+        text,
+        new RegExp(`원고 쓰기 기준 수정번호 \\(자동 변경 없음\\)${rev}`),
+      );
+      assert.equal(
+        await page.$eval("#issue-resolution-submit", (node) => node.disabled),
+        true,
+      );
+      assert.equal(
+        await page.$eval(
+          "#issue-resolution-receipt",
+          (node) => node.dataset.state,
+        ),
+        "unknown",
+      );
+      const receipt = resolutionReceipt(true);
+      receipt.current.editRev = nextRev;
+      queue(resolutionPath, "POST", (request) => json(request, receipt));
+      await confirm(page, "#issue-resolution-replay");
+      await resolutionMessage(page, "영수증을 확인");
+      assert.equal(resolutionPosts(requests)[1].body, command);
+      assert.equal(
+        await page.$eval("#basic-intro", (node) => node.value),
+        "보존할 부모 입력",
+      );
+      assert.equal(
+        await page.$eval("#child-name", (node) => node.value),
+        "보존할 자식 입력",
+      );
+      assert.equal(
+        await page.$eval("#issue-resolution-ref", (node) => node.value),
+        "replacement_buffer_B",
+      );
+      assert.equal(
+        await page.$eval("#saved-review-current", (node) => node.textContent),
+        text,
+      );
+    },
+    source({ edit: true, review: true, publish: false }),
+  );
 });
 
 test("PT-A12 foreign evidence is a deterministic rejection, not editor revocation or inferred resolution", async () => {
   await isolated(async (context) => {
     const { page, queue, json, requests } = context;
     await prepareResolution(context);
-    queue(resolutionBatchPath, "GET", (request) => json(request, { code: "NOT_FOUND" }, 404));
+    queue(resolutionBatchPath, "GET", (request) =>
+      json(request, { code: "NOT_FOUND" }, 404),
+    );
+    if (
+      !(await page.$eval("#issue-resolution-batch-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-batch-read");
     await page.click("#issue-resolution-batch-read");
     await page.waitForFunction(() =>
-      document.getElementById("issue-resolution-batch-status").textContent.includes("조회 실패"));
+      document
+        .getElementById("issue-resolution-batch-status")
+        .textContent.includes("조회 실패"),
+    );
     assert.equal(await page.$eval("#editor", (node) => node.hidden), false);
-    queue(resolutionPath, "POST", (request) => json(request, { code: "NOT_FOUND" }, 404));
+    queue(resolutionPath, "POST", (request) =>
+      json(request, { code: "NOT_FOUND" }, 404),
+    );
     await confirm(page, "#issue-resolution-submit");
     await resolutionMessage(page, "요청 거절");
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.dataset.state), "rejected");
+    assert.equal(
+      await page.$eval(
+        "#issue-resolution-receipt",
+        (node) => node.dataset.state,
+      ),
+      "rejected",
+    );
     assert.equal(await page.$eval("#editor", (node) => node.hidden), false);
     assert.equal(resolutionPosts(requests).length, 1);
-    assert.equal(await page.$eval("#issue-resolution-replay", (node) => node.hidden), true);
+    assert.equal(
+      await page.$eval("#issue-resolution-replay", (node) => node.hidden),
+      true,
+    );
     await confirm(page, "#issue-resolution-discard");
     await resolutionMessage(page, "명시 폐기");
-    assert.equal(await page.$eval("#issue-resolution-receipt", (node) => node.textContent), "");
+    assert.equal(
+      await page.$eval("#issue-resolution-receipt", (node) => node.textContent),
+      "",
+    );
     assert.equal(resolutionPosts(requests).length, 1);
   }, manualSource());
 });
@@ -8397,6 +10619,12 @@ test("PT-A12 rejects noncanonical target keys and references before consent or P
     ]) {
       await resolutionInput(page, "batch", batch);
       await resolutionInput(page, "ref", ref);
+      if (
+        !(await page.$eval("#issue-resolution-submit", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#issue-resolution-submit");
       await page.click("#issue-resolution-submit");
       await resolutionMessage(page, "전송하지 않았");
       assert.equal(await page.$("#ui-confirm-dialog"), null);

@@ -7,6 +7,10 @@ import { captureReportPreview } from "./story-report-preview.mjs";
 import { exerciseAdminWorkspace } from "./admin-workspace.mjs";
 import { exerciseAdminAccounts } from "./admin-accounts.mjs";
 import {
+  exerciseEditorWorkspace,
+  selectEditorTaskFor,
+} from "./editor-workspace.mjs";
+import {
   inspectAdminDesign,
   inspectOpenDialog,
 } from "./admin-design-check.mjs";
@@ -89,6 +93,8 @@ async function openSection(page, section) {
   await page.bringToFront();
   const selector = `#editor-nav a[href="#${section}-heading"]`;
   await page.waitForSelector(selector);
+  if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, selector);
   if (
     !(await page.$eval(
       selector,
@@ -214,7 +220,7 @@ const layoutEvidence = [];
  * @param {object} page 합성 사건 편집기가 준비된 Puppeteer 페이지. null은 허용하지 않는다.
  */
 async function inspectEditorNavigation(page) {
-  for (const width of [360, 768, 900, 1200, 1440]) {
+  for (const width of [360, 768, 900, 1199, 1200, 1440]) {
     await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
     const widths = [];
     for (const section of ["basic", "child", "answer", "reveal"]) {
@@ -267,6 +273,12 @@ async function inspectEditorNavigation(page) {
     assert.ok(workbench.font >= 16, "입력 선택기는 본문 글자 크기 유지");
   }
   assert.equal(await page.$eval("#policy-details", (node) => node.open), false);
+  if (
+    !(await page.$eval('#editor-nav a[href="#policy-heading"]', (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, '#editor-nav a[href="#policy-heading"]');
   await page.click('#editor-nav a[href="#policy-heading"]');
   assert.equal(await page.$eval("#policy-details", (node) => node.open), true);
   assert.equal(
@@ -279,6 +291,8 @@ async function inspectEditorNavigation(page) {
     ),
     "location",
   );
+  if (!(await page.$eval("#policy-heading", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#policy-heading");
   await page.click("#policy-heading");
   assert.equal(await page.$eval("#policy-details", (node) => node.open), false);
   await openSection(page, "basic");
@@ -292,6 +306,10 @@ async function inspectEditorNavigation(page) {
     "true",
   );
   for (const mode of ["keep", "clear"]) {
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", mode);
     assert.equal(
       await page.$eval("#basic-intro", (node) => node.value),
@@ -305,13 +323,27 @@ async function inspectEditorNavigation(page) {
       ),
       String(mode !== "keep"),
     );
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "value");
     assert.equal(
       await page.$eval("#basic-intro", (node) => node.value),
       "모드 왕복 보존 입력",
     );
   }
+  if (
+    !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#basic-intro-mode");
   await page.select("#basic-intro-mode", "keep");
+  if (
+    !(await page.$eval("#warning-details summary", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#warning-details summary");
   await page.click("#warning-details summary");
   assert.equal(await page.$eval("#warning-details", (node) => node.open), true);
   const count = await page.$$eval("#warnings li", (nodes) => nodes.length);
@@ -319,6 +351,12 @@ async function inspectEditorNavigation(page) {
   const warning = await page.$eval('#warnings a[href$="-mode"]', (node) =>
     node.getAttribute("href"),
   );
+  if (
+    !(await page.$eval(`#warnings a[href="${warning}"]`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `#warnings a[href="${warning}"]`);
   await page.click(`#warnings a[href="${warning}"]`);
   assert.equal(
     await page.evaluate(() => document.activeElement.id),
@@ -355,6 +393,12 @@ async function inspectEditorNavigation(page) {
   await page.waitForFunction(
     () => document.activeElement.id === "basic-heading",
   );
+  if (
+    !(await page.$eval("#warning-details summary", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#warning-details summary");
   await page.click("#warning-details summary");
 }
 
@@ -431,10 +475,64 @@ async function inspectLayout(page, name, viewport) {
   layoutEvidence.push({ name, viewport, ...state });
 }
 
+/**
+ * 현재 업무 상태를 유지한 채 다섯 작업의 실제 표시 영역을 같은 폭에서 측정한다.
+ * @param {object} page 기존 HTTPS 페이지. 편집기가 없는 화면은 기존 검사만 유지한다.
+ * @param {string} name 기존 상태별 증거 이름.
+ * @param {string} viewport 실제 CSS 폭 또는 Chrome 확대 표기.
+ * @returns {Promise<void>} 원래 작업과 표시된 초점을 복구하며 요청은 만들지 않는다.
+ */
+async function inspectWorkspaceLayout(page, name, viewport) {
+  if (!(await page.$("#editor:not([hidden]) [data-workspace-task]"))) return;
+  const selected = await page.$eval(
+    '[data-workspace-task][aria-pressed="true"]',
+    (node) => node.dataset.workspaceTask,
+  );
+  const focus = await page.evaluateHandle(() => document.activeElement);
+  const requests = [];
+  const observe = (request) => requests.push(request.method());
+  page.on("request", observe);
+  try {
+    for (const [task, selector] of [
+      ["write", "#editor-nav"],
+      ["review", "#review-check-heading"],
+      ["read", "#saved-review-heading"],
+      ["evidence", "#workspace-evidence-heading"],
+      ["version", "#clone-heading"],
+    ]) {
+      if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+        await selectEditorTaskFor(page, selector);
+      await inspectLayout(page, `${name}-task-${task}`, viewport);
+    }
+  } finally {
+    if (
+      !(await page.$eval(
+        `[data-workspace-task="${selected}"]`,
+        (node) => node.getAttribute("aria-pressed") === "true",
+      ))
+    )
+      await page.click(`[data-workspace-task="${selected}"]`);
+    if (
+      await focus.evaluate(
+        (node) =>
+          node.isConnected && node !== document.body && node.checkVisibility(),
+      )
+    )
+      await focus.asElement().focus();
+    await focus.dispose();
+    page.off("request", observe);
+  }
+  assert.deepEqual(
+    requests,
+    [],
+    "상태별 작업 배치 검사는 HTTP를 만들지 않는다",
+  );
+}
+
 /** 실제 DOM의 넘침·터치 크기·대비와 확대 시 재배치를 확인한 뒤 화면을 보존한다. */
 async function layout(page, name) {
   await page.bringToFront();
-  for (const width of [360, 768, 1440]) {
+  for (const width of [360, 768, 900, 1199, 1200, 1440]) {
     await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
     await page.evaluate(() => scrollTo(0, 0));
     await inspectLayout(page, name, `${width}px`);
@@ -449,6 +547,7 @@ async function layout(page, name) {
         path: `${output}/${name}-form-${width}.png`,
       });
     }
+    await inspectWorkspaceLayout(page, name, `${width}px`);
   }
   // 테스트 전용 확장에서 실제 Chrome 탭 확대를 사용하며 CSS 확대나 핀치로 대체하지 않는다.
   const zoom = await zoomWorker.evaluate(async (url) => {
@@ -502,6 +601,7 @@ async function layout(page, name) {
   } finally {
     await capture.detach();
   }
+  await inspectWorkspaceLayout(page, name, "200%");
   await zoomWorker.evaluate(async (url) => {
     const [tab] = (await chrome.tabs.query({})).filter(
       (tab) => tab.url === url && tab.active,
@@ -620,17 +720,18 @@ try {
   await page.waitForSelector("#editor:not([hidden])");
   assert.equal(await page.title(), "시차 · 관리자 사건 보고서");
   assert.equal(await page.$$(".workbench").then((nodes) => nodes.length), 1);
-  assert.equal(
-    await page.evaluate(() =>
-      Boolean(
-        document
-          .querySelector(".workbench")
-          .compareDocumentPosition(document.getElementById("review-check")) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
+  assert.deepEqual(
+    await page.$$eval("[data-workspace-task]", (nodes) =>
+      nodes.map((node) => node.dataset.workspaceTask),
     ),
-    true,
-    "실제 DOM에서 원고 작성이 검수보다 앞선다",
+    ["write", "review", "read", "evidence", "version"],
+    "작업 탐색은 원고 작성부터 시작한다",
+  );
+  assert.equal(
+    await page.$eval('[data-workspace-task="write"]', (node) =>
+      node.getAttribute("aria-pressed"),
+    ),
+    "true",
   );
   assert.equal(await text(page, ".workspace-label"), "시차 · 관리자 제작실");
   const editorUrl = page.url();
@@ -669,22 +770,33 @@ try {
     "location",
   );
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
-  await page.click(".review-tools > summary");
+  const workspace = await exerciseEditorWorkspace(page, {
+    keepBuffer: {
+      section: "answer",
+      field: "methodAnswer",
+      value: "local-answer 작업 왕복 keep 버퍼",
+    },
+    disabledForms: [
+      "#review-withdraw-form",
+      "#review-changes-form",
+      "#manual-form",
+      "#issue-resolution-form",
+    ],
+  });
+  assert.equal(workspace.requests, 0);
+  assert.equal(workspace.sameDom, true);
+  assert.equal(workspace.keepBuffer, "verified");
   assert.equal(
-    await page.$eval(".review-tools", (details) => details.open),
-    false,
+    await page.$eval("#answer-methodAnswer-mode", (node) => node.value),
+    "keep",
   );
+  await edit(page, "answer", "methodAnswer", "local-answer 보존할 미저장 원고");
   assert.equal(
     await page.$eval("#answer-methodAnswer", (input) => input.value),
     "local-answer 보존할 미저장 원고",
   );
   assert.equal(await text(page, "#draft-summary"), beforeSidebar);
   await layout(page, "editor-compact");
-  await page.click(".review-tools > summary");
-  assert.equal(
-    await page.$eval(".review-tools", (details) => details.open),
-    true,
-  );
   await edit(page, "basic", "difficulty", 3);
   await edit(page, "basic", "estMin", 20);
   await edit(page, "basic", "estMax", 30);
@@ -703,6 +815,8 @@ try {
   await save(page, "answer");
   assert.match(await text(page, "#draft-summary"), /변경 없음/);
   assert.equal(await page.$eval("#basic-difficulty", (e) => e.value), "3");
+  if (!(await page.$eval("#answer-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#answer-save");
   await page.focus("#answer-save");
   await page.keyboard.press("Tab");
   assert.notEqual(
@@ -716,17 +830,29 @@ try {
     "solid",
   );
   await layout(page, "editor");
-  await page.focus(".version-panel summary");
+  const versionSummary = "#editor > .version-panel > details > summary";
+  if (!(await page.$eval(versionSummary, (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, versionSummary);
+  await page.focus(versionSummary);
   await page.keyboard.press("Enter");
-  assert.equal(await page.$eval(".version-panel details", (e) => e.open), true);
+  assert.equal(
+    await page.$eval("#editor > .version-panel > details", (e) => e.open),
+    true,
+  );
   await layout(page, "version-details");
   await page.keyboard.press("Enter");
   assert.equal(
-    await page.$eval(".version-panel details", (e) => e.open),
+    await page.$eval("#editor > .version-panel > details", (e) => e.open),
     false,
   );
   for (const width of [360, 1440]) {
     await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+    if (
+      !(await page.$eval('.section-nav a[href="#answer-heading"]', (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, '.section-nav a[href="#answer-heading"]');
     await page.click('.section-nav a[href="#answer-heading"]');
     await page.keyboard.press("Tab");
     const focus = await page.evaluate(() => {
@@ -756,14 +882,22 @@ try {
   );
 
   await edit(page, "basic", "estMax", 1);
+  if (!(await page.$eval("#basic-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#basic-save");
   await page.click("#basic-save");
   await page.waitForSelector("#basic-estMax[aria-invalid=true]");
   assert.equal(
     await page.evaluate(() => document.activeElement.id),
     "basic-estMax",
   );
+  if (
+    !(await page.$eval("#basic-estMax-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#basic-estMax-mode");
   await page.select("#basic-estMax-mode", "keep");
   await edit(page, "basic", "estMin", 40);
+  if (!(await page.$eval("#basic-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#basic-save");
   await page.click("#basic-save");
   await page.waitForSelector("#basic-estMax-mode[aria-invalid=true]");
   assert.equal(await page.$eval("#basic-estMax", (e) => e.hidden), true);
@@ -772,7 +906,15 @@ try {
     "basic-estMax-mode",
   );
   await layout(page, "input-error");
+  if (
+    !(await page.$eval("#basic-estMin-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#basic-estMin-mode");
   await page.select("#basic-estMin-mode", "keep");
+  if (
+    !(await page.$eval("#basic-estMax-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#basic-estMax-mode");
   await page.select("#basic-estMax-mode", "value");
   assert.equal(
     await page.$eval("#basic-estMax-mode", (e) =>
@@ -780,6 +922,10 @@ try {
     ),
     false,
   );
+  if (
+    !(await page.$eval("#basic-estMax-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#basic-estMax-mode");
   await page.select("#basic-estMax-mode", "keep");
   console.log("PASS input error and focus");
 
@@ -794,6 +940,8 @@ try {
   await save(other, "answer");
   console.log("Conflict second tab saved");
   await page.bringToFront();
+  if (!(await page.$eval("#answer-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#answer-save");
   await page.click("#answer-save");
   await notice(page, "검토 전 저장은 차단");
   assert.match(await text(page, "#latest-values"), /다른 탭 서버 최신 원고/);
@@ -853,6 +1001,8 @@ try {
     "revealText",
     "응답이 사라져도 서버에 한 번 저장되는 해설",
   );
+  if (!(await page.$eval("#reveal-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#reveal-save");
   await page.click("#reveal-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(patches, 1);
@@ -904,6 +1054,12 @@ try {
   );
   assert.equal(blocked.status, 409);
   assert.equal(blocked.body.code, "REFERENCE_IN_USE");
+  if (
+    !(await page.$eval("#answer-culpritCode-mode", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#answer-culpritCode-mode");
   await page.select("#answer-culpritCode-mode", "clear");
   await save(page, "answer");
   const unlinked = (await childApi(page, apiPath)).body.editRev;
@@ -948,10 +1104,14 @@ try {
     pageRev = result.body.editRev;
   }
   await openSection(page, "child");
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
   await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
+  if (!(await page.$eval("#child-filter", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-filter");
   await page.select("#child-filter", "false");
   await page.waitForFunction(() =>
     document
@@ -959,6 +1119,8 @@ try {
       .textContent.includes("이 상태의 인물이 없습니다"),
   );
   await layout(page, "empty-child-list");
+  if (!(await page.$eval("#child-filter", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-filter");
   await page.select("#child-filter", "true");
   await page.waitForSelector('[data-child-key="PAGE_00"]');
   assert.equal(
@@ -967,6 +1129,8 @@ try {
   );
   assert.doesNotMatch(await text(page, "#child-rows"), /목록 비노출 원고/);
   await layout(page, "key-list");
+  if (!(await page.$eval("#child-next", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-next");
   await page.click("#child-next");
   await page.waitForSelector('[data-child-key="P_BROWSER"]');
   assert.equal(
@@ -984,6 +1148,8 @@ try {
   );
   await edit(page, "answer", "methodAnswer", "인물 저장 중 보존할 미저장 정답");
   await edit(page, "child", "name", " ");
+  if (!(await page.$eval("#child-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-save");
   await page.click("#child-save");
   await notice(page, "공백일 수 없습니다");
   assert.equal(
@@ -1016,6 +1182,10 @@ try {
   page.on("request", countConsentWrites);
   confirmation.automatic = false;
   for (const action of ["cancel", "escape"]) {
+    if (
+      !(await page.$eval("#child-resource", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#child-resource");
     await page.select("#child-resource", "roles");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     assert.deepEqual(await childDraftState(), draftBeforeConsent);
@@ -1026,6 +1196,8 @@ try {
     assert.deepEqual(await childDraftState(), draftBeforeConsent);
     assert.equal(consentWrites, 0);
   }
+  if (!(await page.$eval("#child-resource", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-resource");
   await page.select("#child-resource", "roles");
   await page.waitForSelector("#ui-confirm-dialog[open]");
   await page.click("#ui-confirm-accept");
@@ -1044,8 +1216,12 @@ try {
   page.off("request", countConsentWrites);
   confirmation.automatic = true;
   await selectChildResource(page, "persons");
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_00"]');
+  if (!(await page.$eval("#child-next", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-next");
   await page.click("#child-next");
   await page.waitForSelector('[data-child-key="P_BROWSER"]');
   await clickWithConfirmation(page, '[data-child-key="P_BROWSER"]');
@@ -1053,6 +1229,8 @@ try {
     () => document.getElementById("child-code").value === "P_BROWSER",
   );
   await layout(page, "child-editor");
+  if (!(await page.$eval("#child-name-mode", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-name-mode");
   await page.click("#child-name-mode");
   assert.equal(
     await page.evaluate(() => document.activeElement.id),
@@ -1080,6 +1258,8 @@ try {
   };
   page.on("request", countChildPosts);
   const lostChild = await loseResponse(page, `${fixture.url}${childPath}`);
+  if (!(await page.$eval("#child-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-save");
   await page.click("#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.equal(childPosts, 1);
@@ -1097,6 +1277,8 @@ try {
     () => document.getElementById("child-active").textContent === "인물 복원",
   );
   assert.equal(await page.$eval("#child-save", (e) => e.disabled), true);
+  if (!(await page.$eval("#child-filter", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-filter");
   await page.select("#child-filter", "false");
   await page.waitForSelector('[data-child-key="UI_PERSON"]');
   await clickWithConfirmation(page, "#child-active");
@@ -1112,6 +1294,8 @@ try {
     changes: { name: "서버에서 바꾼 인물명" },
   });
   assert.equal(remoteChild.status, 200);
+  if (!(await page.$eval("#child-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-save");
   await page.click("#child-save");
   await notice(page, "검토 전 저장은 차단");
   assert.match(await text(page, "#latest-values"), /서버에서 바꾼 인물명/);
@@ -1144,6 +1328,8 @@ try {
     changes: { publicText: "비교를 여는 변경" },
   });
   await edit(page, "child", "secretText", "분할 조회에도 남겨 둘 입력");
+  if (!(await page.$eval("#child-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-save");
   await page.click("#child-save");
   await notice(page, "검토 전 저장은 차단");
   const splitRead = await page.createCDPSession();
@@ -1192,6 +1378,8 @@ try {
   );
 
   // 오래된 목록 응답은 진행 중인 인물 선택이나 저장의 잠금을 풀 수 없다.
+  if (!(await page.$eval("#child-filter", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-filter");
   await page.select("#child-filter", "true");
   await page.waitForSelector('[data-child-key="PAGE_00"]');
   remoteRev = (await childApi(page, apiPath)).body.editRev;
@@ -1203,6 +1391,8 @@ try {
     page,
     `${fixture.url}${childPath}?size=20&activeYn=true`,
   );
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await delayedList.ready;
   const delayedA = await holdResponse(
@@ -1222,6 +1412,8 @@ try {
   await notice(page, "검토 전 저장은 차단");
   await clickWithConfirmation(page, "#accept-latest");
   await notice(page, "서버 최신값과 수정번호를 화면에 반영했습니다.");
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_01"]');
   const selectedResponse = await holdResponse(
@@ -1231,6 +1423,12 @@ try {
   await clickWithConfirmation(page, '[data-child-key="PAGE_01"]');
   await selectedResponse.ready;
   await openSection(page, "answer");
+  if (
+    !(await page.$eval("#answer-methodAnswer", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#answer-methodAnswer");
   await page.focus("#answer-methodAnswer");
   const pendingInput = await page.$eval(
     "#answer-methodAnswer",
@@ -1266,6 +1464,8 @@ try {
   assert.equal(await page.$eval("#child-code", (e) => e.value), "PAGE_01");
   console.log("PASS delayed list cannot replace selected child identity");
 
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_00"]');
   remoteRev = (await childApi(page, apiPath)).body.editRev;
@@ -1277,6 +1477,8 @@ try {
     page,
     `${fixture.url}${childPath}?size=20&activeYn=true`,
   );
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await listDuringSave.ready;
   const pendingWrite = await holdResponse(
@@ -1284,6 +1486,8 @@ try {
     `${fixture.url}${apiPath}/sections/basic`,
   );
   await edit(page, "basic", "intro", "잠금 소유권 확인 본문");
+  if (!(await page.$eval("#basic-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#basic-save");
   await page.click("#basic-save");
   await pendingWrite.ready;
   await listDuringSave.release();
@@ -1449,8 +1653,12 @@ try {
   await page.click("#retry-detail");
   await page.waitForSelector("#editor:not([hidden])");
   await openSection(page, "child");
+  if (!(await page.$eval("#child-list", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-list");
   await page.click("#child-list");
   await page.waitForSelector('[data-child-key="PAGE_00"]');
+  if (!(await page.$eval("#child-next", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#child-next");
   await page.click("#child-next");
   await page.waitForSelector('[data-child-key="UI_PERSON"]');
   await clickWithConfirmation(page, '[data-child-key="UI_PERSON"]');
@@ -1484,6 +1692,8 @@ try {
     return response.status;
   });
   assert.equal(logout, 204);
+  if (!(await page.$eval("#answer-save", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#answer-save");
   await page.click("#answer-save");
   await page.waitForSelector("#editor[hidden]");
   assert.equal(await page.$eval("#editor", (e) => e.childElementCount), 0);

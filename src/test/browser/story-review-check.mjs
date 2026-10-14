@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { clickWithConfirmation } from "./confirmation.mjs";
+import {
+  exerciseEditorWorkspace,
+  selectEditorTaskFor,
+} from "./editor-workspace.mjs";
 
 /** SR09의 실제 구조 계약만 충족하는 폐기형 예시를 API로 만든다. 사람 품질 승인 자료가 아니다. */
 async function createCheckFixture(page, api) {
@@ -154,6 +158,12 @@ async function reviewMessage(page, fragment) {
 /** 남겨 둔 합성 입력만 원래 버퍼로 되돌린 뒤 기존 기록 유지 동작을 선택한다. */
 async function cancelFixtureInput(page, openSection, section, key, original) {
   await openSection(page, section);
+  if (
+    !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `#${section}-${key}-mode`);
   await page.select(`#${section}-${key}-mode`, "value");
   await page.$eval(
     `#${section}-${key}`,
@@ -163,6 +173,12 @@ async function cancelFixtureInput(page, openSection, section, key, original) {
     },
     original,
   );
+  if (
+    !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `#${section}-${key}-mode`);
   await page.select(`#${section}-${key}-mode`, "keep");
 }
 
@@ -305,6 +321,8 @@ async function submitLifecycleControl(page, root, selector, suffix) {
         new URL(value.url()).pathname === `${root}/${suffix}` &&
         value.request().method() === "POST",
     );
+    if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, selector);
     await page.click(selector);
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
@@ -357,6 +375,8 @@ async function acceptLifecycleBaseline(page) {
   await page.waitForFunction(
     () => !document.getElementById("accept-latest").disabled,
   );
+  if (!(await page.$eval("#accept-latest", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#accept-latest");
   await page.click("#accept-latest");
   await page.waitForSelector("#ui-confirm-dialog[open]");
   await page.click("#ui-confirm-accept");
@@ -399,7 +419,11 @@ async function navigateLifecycleLeave(page, expected) {
  * @param {string} kind MODEL 또는 APPROVAL.
  */
 async function fillUnperformedManual(page, kind) {
+  if (!(await page.$eval("#manual-kind", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#manual-kind");
   await page.select("#manual-kind", kind);
+  if (!(await page.$eval("#manual-result", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#manual-result");
   await page.select("#manual-result", "INCOMPLETE");
   for (const key of [
     "modelId",
@@ -408,9 +432,24 @@ async function fillUnperformedManual(page, kind) {
     "checkedAt",
     "criticalOpenCount",
     "runRef",
-  ])
+  ]) {
+    if (
+      !(await page.$eval(`#manual-${key}-mode`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `#manual-${key}-mode`);
     await page.select(`#manual-${key}-mode`, "null");
+  }
+  if (
+    !(await page.$eval("#manual-separateContext", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#manual-separateContext");
   await page.select("#manual-separateContext", "null");
+  if (!(await page.$eval("#manual-formatNo", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#manual-formatNo");
   await page.select("#manual-formatNo", kind === "MODEL" ? "1" : "2");
   for (const [key, text] of [
     [
@@ -423,6 +462,8 @@ async function fillUnperformedManual(page, kind) {
     ],
   ]) {
     // 실제 입력 요소에 키보드 선택·입력으로 교체하며 제품 상태나 숨은 필드는 조작하지 않는다.
+    if (!(await page.$eval(`#manual-${key}`, (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, `#manual-${key}`);
     await page.focus(`#manual-${key}`);
     const length = await page.$eval(
       `#manual-${key}`,
@@ -435,16 +476,28 @@ async function fillUnperformedManual(page, kind) {
       await page.keyboard.press("ArrowRight");
     await page.keyboard.up("Shift");
     await page.keyboard.press("Backspace");
+    if (!(await page.$eval(`#manual-${key}`, (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, `#manual-${key}`);
     await page.type(`#manual-${key}`, text);
   }
 }
 
 /** 실제 확인창으로 선택한 현재 사본과 기존 상세 쓰기 기준만 수락한다. */
 async function acceptManualControl(page, snapshotId) {
+  if (
+    !(await page.$eval(`[data-snapshot-id="${snapshotId}"]`, (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, `[data-snapshot-id="${snapshotId}"]`);
   await page.click(`[data-snapshot-id="${snapshotId}"]`);
+  if (!(await page.$eval("#manual-baseline", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#manual-baseline");
   await page.click("#manual-baseline");
   await page.waitForSelector("#ui-confirm-dialog[open]");
   await page.click("#ui-confirm-accept");
+  await page.waitForSelector("#manual-submit:enabled");
+  await selectEditorTaskFor(page, "#manual-submit");
   await page.waitForSelector("#manual-submit:enabled", { visible: true });
 }
 
@@ -461,6 +514,8 @@ async function submitManualControl(page, path, selector) {
       new URL(response.url()).pathname === path &&
       response.request().method() === "POST",
   );
+  if (!(await page.$eval(selector, (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, selector);
   await page.click(selector);
   await page.waitForSelector("#ui-confirm-dialog[open]");
   await page.click("#ui-confirm-accept");
@@ -516,6 +571,8 @@ async function exerciseManualRecords({
   try {
     await acceptManualControl(page, second.body.snapshotId);
     await fillUnperformedManual(page, "MODEL");
+    if (!(await page.$eval("#manual-submit", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#manual-submit");
     await page.focus("#manual-submit");
     await page.keyboard.press("Enter");
     await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -541,6 +598,10 @@ async function exerciseManualRecords({
     // 실제 서버 처리 이후 응답 전송만 유실시킨다. 허구의 성공 응답을 주입하지 않는다.
     const lost = await loseResponse(page, `${baseUrl}${path}`);
     try {
+      if (
+        !(await page.$eval("#manual-submit", (node) => node.checkVisibility()))
+      )
+        await selectEditorTaskFor(page, "#manual-submit");
       await page.click("#manual-submit");
       await page.waitForSelector("#ui-confirm-dialog[open]");
       await page.click("#ui-confirm-accept");
@@ -554,6 +615,27 @@ async function exerciseManualRecords({
     }
     assert.equal(posts.length, 1, "유실 후 자동 재전송 없음");
     assert.deepEqual(reads, [], "유실 후 민감 이력 자동 조회 없음");
+    const unknownWorkspace = await exerciseEditorWorkspace(page, {
+      unknownTarget: "#manual-receipt",
+    });
+    assert.equal(unknownWorkspace.unknownTarget, "verified");
+    // 실제 HTTPS favicon 수는 helper가 별도 반환·로그로 노출하며 0으로 고정하지 않는다.
+    assert.equal(
+      unknownWorkspace.requests,
+      0,
+      "미확인 상태 작업 이동의 업무·기타 요청 0",
+    );
+    await layout(page, "manual-review-unknown");
+    assert.equal(
+      posts.length,
+      1,
+      "작업 왕복·상태별 배치 확인은 원래 요청을 재전송하지 않음",
+    );
+    assert.deepEqual(
+      reads,
+      [],
+      "미확인 상태의 작업 이동도 민감 이력을 조회하지 않음",
+    );
     const model = await submitManualControl(page, path, "#manual-reconfirm");
     assert.equal(model.status, 200);
     assert.equal(model.body.replayed, true);
@@ -616,6 +698,12 @@ async function exerciseManualRecords({
         new URL(response.url()).pathname === path &&
         response.request().method() === "GET",
     );
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     const response = await waiting;
     assert.equal(response.status(), 200);
@@ -669,6 +757,16 @@ async function exerciseExecutionIssueHistory({
   try {
     for (const snapshot of [first, second]) {
       const beforeSelection = reads.length;
+      if (
+        !(await page.$eval(
+          `[data-snapshot-id="${snapshot.body.snapshotId}"]`,
+          (node) => node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(
+          page,
+          `[data-snapshot-id="${snapshot.body.snapshotId}"]`,
+        );
       await page.click(`[data-snapshot-id="${snapshot.body.snapshotId}"]`);
       assert.equal(
         reads.length,
@@ -677,8 +775,20 @@ async function exerciseExecutionIssueHistory({
       );
       for (const filter of ["ALL", "OPEN", "RESOLVED"]) {
         const beforeFilter = reads.length;
+        if (
+          !(await page.$eval("#saved-issues-filter", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-issues-filter");
         await page.select("#saved-issues-filter", filter);
         assert.equal(reads.length, beforeFilter, "필터 변경은 GET이 아님");
+        if (
+          !(await page.$eval("#saved-issues-filter", (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, "#saved-issues-filter");
         await page.focus("#saved-issues-filter");
         await page.keyboard.press("Tab");
         assert.equal(
@@ -743,6 +853,12 @@ async function exerciseExecutionIssueHistory({
       `${baseUrl}${root}/execution-issues?*`,
     );
     try {
+      if (
+        !(await page.$eval("#saved-issues-first", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-issues-first");
       await page.click("#saved-issues-first");
       await page.waitForFunction(
         () =>
@@ -771,6 +887,12 @@ async function exerciseExecutionIssueHistory({
     } finally {
       await lost.detach();
     }
+    if (
+      !(await page.$eval("#saved-issues-filter", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-filter");
     await page.select("#saved-issues-filter", "ALL");
     assert.equal(reads.length, beforeLoss + 1);
     console.log(
@@ -786,7 +908,13 @@ async function exerciseExecutionIssueHistory({
  * @param {object} flow 실제 HTTPS 페이지·현재 사본·수정번호와 기존 배치 검사기.
  * @throws {Error} 원래 요청 재생·입력 보존·닫힌 화면·기존 배치 단언 실패를 전파한다.
  */
-async function exerciseIssueResolutionUi({ page, root, second, revision, layout }) {
+async function exerciseIssueResolutionUi({
+  page,
+  root,
+  second,
+  revision,
+  layout,
+}) {
   const issueKey = "a1212121-1212-4212-8212-121212121212";
   const batchKey = "b1212121-1212-4212-8212-121212121212";
   const sourceKey = "c1212121-1212-4212-8212-121212121212";
@@ -798,136 +926,355 @@ async function exerciseIssueResolutionUi({ page, root, second, revision, layout 
   const calls = [];
   const failures = [];
   const client = await page.createCDPSession();
-  await client.send("Fetch.enable", { patterns: [
-    { urlPattern: `*${issuePath}*`, requestStage: "Request" },
-    { urlPattern: `*${detailPath}`, requestStage: "Request" },
-  ] });
+  await client.send("Fetch.enable", {
+    patterns: [
+      { urlPattern: `*${issuePath}*`, requestStage: "Request" },
+      { urlPattern: `*${detailPath}`, requestStage: "Request" },
+    ],
+  });
   /** 고정 세 경로만 합성 응답하며 다른 경로는 기존 실제 서버로 보낸다. */
   const intercept = async (event) => {
     const url = new URL(event.request.url);
     if (![issuePath, path, detailPath].includes(url.pathname)) {
-      await client.send("Fetch.continueRequest", { requestId: event.requestId });
+      await client.send("Fetch.continueRequest", {
+        requestId: event.requestId,
+      });
       return;
     }
-    calls.push({ path: url.pathname, method: event.request.method, body: event.request.postData });
+    calls.push({
+      path: url.pathname,
+      method: event.request.method,
+      body: event.request.postData,
+    });
     let data;
     if (url.pathname === issuePath) {
-      data = { items: [{
-        issueKey, snapshotId: second.body.snapshotId, runtimeConfigId: `SYNTHETIC_${literal}`,
-        sourceBatchKey: sourceKey, sourceReviewId: null, kind: "INFRA", severity: "CRITICAL",
-        state: "OPEN", createdAt: "2026-10-01T00:00:00Z", resolvedAt: null, resolvedBy: null,
-        targetBatchKey: null, targetReviewId: null, resolution: null,
-      }], nextCursor: null, requestId };
+      data = {
+        items: [
+          {
+            issueKey,
+            snapshotId: second.body.snapshotId,
+            runtimeConfigId: `SYNTHETIC_${literal}`,
+            sourceBatchKey: sourceKey,
+            sourceReviewId: null,
+            kind: "INFRA",
+            severity: "CRITICAL",
+            state: "OPEN",
+            createdAt: "2026-10-01T00:00:00Z",
+            resolvedAt: null,
+            resolvedBy: null,
+            targetBatchKey: null,
+            targetReviewId: null,
+            resolution: null,
+          },
+        ],
+        nextCursor: null,
+        requestId,
+      };
     } else if (url.pathname === detailPath) {
       data = {
-        batchKey, purpose: "REVIEW", snapshotId: second.body.snapshotId,
-        runtimeConfigId: "SYNTHETIC_UI_ONLY", runtimeEpoch: "1", datasetHash: "a".repeat(64),
-        state: "COMPLETED", passed: true, repeatCount: 3, totalJobs: 3, completedJobs: 3,
-        failedComparisons: 0, unresolvedJobs: 0, createdAt: "2026-10-01T00:01:00Z",
-        batchDeadline: "2026-10-02T00:01:00Z", completedAt: "2026-10-01T00:02:00Z",
-        validUntil: null, items: [1, 2, 3].map((repeatNo) => ({
-          sampleCode: "SYNTHETIC", repeatNo, jobKey: `e1212121-1212-4212-8212-12121212121${repeatNo}`,
-          state: "COMPLETED", comparison: "PASS", errorCode: null,
-        })), requestId,
+        batchKey,
+        purpose: "REVIEW",
+        snapshotId: second.body.snapshotId,
+        runtimeConfigId: "SYNTHETIC_UI_ONLY",
+        runtimeEpoch: "1",
+        datasetHash: "a".repeat(64),
+        state: "COMPLETED",
+        passed: true,
+        repeatCount: 3,
+        totalJobs: 3,
+        completedJobs: 3,
+        failedComparisons: 0,
+        unresolvedJobs: 0,
+        createdAt: "2026-10-01T00:01:00Z",
+        batchDeadline: "2026-10-02T00:01:00Z",
+        completedAt: "2026-10-01T00:02:00Z",
+        validUntil: null,
+        items: [1, 2, 3].map((repeatNo) => ({
+          sampleCode: "SYNTHETIC",
+          repeatNo,
+          jobKey: `e1212121-1212-4212-8212-12121212121${repeatNo}`,
+          state: "COMPLETED",
+          comparison: "PASS",
+          errorCode: null,
+        })),
+        requestId,
       };
     } else {
       assert.equal(event.request.method, "POST");
       const posts = calls.filter((call) => call.path === path);
       if (posts.length === 1) {
-        await client.send("Fetch.failRequest", { requestId: event.requestId, errorReason: "ConnectionClosed" });
+        await client.send("Fetch.failRequest", {
+          requestId: event.requestId,
+          errorReason: "ConnectionClosed",
+        });
         return;
       }
-      assert.equal(event.request.postData, posts[0].body, "합성 A의 정확한 원래 본문만 재생");
+      assert.equal(
+        event.request.postData,
+        posts[0].body,
+        "합성 A의 정확한 원래 본문만 재생",
+      );
       const body = JSON.parse(event.request.postData);
-      const original = { issueKey, snapshotId: second.body.snapshotId, editRev: revision,
-        state: "RESOLVED", targetBatchKey: batchKey, resolvedAt: "2026-10-01T00:03:00Z" };
+      const original = {
+        issueKey,
+        snapshotId: second.body.snapshotId,
+        editRev: revision,
+        state: "RESOLVED",
+        targetBatchKey: batchKey,
+        resolvedAt: "2026-10-01T00:03:00Z",
+      };
       assert.equal(body.expectedRev, revision);
-      data = { action: "ISSUE_RESOLVE", replayed: true, changed: false,
-        original, current: { ...original }, requestId };
+      data = {
+        action: "ISSUE_RESOLVE",
+        replayed: true,
+        changed: false,
+        original,
+        current: { ...original },
+        requestId,
+      };
     }
     await client.send("Fetch.fulfillRequest", {
-      requestId: event.requestId, responseCode: 200,
-      responseHeaders: [{ name: "Content-Type", value: "application/json" }, { name: "Cache-Control", value: "no-store" }],
+      requestId: event.requestId,
+      responseCode: 200,
+      responseHeaders: [
+        { name: "Content-Type", value: "application/json" },
+        { name: "Cache-Control", value: "no-store" },
+      ],
       body: Buffer.from(JSON.stringify(data)).toString("base64"),
     });
   };
-  client.on("Fetch.requestPaused", (event) => void intercept(event).catch((error) => failures.push(error)));
+  client.on(
+    "Fetch.requestPaused",
+    (event) => void intercept(event).catch((error) => failures.push(error)),
+  );
   try {
+    if (
+      !(await page.$eval(
+        `[data-snapshot-id="${second.body.snapshotId}"]`,
+        (node) => node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        `[data-snapshot-id="${second.body.snapshotId}"]`,
+      );
     await page.click(`[data-snapshot-id="${second.body.snapshotId}"]`);
+    if (
+      !(await page.$eval("#saved-issues-filter", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-filter");
     await page.select("#saved-issues-filter", "ALL");
     assert.equal(calls.length, 0, "선택·필터 변경은 자동 요청이 아님");
+    if (
+      !(await page.$eval("#saved-issues-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-issues-first");
     await page.click("#saved-issues-first");
-    await page.waitForSelector(`[data-resolution-issue="${issueKey}"]:not(:disabled)`);
+    await page.waitForSelector(
+      `[data-resolution-issue="${issueKey}"]:not(:disabled)`,
+    );
+    if (
+      !(await page.$eval(`[data-resolution-issue="${issueKey}"]`, (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, `[data-resolution-issue="${issueKey}"]`);
     await page.click(`[data-resolution-issue="${issueKey}"]`);
+    if (
+      !(await page.$eval("#issue-resolution-batch", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-batch");
     await page.type("#issue-resolution-batch", batchKey);
+    if (
+      !(await page.$eval("#issue-resolution-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-ref");
     await page.type("#issue-resolution-ref", "synthetic_ui_only");
     assert.equal(calls.length, 1, "입력 시 후속 근거 자동 조회 없음");
-    assert.equal(await page.evaluate(() => window.resolutionInjected), undefined);
-    const baseline = await page.$eval("#saved-review-current", (node) => node.textContent);
+    assert.equal(
+      await page.evaluate(() => window.resolutionInjected),
+      undefined,
+    );
+    const baseline = await page.$eval(
+      "#saved-review-current",
+      (node) => node.textContent,
+    );
+    if (
+      !(await page.$eval("#issue-resolution-batch-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-batch-read");
     await page.click("#issue-resolution-batch-read");
-    await page.waitForFunction(() => document.getElementById("issue-resolution-batch-status").textContent.includes("관측 완료"));
-    assert.equal(JSON.parse(await page.$eval("#issue-resolution-batch-detail", (node) => node.textContent)).items.length, 3);
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    await page.waitForFunction(() =>
+      document
+        .getElementById("issue-resolution-batch-status")
+        .textContent.includes("관측 완료"),
+    );
+    assert.equal(
+      JSON.parse(
+        await page.$eval(
+          "#issue-resolution-batch-detail",
+          (node) => node.textContent,
+        ),
+      ).items.length,
+      3,
+    );
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
       const metrics = await page.$eval("#issue-resolution", (panel) => ({
-        labelled: Boolean(document.getElementById(panel.getAttribute("aria-labelledby"))),
+        labelled: Boolean(
+          document.getElementById(panel.getAttribute("aria-labelledby")),
+        ),
         overflow: document.documentElement.scrollWidth > innerWidth,
-        controls: [...panel.querySelectorAll("button,input")].filter((node) => node.getClientRects().length)
-          .map((node) => ({ width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height })),
+        controls: [...panel.querySelectorAll("button,input")]
+          .filter((node) => node.getClientRects().length)
+          .map((node) => ({
+            width: node.getBoundingClientRect().width,
+            height: node.getBoundingClientRect().height,
+          })),
       }));
       assert.equal(metrics.labelled, true);
       assert.equal(metrics.overflow, false, `${width}px PT-A12 가로 넘침`);
-      assert.ok(metrics.controls.every((control) => control.width >= 48 && control.height >= 48));
+      assert.ok(
+        metrics.controls.every(
+          (control) => control.width >= 48 && control.height >= 48,
+        ),
+      );
     }
+    if (
+      !(await page.$eval("#issue-resolution-submit", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-submit");
     await page.focus("#issue-resolution-submit");
     await page.keyboard.press("Enter");
     await page.waitForSelector("#ui-confirm-dialog[open]");
-    assert.equal(await page.evaluate(() => document.activeElement.id), "ui-confirm-cancel");
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "ui-confirm-cancel",
+    );
     await page.keyboard.press("Escape");
-    await page.waitForFunction(() => !document.getElementById("ui-confirm-dialog"));
-    assert.equal(await page.evaluate(() => document.activeElement.id), "issue-resolution-submit");
+    await page.waitForFunction(
+      () => !document.getElementById("ui-confirm-dialog"),
+    );
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "issue-resolution-submit",
+    );
     // 이 상위 흐름은 automatic=false다. 실제 창을 기다린 뒤 직접 동의 버튼을 누른다.
+    if (
+      !(await page.$eval("#issue-resolution-submit", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-submit");
     await page.click("#issue-resolution-submit");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
     try {
-      await page.waitForFunction(() =>
-        document.getElementById("issue-resolution-receipt").dataset.state === "unknown" &&
-        document.getElementById("issue-resolution").getAttribute("aria-busy") === "false");
+      await page.waitForFunction(
+        () =>
+          document.getElementById("issue-resolution-receipt").dataset.state ===
+            "unknown" &&
+          document
+            .getElementById("issue-resolution")
+            .getAttribute("aria-busy") === "false",
+      );
     } catch (error) {
-      console.error("PT-A12 synthetic unknown boundary", await page.evaluate(() => ({
-        state: document.getElementById("issue-resolution-receipt").dataset.state,
-        busy: document.getElementById("issue-resolution").getAttribute("aria-busy"),
-        status: document.getElementById("issue-resolution-status").textContent,
-      })), calls.map(({ path, method }) => ({ path, method })), failures.map((failure) => failure.message));
+      console.error(
+        "PT-A12 synthetic unknown boundary",
+        await page.evaluate(() => ({
+          state: document.getElementById("issue-resolution-receipt").dataset
+            .state,
+          busy: document
+            .getElementById("issue-resolution")
+            .getAttribute("aria-busy"),
+          status: document.getElementById("issue-resolution-status")
+            .textContent,
+        })),
+        calls.map(({ path, method }) => ({ path, method })),
+        failures.map((failure) => failure.message),
+      );
       throw error;
     }
     await page.$eval("#issue-resolution-ref", (node) => {
       node.value = "synthetic_new_buffer_B";
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    if (
+      !(await page.$eval("#issue-resolution-replay", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-replay");
     await page.click("#issue-resolution-replay");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
-    await page.waitForFunction(() =>
-      document.getElementById("issue-resolution-receipt").dataset.state === "confirmed" &&
-      document.getElementById("issue-resolution").getAttribute("aria-busy") === "false");
-    assert.equal(await page.$eval("#issue-resolution-ref", (node) => node.value), "synthetic_new_buffer_B");
-    assert.equal(await page.$eval("#saved-review-current", (node) => node.textContent), baseline);
+    await page.waitForFunction(
+      () =>
+        document.getElementById("issue-resolution-receipt").dataset.state ===
+          "confirmed" &&
+        document
+          .getElementById("issue-resolution")
+          .getAttribute("aria-busy") === "false",
+    );
+    assert.equal(
+      await page.$eval("#issue-resolution-ref", (node) => node.value),
+      "synthetic_new_buffer_B",
+    );
+    assert.equal(
+      await page.$eval("#saved-review-current", (node) => node.textContent),
+      baseline,
+    );
     const posts = calls.filter((call) => call.path === path);
     assert.equal(posts.length, 2);
     const body = JSON.parse(posts[0].body);
-    assert.deepEqual(Object.keys(body).sort(), ["expectedRev", "requestKey", "reasonCode", "verificationRef", "targetBatchKey", "targetReviewId"].sort());
+    assert.deepEqual(
+      Object.keys(body).sort(),
+      [
+        "expectedRev",
+        "requestKey",
+        "reasonCode",
+        "verificationRef",
+        "targetBatchKey",
+        "targetReviewId",
+      ].sort(),
+    );
     assert.equal(body.reasonCode, "INFRA_RECOVERED");
     assert.equal(body.targetReviewId, null);
-    assert.equal(calls.length, 4, "명시 이력·상세 GET과 원래 두 POST 이외 자동 요청 없음");
+    assert.equal(
+      calls.length,
+      4,
+      "명시 이력·상세 GET과 원래 두 POST 이외 자동 요청 없음",
+    );
     await layout(page, "issue-resolution-synthetic-transport-only");
+    if (
+      !(await page.$eval("#issue-resolution-discard", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#issue-resolution-discard");
     await page.click("#issue-resolution-discard");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
-    await page.waitForFunction(() => document.getElementById("issue-resolution-receipt").textContent === "");
+    await page.waitForFunction(
+      () =>
+        document.getElementById("issue-resolution-receipt").textContent === "",
+    );
     assert.deepEqual(failures, []);
-    console.log("PASS PT-A12 UI synthetic intercepted transport only: five widths/200%, explicit detail, unknown/replay/B buffer; NOT actual resolution API, runtime or terminal PG evidence");
+    console.log(
+      "PASS PT-A12 UI synthetic intercepted transport only: five widths/200%, explicit detail, unknown/replay/B buffer; NOT actual resolution API, runtime or terminal PG evidence",
+    );
   } finally {
     await client.send("Fetch.disable");
     await client.detach();
@@ -955,12 +1302,20 @@ async function exerciseSavedReviewReads({
   const fixture = await completeSavedReadFixture(page, api, root);
   await page.goto(editorUrl);
   await notice(page, "현재 원고를 조회했습니다");
+  if (
+    !(await page.$eval("#saved-preview-role", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#saved-preview-role");
   await page.type("#saved-preview-role", "A");
   const draftResponse = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === `${root}/preview` &&
       response.request().method() === "GET",
   );
+  if (
+    !(await page.$eval("#saved-preview-read", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#saved-preview-read");
   await page.click("#saved-preview-read");
   const draft = await draftResponse;
   assert.equal(draft.status(), 200);
@@ -984,12 +1339,24 @@ async function exerciseSavedReviewReads({
     /SAVED_PRIVATE_|SAVED_REVEAL_ONLY/,
   );
   await edit(page, "basic", "intro", "미저장 입력은 서버 투영에 포함되지 않음");
+  if (
+    !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#basic-intro-mode");
   await page.select("#basic-intro-mode", "keep");
+  if (
+    !(await page.$eval("#saved-preview-mode", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#saved-preview-mode");
   await page.select("#saved-preview-mode", "REVEAL");
   assert.equal(
     await page.$eval("#saved-preview-result", (node) => node.textContent),
     "",
   );
+  if (
+    !(await page.$eval("#saved-preview-read", (node) => node.checkVisibility()))
+  )
+    await selectEditorTaskFor(page, "#saved-preview-read");
   await page.click("#saved-preview-read");
   await page.waitForFunction(
     () =>
@@ -1008,6 +1375,8 @@ async function exerciseSavedReviewReads({
     review: false,
     publish: false,
   });
+  if (!(await page.$eval("#review-request", (node) => node.checkVisibility())))
+    await selectEditorTaskFor(page, "#review-request");
   await page.focus("#review-request");
   await page.keyboard.press("Enter");
   await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -1045,6 +1414,12 @@ async function exerciseSavedReviewReads({
     await page.$eval("#review-changes-required", (node) => node.disabled),
     true,
   );
+  if (
+    !(await page.$eval("#review-withdraw-ref", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#review-withdraw-ref");
   await page.type("#review-withdraw-ref", "synthetic_saved_read");
   const returned = await submitLifecycleControl(
     page,
@@ -1070,6 +1445,12 @@ async function exerciseSavedReviewReads({
     expectedRev: changed.body.editRev,
   });
   assert.equal(checked.status, 200);
+  if (
+    !(await page.$eval("#review-lifecycle-refresh", (node) =>
+      node.checkVisibility(),
+    ))
+  )
+    await selectEditorTaskFor(page, "#review-lifecycle-refresh");
   await page.click("#review-lifecycle-refresh");
   await acceptLifecycleBaseline(page);
   const second = await submitLifecycleControl(
@@ -1121,6 +1502,12 @@ async function exerciseSavedReviewReads({
       await page.$eval("#saved-preview-source", (node) => node.value),
       "DRAFT",
     );
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     assert.equal(
       await page.$eval("#saved-preview-read", (node) => node.disabled),
@@ -1132,7 +1519,19 @@ async function exerciseSavedReviewReads({
       await page.$eval("#saved-history-first", (node) => node.disabled),
       false,
     );
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "ROLE");
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await page.waitForSelector(`[data-snapshot-id="${first.body.snapshotId}"]`);
     assert.equal(reads.length, 1);
@@ -1140,6 +1539,16 @@ async function exerciseSavedReviewReads({
       nodes.map((node) => node.dataset.snapshotId),
     );
     assert.deepEqual(ids, [second.body.snapshotId, first.body.snapshotId]);
+    if (
+      !(await page.$eval(
+        `[data-snapshot-id="${first.body.snapshotId}"]`,
+        (node) => node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        `[data-snapshot-id="${first.body.snapshotId}"]`,
+      );
     await page.click(`[data-snapshot-id="${first.body.snapshotId}"]`);
     assert.equal(reads.length, 1, "이력 선택만으로 민감 원문을 읽지 않음");
     assert.match(
@@ -1156,6 +1565,12 @@ async function exerciseSavedReviewReads({
         new URL(response.url()).pathname ===
         `${root}/review-snapshots/${first.body.snapshotId}`,
     );
+    if (
+      !(await page.$eval("#saved-payload-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-payload-read");
     await page.click("#saved-payload-read");
     const payload = await payloadResponse;
     assert.equal(payload.status(), 200);
@@ -1188,6 +1603,12 @@ async function exerciseSavedReviewReads({
         new URL(response.url()).pathname ===
         `${root}/review-snapshots/${first.body.snapshotId}/records`,
     );
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     const evidence = await evidenceResponse;
     assert.equal(evidence.status(), 200);
@@ -1220,13 +1641,13 @@ async function exerciseSavedReviewReads({
     );
     assert.equal(
       await page.$$eval(
-        "#saved-review img, #saved-review script, #saved-review a",
+        ":is(#saved-payload-result, #saved-preview-result, #saved-records-result, #saved-issues-result) :is(img, script, a)",
         (nodes) => nodes.length,
       ),
       0,
     );
     await layout(page, "saved-snapshot-private-history");
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
       assert.equal(
         await page.evaluate(
@@ -1234,6 +1655,12 @@ async function exerciseSavedReviewReads({
         ),
         false,
       );
+      if (
+        !(await page.$eval("#saved-preview-source", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#saved-preview-source");
       await page.focus("#saved-preview-source");
       await page.keyboard.press("Tab");
       assert.equal(
@@ -1247,6 +1674,12 @@ async function exerciseSavedReviewReads({
         "solid",
       );
     }
+    if (
+      !(await page.$eval("#saved-preview-source", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-source");
     await page.select("#saved-preview-source", "SNAPSHOT");
     assert.equal(
       await page.$eval("#saved-preview-read", (node) => node.disabled),
@@ -1261,10 +1694,22 @@ async function exerciseSavedReviewReads({
       await page.$eval("#saved-records-result", (node) => node.textContent),
       "",
     );
+    if (
+      !(await page.$eval("#saved-preview-role", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-role");
     await page.type("#saved-preview-role", "A");
     const roleResponse = page.waitForResponse(
       (response) => new URL(response.url()).pathname === `${root}/preview`,
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     const role = await roleResponse;
     assert.equal(role.status(), 200);
@@ -1296,8 +1741,20 @@ async function exerciseSavedReviewReads({
     assert.equal(reads.at(-1).searchParams.has("expectedRev"), false);
     await layout(page, "saved-snapshot-role-projection");
     const held = await holdResponse(page, `${baseUrl}${root}/preview?*`);
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await held.ready;
+    if (
+      !(await page.$eval("#saved-preview-mode", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-mode");
     await page.select("#saved-preview-mode", "REVEAL");
     assert.equal(
       await page.$eval("#saved-preview-result", (node) => node.textContent),
@@ -1308,6 +1765,12 @@ async function exerciseSavedReviewReads({
       await page.$eval("#saved-preview-result", (node) => node.textContent),
       "",
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await page.waitForFunction(
       () =>
@@ -1325,6 +1788,16 @@ async function exerciseSavedReviewReads({
     );
     assert.equal(reads.at(-1).searchParams.has("roleCode"), false);
     const beforeSwitch = reads.length;
+    if (
+      !(await page.$eval(
+        `[data-snapshot-id="${second.body.snapshotId}"]`,
+        (node) => node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        `[data-snapshot-id="${second.body.snapshotId}"]`,
+      );
     await page.click(`[data-snapshot-id="${second.body.snapshotId}"]`);
     assert.equal(reads.length, beforeSwitch);
     assert.equal(
@@ -1335,6 +1808,12 @@ async function exerciseSavedReviewReads({
       await page.$eval("#saved-review-selected", (node) => node.textContent),
       /현재 사본/,
     );
+    if (
+      !(await page.$eval("#saved-preview-read", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-preview-read");
     await page.click("#saved-preview-read");
     await page.waitForFunction(
       () =>
@@ -1351,6 +1830,12 @@ async function exerciseSavedReviewReads({
       `${baseUrl}${root}/review-snapshots/${second.body.snapshotId}/records?*`,
     );
     const beforeLoss = reads.length;
+    if (
+      !(await page.$eval("#saved-records-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-records-first");
     await page.click("#saved-records-first");
     await page.waitForFunction(
       () =>
@@ -1410,8 +1895,20 @@ async function exerciseSavedReviewReads({
       review: true,
       publish: false,
     });
+    if (
+      !(await page.$eval("#review-lifecycle-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-lifecycle-refresh");
     await page.click("#review-lifecycle-refresh");
     await acceptLifecycleBaseline(page);
+    if (
+      !(await page.$eval("#saved-history-first", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#saved-history-first");
     await page.click("#saved-history-first");
     await page.waitForSelector(`[data-snapshot-id="${first.body.snapshotId}"]`);
     await exerciseExecutionIssueHistory({
@@ -1424,7 +1921,11 @@ async function exerciseSavedReviewReads({
       layout,
     });
     await exerciseIssueResolutionUi({
-      page, root, second, revision: qualified.body.editRev, layout,
+      page,
+      root,
+      second,
+      revision: qualified.body.editRev,
+      layout,
     });
     const manualApproval = await exerciseManualRecords({
       page,
@@ -1440,9 +1941,37 @@ async function exerciseSavedReviewReads({
     assert.equal(afterManual.body.status, "REVIEW");
     assert.equal(afterManual.body.currentSnapshotId, second.body.snapshotId);
     assert.deepEqual(afterManual.body.sections, qualified.body.sections);
+    if (
+      !(await page.$eval(
+        `[data-snapshot-id="${first.body.snapshotId}"]`,
+        (node) => node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(
+        page,
+        `[data-snapshot-id="${first.body.snapshotId}"]`,
+      );
     await page.click(`[data-snapshot-id="${first.body.snapshotId}"]`);
+    if (
+      !(await page.$eval("#review-changes-reason", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-reason");
     await page.select("#review-changes-reason", "FAIRNESS_ISSUE");
+    if (
+      !(await page.$eval("#review-changes-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-ref");
     await page.type("#review-changes-ref", "synthetic_changes_required");
+    if (
+      !(await page.$eval("#review-changes-reason", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-reason");
     await page.focus("#review-changes-reason");
     await page.keyboard.press("Tab");
     assert.equal(
@@ -1495,9 +2024,28 @@ async function exerciseSavedReviewReads({
     await navigateLifecycleLeave(page, false);
     await page.goto(editorUrl);
     await notice(page, "현재 원고를 조회했습니다");
+    if (
+      !(await page.$eval("#manual-evidence", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#manual-evidence");
     await page.type(
       "#manual-evidence",
       "Native leave: new unsent manual evidence.",
+    );
+    const dirtyWorkspace = await exerciseEditorWorkspace(page, {
+      keepBuffer: {
+        section: "basic",
+        field: "intro",
+        value: "Native leave: task navigation preserves the keep buffer.",
+      },
+    });
+    assert.equal(dirtyWorkspace.sameDom, true);
+    assert.equal(dirtyWorkspace.keepBuffer, "verified");
+    // 업무 0과 브라우저 정적 favicon 실측 수를 구분하며 전체 HTTP 0을 주장하지 않는다.
+    assert.equal(
+      dirtyWorkspace.requests,
+      0,
+      "미저장 원고 작업 이동의 업무·기타 요청 0",
     );
     await navigateLifecycleLeave(page, true);
     await page.goto(editorUrl);
@@ -1506,6 +2054,12 @@ async function exerciseSavedReviewReads({
       await page.$eval("#manual-evidence", (node) => node.value),
       "",
     );
+    if (
+      !(await page.$eval("#review-withdraw-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-withdraw-ref");
     await page.type("#review-withdraw-ref", "native_leave_dirty_reference");
     await navigateLifecycleLeave(page, true);
     await page.goto(editorUrl);
@@ -1518,7 +2072,17 @@ async function exerciseSavedReviewReads({
 
     // 실제 Me 응답의 전송만 유실시킨다. 가짜 행위자·권한 응답이나 새 사건을 만들지 않는다.
     await edit(page, "basic", "intro", "HTTPS_IDENTITY_KEEP_BUFFER");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "keep");
+    if (
+      !(await page.$eval("#review-changes-ref", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-changes-ref");
     await page.type("#review-changes-ref", "https_identity_reference");
     const mutations = [];
     /** 신원 실패 경계에서 업무 변경 전송이 생기지 않는지 관찰한다. */
@@ -1535,6 +2099,12 @@ async function exerciseSavedReviewReads({
       `${baseUrl}/admin/api/auth/me`,
     );
     try {
+      if (
+        !(await page.$eval("#review-lifecycle-refresh", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-lifecycle-refresh");
       await page.click("#review-lifecycle-refresh");
       await page.waitForSelector("#editor[hidden]");
       assert.equal(
@@ -1617,6 +2187,10 @@ export async function exerciseReviewChecks({
         value.url() === `${baseUrl}${root}/review-precheck` &&
         value.request().method() === "POST",
     );
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     const checked = await response;
     assert.equal(checked.status(), 200);
@@ -1637,8 +2211,14 @@ export async function exerciseReviewChecks({
     assert.ok(displayed.includes(`차단 오류 ${result.errorCount}건`));
     assert.ok(displayed.includes(`경고 ${result.warningCount}건`));
     assert.match(displayed, /품질 통과 아님/);
-    // 기존 layout은 다섯 폭과 확장 프로그램의 실제 Chrome 200% 확대·캡처를 그대로 수행한다.
+    // 배치 전환 주변을 포함한 여섯 폭과 기존 확장의 실제 Chrome 200% 확대·캡처를 사용한다.
     await layout(page, "saved-draft-precheck");
+    if (
+      !(await page.$eval("#review-samples-open", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-open");
     await page.click("#review-samples-open");
     await page.waitForSelector('[data-child-key="FULL"]');
     assert.equal(
@@ -1667,6 +2247,12 @@ export async function exerciseReviewChecks({
       );
       await edit(page, section, key, "아직 저장하지 않은 확인 시험 입력");
       for (const mode of ["value", "clear", "keep"]) {
+        if (
+          !(await page.$eval(`#${section}-${key}-mode`, (node) =>
+            node.checkVisibility(),
+          ))
+        )
+          await selectEditorTaskFor(page, `#${section}-${key}-mode`);
         await page.select(`#${section}-${key}-mode`, mode);
         assert.equal(
           await page.$eval("#review-precheck", (node) => node.disabled),
@@ -1690,6 +2276,7 @@ export async function exerciseReviewChecks({
     );
 
     // 공개 조회 버튼의 활성 상태를 취소 후 작업 해제 기준으로 사용한다.
+    await selectEditorTaskFor(page, "#review-lifecycle-refresh");
     await page.waitForSelector("#review-lifecycle-refresh:enabled", {
       visible: true,
     });
@@ -1699,6 +2286,12 @@ export async function exerciseReviewChecks({
 
     confirmation.automatic = false;
     for (const escape of [false, true]) {
+      if (
+        !(await page.$eval("#review-samples-check", (node) =>
+          node.checkVisibility(),
+        ))
+      )
+        await selectEditorTaskFor(page, "#review-samples-check");
       await page.focus("#review-samples-check");
       await page.keyboard.press("Enter");
       await page.waitForSelector("#ui-confirm-dialog[open]");
@@ -1734,6 +2327,12 @@ export async function exerciseReviewChecks({
       });
     }
     assert.equal(posts.length, countBeforeDirty);
+    if (
+      !(await page.$eval("#review-samples-check", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-check");
     await page.click("#review-samples-check");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-cancel");
@@ -1744,6 +2343,10 @@ export async function exerciseReviewChecks({
       visible: true,
     });
     await openSection(page, "basic");
+    if (
+      !(await page.$eval("#basic-intro-mode", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#basic-intro-mode");
     await page.select("#basic-intro-mode", "clear");
     assert.equal(
       await page.$eval("#review-samples-check", (node) => node.disabled),
@@ -1756,6 +2359,12 @@ export async function exerciseReviewChecks({
       page,
       `${baseUrl}${root}/grade-samples/check`,
     );
+    if (
+      !(await page.$eval("#review-samples-check", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-check");
     await page.click("#review-samples-check");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
@@ -1810,6 +2419,10 @@ export async function exerciseReviewChecks({
     const saved = await api(page, `${root}/grade-samples/FULL`);
     assert.equal(typeof saved.body.item.checkedBy, "string");
     await cancelFixtureInput(page, openSection, "basic", "intro", "");
+    if (
+      !(await page.$eval("#review-precheck", (node) => node.checkVisibility()))
+    )
+      await selectEditorTaskFor(page, "#review-precheck");
     await page.click("#review-precheck");
     await reviewMessage(page, "구조 진단입니다");
     assert.deepEqual(posts.at(-1).body, { expectedRev: receiptRevision });
@@ -1819,6 +2432,12 @@ export async function exerciseReviewChecks({
       page,
       `${baseUrl}${root}/grade-samples/check`,
     );
+    if (
+      !(await page.$eval("#review-samples-check", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-check");
     await page.click("#review-samples-check");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
@@ -1826,10 +2445,22 @@ export async function exerciseReviewChecks({
     await lost.detach();
     const sent = posts.length;
     const failedGet = await loseResponse(page, `${baseUrl}${root}`);
+    if (
+      !(await page.$eval("#review-check-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-check-refresh");
     await page.click("#review-check-refresh");
     await reviewMessage(page, "조회 실패");
     await failedGet.detach();
     assert.equal(posts.length, sent);
+    if (
+      !(await page.$eval("#review-check-refresh", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-check-refresh");
     await page.click("#review-check-refresh");
     await page.waitForFunction(
       () => !document.getElementById("accept-latest").disabled,
@@ -1838,6 +2469,8 @@ export async function exerciseReviewChecks({
       await page.$eval("#review-check-receipt", (node) => node.textContent),
       /결과 미확인/,
     );
+    if (!(await page.$eval("#accept-latest", (node) => node.checkVisibility())))
+      await selectEditorTaskFor(page, "#accept-latest");
     await page.click("#accept-latest");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.click("#ui-confirm-accept");
@@ -1845,6 +2478,12 @@ export async function exerciseReviewChecks({
       () => !document.getElementById("review-samples-check").disabled,
     );
     assert.equal(posts.length, sent, "조회·비교는 SR09를 재전송하지 않음");
+    if (
+      !(await page.$eval("#review-samples-check", (node) =>
+        node.checkVisibility(),
+      ))
+    )
+      await selectEditorTaskFor(page, "#review-samples-check");
     await page.click("#review-samples-check");
     await page.waitForSelector("#ui-confirm-dialog[open]");
     await page.keyboard.press("Escape");

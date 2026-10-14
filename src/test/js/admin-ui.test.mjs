@@ -88,7 +88,7 @@ function gallery() {
   const long = "길고줄바꿈없는합성라벨".repeat(30);
   return `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <link rel="stylesheet" href="/admin/stories.css"><title>합성 UI 회귀</title>
-    <main class="shell"><header class="page-header"><h1>컴포넌트 검증</h1><p>합성 문구만 사용합니다.</p></header>
+    <main class="shell"><header class="page-header"><h1>컴포넌트 검증</h1><p class="muted" id="muted-copy">합성 문구만 사용합니다.</p></header>
     <section><h2>입력 상태</h2><form>
       <div class="field" id="first-group"><div class="field-head"><label for="long-input">${long}</label><select id="mode" aria-label="입력 모드"><option>직접 수정</option></select></div><input id="long-input" value="${long}"><p class="error" id="helper">합성 도움말</p></div>
       <div class="field" id="second-group"><label for="long-select">긴 선택 항목</label><select id="long-select"><option>${long}</option></select></div>
@@ -233,7 +233,7 @@ function assertButtonContrast(value) {
   assert.equal(value.opacity, "1");
 }
 
-/** 외부 요청을 전부 차단한 브라우저에서 다섯 폭과 실제 입력 상태를 검증한다. */
+/** 외부 요청을 전부 차단한 브라우저에서 여섯 폭과 실제 입력 상태를 검증한다. */
 test("shared UI gallery geometry, interaction, contrast and native forced colors", async () => {
   const browser = await puppeteer.launch({
     executablePath:
@@ -261,7 +261,7 @@ test("shared UI gallery geometry, interaction, contrast and native forced colors
     });
     await page.goto("https://ui.test/gallery");
     await page.waitForSelector("#primary");
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900 });
       const result = await geometry(page);
       assert.ok(result.scroll <= width, `${width}px 문서 넘침`);
@@ -333,6 +333,17 @@ test("shared UI gallery geometry, interaction, contrast and native forced colors
     assert.deepEqual(await state(page, "#disabled-button"), disabled);
     assert.notEqual(disabled.background, normal.background);
     assert.notEqual(disabled.color, normal.color);
+    // 비활성·읽기 전용의 현행 보조 글자와 일반 조작 경계를 구분한다.
+    assert.match(shared, /--color-text-muted:\s*#adb5c0;/);
+    assert.match(shared, /--color-border:\s*#3c444f;/);
+    assert.equal(disabled.color, "rgb(173, 181, 192)");
+    assert.equal(disabled.border, "rgb(60, 68, 79)");
+    assert.equal((await state(page, "#readonly-input")).color, disabled.color);
+    assert.equal((await state(page, "#muted-copy")).color, disabled.color);
+    assert.equal(
+      (await state(page, "#long-input")).border,
+      "rgb(156, 163, 175)",
+    );
     assertButtonContrast(disabled);
     await page.mouse.move(0, 0);
     const secondary = await state(page, "#secondary");
@@ -351,6 +362,16 @@ test("shared UI gallery geometry, interaction, contrast and native forced colors
     assert.notEqual(
       (await state(page, "#long-input")).border,
       inputHover.border,
+    );
+    await page.$eval("#long-input", (node) =>
+      node.setAttribute("aria-invalid", "true"),
+    );
+    const invalid = await state(page, "#long-input");
+    assert.equal(invalid.border, "rgb(239, 68, 68)");
+    assert.equal(invalid.opacity, "1");
+    assert.notEqual(invalid.border, inputHover.border);
+    await page.$eval("#long-input", (node) =>
+      node.removeAttribute("aria-invalid"),
     );
     await page.goto("https://ui.test/gallery");
     await page.keyboard.press("Tab");
@@ -379,6 +400,19 @@ test("shared UI gallery geometry, interaction, contrast and native forced colors
       assert.equal(forced.image, "none");
       assert.equal(forced.padding, "16px");
       assert.equal((await state(page, "#mode")).outline, "solid");
+      await cdp.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+      });
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          reduced: matchMedia("(prefers-reduced-motion: reduce)").matches,
+          duration: getComputedStyle(document.documentElement)
+            .getPropertyValue("--motion-duration")
+            .trim(),
+          scrolling: getComputedStyle(document.documentElement).scrollBehavior,
+        })),
+        { reduced: true, duration: "0ms", scrolling: "auto" },
+      );
     } finally {
       await cdp.send("Emulation.setEmulatedMedia", { features: [] });
       await cdp.detach();
@@ -422,7 +456,7 @@ test("authentication composition wraps long identifiers and keeps whole permissi
       });
     });
     await page.goto("https://ui.test/auth-gallery");
-    for (const width of [360, 768, 900, 1200, 1440]) {
+    for (const width of [360, 768, 900, 1199, 1200, 1440]) {
       await page.setViewport({ width, height: 900 });
       const layout = await page.evaluate(() => {
         const shell = document.querySelector(".shell");

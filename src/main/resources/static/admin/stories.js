@@ -348,6 +348,225 @@
   let resolutionOperation;
   let resolutionInputEpoch = 0;
   let resolutionAcknowledged = '["","",""]';
+  const workspaceInitialStatus = new WeakMap();
+
+  /**
+   * 기존 작업 DOM의 표시와 탐색 상태만 바꾼다. 입력·동의·요청 세대는 건드리지 않는다.
+   * @param {string} task 탐색 버튼에 선언된 write/review/read/evidence/version.
+   * @returns {boolean} 알려진 작업을 선택했는지 여부.
+   */
+  function selectWorkspaceTask(task) {
+    const buttons = [...editor.querySelectorAll("[data-workspace-task]")];
+    const selected = buttons.find(
+      (button) => button.dataset.workspaceTask === task,
+    );
+    if (!selected) return false;
+    const focusedPanel = document.activeElement?.closest(
+      "[data-workspace-panel]",
+    );
+    for (const panel of editor.querySelectorAll("[data-workspace-panel]"))
+      panel.hidden = panel.dataset.workspacePanel !== task;
+    for (const button of buttons)
+      button.setAttribute("aria-pressed", String(button === selected));
+    if (focusedPanel?.hidden) selected.focus({ preventScroll: true });
+    return true;
+  }
+
+  /**
+   * 대상 작업과 조상 disclosure만 연다. 원래 숨긴 필드·자료 선택은 우회하지 않는다.
+   * @param {Element|null} target 현재 문서의 실제 대상. null이면 아무것도 바꾸지 않는다.
+   */
+  function revealWorkspaceTarget(target) {
+    const panel = target?.closest("[data-workspace-panel]");
+    if (panel) selectWorkspaceTask(panel.dataset.workspacePanel);
+    const disclosures = [];
+    for (
+      let parent = target?.parentElement;
+      parent;
+      parent = parent.parentElement
+    )
+      if (parent.matches("details")) disclosures.push(parent);
+    for (const disclosure of disclosures.reverse()) disclosure.open = true;
+  }
+
+  /**
+   * 고정 범주의 상태 링크·조회 기준·버튼의 실제 비활성 안내만 갱신한다.
+   * 원문·입력·영수증 내용을 요약에 복사하지 않으며 새로운 권한을 추정하지 않는다.
+   */
+  function syncWorkspacePresentation() {
+    const links = document.getElementById("workspace-status-links");
+    if (!links || !detail || editorIdentityRevoked) return;
+    for (const link of links.querySelectorAll(
+      "[data-workspace-status-source]",
+    )) {
+      const source = document.getElementById(
+        link.dataset.workspaceStatusSource,
+      );
+      const comparison = source?.id === "compare-heading";
+      const present =
+        source &&
+        (comparison
+          ? !document.getElementById("comparison").hidden
+          : Boolean(source.textContent.trim()) &&
+            !source.hidden &&
+            (source.id === "review-permissions" ||
+              source.textContent !== workspaceInitialStatus.get(source)));
+      link.parentElement.hidden = !present;
+      const state = source?.dataset.state;
+      const suffix =
+        state === "unknown"
+          ? " · 결과 미확인"
+          : state === "failure" || state === "rejected"
+            ? " · 실패·거절 안내"
+            : state === "loading"
+              ? " · 조회 중"
+              : state === "csrf"
+                ? " · CSRF 복구 필요"
+                : "";
+      const text = `${link.dataset.workspaceStatusLabel}${suffix}`;
+      if (link.textContent !== text) link.textContent = text;
+    }
+    const drafts = document.getElementById("workspace-input-status");
+    const protectedInputs =
+      reviewHasDrafts() ||
+      returnHasDrafts() ||
+      manualProtected() ||
+      resolutionProtected() ||
+      cloneProtected();
+    drafts.hidden = !protectedInputs;
+    for (const link of links.querySelectorAll("[data-workspace-error]")) {
+      const panels = [
+        ...editor.querySelectorAll("[data-workspace-panel]"),
+      ].filter(
+        (panel) => panel.dataset.workspacePanel === link.dataset.workspaceError,
+      );
+      const invalid = panels
+        .flatMap((panel) => [
+          ...panel.querySelectorAll('[aria-invalid="true"], .error[id]'),
+        ])
+        .find(
+          (node) =>
+            node.id &&
+            (node.getAttribute("aria-invalid") === "true" ||
+              node.textContent.trim()),
+        );
+      link.parentElement.hidden = !invalid;
+      if (invalid) link.href = `#${invalid.id}`;
+    }
+    const read = savedReadReady() ? savedReadMetadata() : null;
+    const basis = `열람 현재 사본 ${read ? (read.currentSnapshotId ?? "없음") : "미확인"} · 선택 사본 ${savedSelection?.snapshotId ?? "없음"} · 원고 쓰기 수정번호 ${detail.editRev} / 현재 사본 ${detail.currentSnapshotId ?? "없음"}. 선택·열람은 쓰기 기준 수락이 아닙니다.`;
+    for (const node of editor.querySelectorAll("[data-workspace-basis]"))
+      if (node.textContent !== basis) node.textContent = basis;
+    for (const node of editor.querySelectorAll("[data-action-availability]")) {
+      const button = document.getElementById(node.dataset.actionAvailability);
+      const text = button.disabled
+        ? "현재 제출 불가 · 위의 대상·권한·쓰기 기준과 처리 상태를 확인하세요. 입력을 펼쳐도 권한이 생기거나 요청이 전송되지 않습니다."
+        : "현재 제출 버튼 사용 가능 · 입력 내용을 확인한 뒤 명시적으로 실행하세요. 서버가 최종 조건을 다시 확인합니다.";
+      if (node.textContent !== text) node.textContent = text;
+    }
+  }
+
+  /**
+   * 탐색과 상태 관찰을 한 번 연결한다. 관찰은 표시만 갱신하며 HTTP·저장소를 사용하지 않는다.
+   * 기존 상태 노드만 관찰하여 요약 자체의 변경이 다시 렌더링을 유발하지 않게 한다.
+   */
+  function initializeWorkspace() {
+    for (const button of editor.querySelectorAll("[data-workspace-task]"))
+      button.addEventListener("click", () =>
+        selectWorkspaceTask(button.dataset.workspaceTask),
+      );
+    const links = document.getElementById("workspace-status-links");
+    const sources = [
+      ["compare-heading", "원고 충돌·최신본 비교"],
+      ["review-permissions", "현재 권한 확인"],
+      ["review-check-status", "저장 초안 검사 상태 확인"],
+      ["review-check-receipt", "사람 확인 결과·복구 안내"],
+      ["review-lifecycle-status", "검수 전환 상태·복구 안내"],
+      ["review-lifecycle-receipt", "검수 전환 영수증 확인"],
+      ["saved-metadata-status", "열람 기준·복구 안내"],
+      ["saved-history-status", "사본 이력 조회 상태"],
+      ["saved-payload-status", "민감 원문 조회 상태"],
+      ["saved-preview-status", "서버 투영 조회 상태"],
+      ["saved-records-status", "저장 근거 조회 상태"],
+      ["saved-issues-status", "실행 지적 조회 상태"],
+      ["issue-resolution-status", "지적 해소 상태·복구 안내"],
+      ["issue-resolution-receipt", "지적 해소 영수증 확인"],
+      ["manual-status", "수동 의견 상태·복구 안내"],
+      ["manual-receipt", "수동 의견 영수증 확인"],
+      ["clone-status", "버전 복제 상태·복구 안내"],
+      ["clone-receipt", "버전 복제 영수증 확인"],
+    ];
+    const observer = new MutationObserver(syncWorkspacePresentation);
+    for (const [id, label] of sources) {
+      const source = document.getElementById(id);
+      workspaceInitialStatus.set(source, source.textContent);
+      source.tabIndex = -1;
+      const item = document.createElement("li");
+      item.hidden = true;
+      const link = document.createElement("a");
+      link.href = `#${id}`;
+      link.dataset.workspaceStatusSource = id;
+      link.dataset.workspaceStatusLabel = label;
+      link.textContent = label;
+      item.append(link);
+      links.append(item);
+      observer.observe(source, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["hidden", "data-state"],
+      });
+    }
+    for (const button of editor.querySelectorAll("[data-workspace-task]")) {
+      const item = document.createElement("li");
+      item.hidden = true;
+      const link = document.createElement("a");
+      link.dataset.workspaceError = button.dataset.workspaceTask;
+      link.textContent = `${button.textContent} · 입력·저장 오류로 이동`;
+      item.append(link);
+      links.append(item);
+    }
+    const inputStatus = document.createElement("li");
+    inputStatus.id = "workspace-input-status";
+    inputStatus.hidden = true;
+    inputStatus.textContent =
+      "입력 버퍼 또는 보관 의도가 남아 있습니다. 작업 이동·접기로 폐기되지 않습니다.";
+    links.prepend(inputStatus);
+    for (const id of [
+      "saved-review-current",
+      "saved-review-selected",
+      "manual-target",
+    ])
+      observer.observe(document.getElementById(id), {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    observer.observe(document.getElementById("comparison"), {
+      attributes: true,
+      attributeFilter: ["hidden"],
+    });
+    for (const node of editor.querySelectorAll("[data-action-availability]"))
+      observer.observe(
+        document.getElementById(node.dataset.actionAvailability),
+        { attributes: true, attributeFilter: ["disabled"] },
+      );
+    for (const eventName of ["input", "change"])
+      editor.addEventListener(eventName, syncWorkspacePresentation);
+    for (const disclosure of editor.querySelectorAll("details")) {
+      disclosure.addEventListener("toggle", () => {
+        const summary = disclosure.querySelector(":scope > summary");
+        if (
+          !disclosure.open &&
+          disclosure.contains(document.activeElement) &&
+          document.activeElement !== summary
+        )
+          summary.focus();
+      });
+    }
+    selectWorkspaceTask("write");
+  }
 
   /**
    * 소문자 정규 UUID v4만 경로·요청·영수증 식별자로 허용한다.
@@ -838,13 +1057,11 @@
     ) {
       message.textContent =
         "소문자 UUID v4와 비개인 ASCII 확인 참조 8~64자를 입력하세요. 전송하지 않았습니다.";
-      document
-        .getElementById(
-          !resolutionUuid(batch)
-            ? "issue-resolution-batch"
-            : "issue-resolution-ref",
-        )
-        .focus();
+      focusEditorFragment(
+        !resolutionUuid(batch)
+          ? "#issue-resolution-batch"
+          : "#issue-resolution-ref",
+      );
       return;
     }
     const intent = replay
@@ -1770,8 +1987,9 @@
       : value;
     if (input) {
       input.setAttribute("aria-invalid", "true");
-      input.focus();
-    } else document.getElementById("manual-resolution-add").focus();
+      focusEditorFragment(`#${input.id}`);
+    } else focusEditorFragment("#manual-resolution-add");
+    syncWorkspacePresentation();
     throw { code: "MANUAL_INPUT" };
   }
 
@@ -3382,7 +3600,7 @@
       document
         .getElementById("saved-preview-role")
         .setAttribute("aria-invalid", "true");
-      document.getElementById("saved-preview-role").focus();
+      focusEditorFragment("#saved-preview-role");
       syncSavedReviewControls();
       return;
     }
@@ -4035,11 +4253,9 @@
     if (action !== "REQUEST" && !fields) {
       message.textContent =
         "행동에 맞는 사유와 영문·숫자·밑줄·하이픈 8~64자의 확인 참조를 입력하세요.";
-      document
-        .getElementById(
-          action === "WITHDRAW" ? "review-withdraw-ref" : "review-changes-ref",
-        )
-        .focus();
+      focusEditorFragment(
+        action === "WITHDRAW" ? "#review-withdraw-ref" : "#review-changes-ref",
+      );
       return;
     }
     resetSavedReview();
@@ -4697,6 +4913,7 @@
         ? `저장될 배정: ${keys.join("~")} · 생성 뒤 변경 불가`
         : "활성 ROLE 단서 코드와 역할 코드를 입력하면 저장될 배정을 표시합니다.";
     }
+    syncWorkspacePresentation();
   }
 
   /**
@@ -4723,10 +4940,11 @@
   }
 
   /**
-   * 대상이 속한 원고 영역의 표시와 목차 위치만 갱신한다. 요청·입력·세대는 변경하지 않는다.
-   * @param {Element|null} target 기존 DOM 대상. 원고 밖이거나 null이면 표시를 바꾸지 않는다.
+   * 대상 작업·접힌 참고와 원고 영역의 표시·목차만 갱신한다. 요청·입력·세대는 변경하지 않는다.
+   * @param {Element|null} target 기존 DOM 대상. 원고 밖이면 작업만 열고 null은 무시한다.
    */
   function revealEditorPanel(target) {
+    revealWorkspaceTarget(target);
     const panel = target?.closest(".manuscript > section");
     if (!panel) return;
     for (const section of editor.querySelectorAll(".manuscript > section")) {
@@ -4760,13 +4978,20 @@
     let target = document.getElementById(id);
     if (!target) return false;
     revealEditorPanel(target);
-    const disclosure = target.closest("details");
-    if (disclosure) disclosure.open = true;
+    if (target.matches("summary")) target.parentElement.open = true;
     if (target.hidden && target.matches("[data-value]")) {
       target = target.closest(".field").querySelector("[data-field]");
     }
-    if (target?.matches(":disabled")) target = activeEditorHeading();
+    if (target?.matches(":disabled")) {
+      target =
+        target.closest("[data-workspace-panel]")?.querySelector("h2") ||
+        activeEditorHeading();
+    }
     if (!target || target.closest("[hidden]")) return false;
+    if (
+      !target.matches("a, button, input, select, textarea, summary, [tabindex]")
+    )
+      target.tabIndex = -1;
     target.focus({ preventScroll: true });
     target.scrollIntoView({ block: "start" });
     return true;
@@ -4797,6 +5022,7 @@
     target.setAttribute("aria-describedby", error.id);
     revealEditorPanel(target);
     target.focus();
+    syncWorkspacePresentation();
   }
 
   /**
@@ -4955,6 +5181,7 @@
     actions.className = "form-actions";
     actions.append(button);
     const feedback = document.createElement("p");
+    feedback.id = `${section}-save-status`;
     feedback.dataset.saveStatus = "";
     feedback.className = "muted";
     feedback.setAttribute("role", "status");
@@ -7079,6 +7306,7 @@
   }
 
   if (editor) {
+    initializeWorkspace();
     document
       .getElementById("issue-resolution-form")
       ?.addEventListener("submit", (event) => {
