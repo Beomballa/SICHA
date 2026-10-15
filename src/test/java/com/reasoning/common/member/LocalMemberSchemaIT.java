@@ -49,7 +49,7 @@ class LocalMemberSchemaIT {
         postgres.start();
         jdbc = jdbc(postgres);
         var migration = flyway(postgres, null);
-        assertThat(migration.migrate().migrationsExecuted).isEqualTo(43);
+        assertThat(migration.migrate().migrationsExecuted).isEqualTo(44);
         assertThat(migration.migrate().migrationsExecuted).isZero();
         migration.validate();
         var properties = new AuthProperties();

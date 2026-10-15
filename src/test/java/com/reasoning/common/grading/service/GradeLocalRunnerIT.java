@@ -98,7 +98,7 @@ class GradeLocalRunnerIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(43);
+                .isEqualTo(44);
         var properties = new AuthProperties();
         properties.setCryptoKeyFile(TestKeys.create((byte) 41));
         properties.setSearchKeyFile(TestKeys.create((byte) 42));

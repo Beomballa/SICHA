@@ -43,7 +43,7 @@ class GameGradeSourceIT extends PlaytestReportFixture {
                                 "SELECT max(version::integer) FROM flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(43);
+                .isEqualTo(44);
         playtestPolicy();
         var selected = account("game-grade-" + UUID.randomUUID() + "@example.invalid");
         String token = selected.path("accessToken").asText();

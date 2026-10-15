@@ -146,16 +146,31 @@ public class MemberAuthConfiguration {
                         java.util.Objects.requireNonNull(db.getDataSource())));
     }
 
+    /**
+     * 같은 연결 원천에서 회원 접근 이력과 최소 영수증의 소유 거래를 구성한다.
+     *
+     * @param db 회원 저장소와 같은 연결 원천의 템플릿이며 null 불가
+     * @return 생성 중 SQL을 실행하지 않는 접근 이력 만료 서비스
+     */
+    @Bean
+    public MemberAccessCleanupService memberAccessCleanupService(JdbcTemplate db) {
+        return new MemberAccessCleanupService(
+                db,
+                new DataSourceTransactionManager(
+                        java.util.Objects.requireNonNull(db.getDataSource())));
+    }
+
     @Configuration(proxyBeanMethods = false)
     public static class CleanupConfiguration {
         /**
          * 명시 활성화에만 정리 실행기를 생성하며 수집·웹 스위치는 참조하지 않는다.
          *
-         * <p>접속 근거·인증 자료·제한 창·감사와 영수증은 독립 확정되며 후속 실패가 앞 확정을 되돌리지 않는다.
+         * <p>접속 근거·인증 자료·제한 창·인증 감사·접근 이력과 영수증은 독립 확정되며 후속 실패가 앞 확정을 되돌리지 않는다.
          *
          * @param presence 게임 영역이 제공하는 필수 선행 정리
          * @param cleanup 종류별 100행 이하로 정리할 서비스
          * @param audit 감사와 만료 영수증 각각 100행 이하로 정리할 필수 서비스
+         * @param access 회원 접근 이력과 만료 영수증 각각 100행 이하로 정리할 필수 서비스
          * @return 컨텍스트가 시작·종료하는 단일 스레드 실행기
          */
         @Bean
@@ -163,12 +178,14 @@ public class MemberAuthConfiguration {
         public CleanupLifecycle memberAuthCleanupLifecycle(
                 PresenceCleanup presence,
                 MemberAuthCleanupService cleanup,
-                MemberAuthAuditCleanupService audit) {
+                MemberAuthAuditCleanupService audit,
+                MemberAccessCleanupService access) {
             return new CleanupLifecycle(
                     () -> {
                         presence.cleanup(100);
                         cleanup.cleanup(100);
                         audit.cleanup(100);
+                        access.cleanup(100);
                     });
         }
     }

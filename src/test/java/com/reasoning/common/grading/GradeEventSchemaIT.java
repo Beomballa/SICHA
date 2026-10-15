@@ -48,7 +48,7 @@ class GradeEventSchemaIT {
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(43);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(44);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             jdbc = GradeSchemaIT.jdbc(postgres);
@@ -732,7 +732,9 @@ class GradeEventSchemaIT {
                         "pk_access_history",
                         "uq_access_history_request",
                         "uq_access_history_event",
-                        "ix_access_history_actor");
+                        "ix_access_history_actor",
+                        "ix_access_member_due",
+                        "ix_access_actor_due");
         assertThat(
                         jdbc.queryForList(
                                 "SELECT conname FROM pg_constraint WHERE"

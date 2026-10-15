@@ -103,7 +103,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     "a5773a08a2f56802175dc1730d79749e894ce6bdc238ca6de07e99458aee1a8d",
                     "20ec317a4f687bf024f893c8f7fb6ad5e16534639b6080298a69ce78ef9ce6ef",
                     "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab",
-                    "6c6411750cf9cdbbf5891bb091302bb3ad012a339db67026d8d0b04fd310d0dc");
+                    "6c6411750cf9cdbbf5891bb091302bb3ad012a339db67026d8d0b04fd310d0dc",
+                    "ff46ab46fa83c3f90f5f01171f21e6a68e60c470eaa864ebc5d41f2eb312fea0");
 
     @Container static final PostgreSQLContainer<?> postgres = database();
 
@@ -133,9 +134,9 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     void completeCatalogReadersAndIntegrityFailures() throws Exception {
         var entries = OriginalSqlCatalog.entries();
         var provider = new EmbeddedSqlResourceProvider();
-        assertThat(entries).hasSize(43);
+        assertThat(entries).hasSize(44);
         assertThat(entries.stream().map(OriginalSqlCatalog.Entry::name).distinct().count())
-                .isEqualTo(43);
+                .isEqualTo(44);
         int totalBytes = 0;
         for (int index = 0; index < entries.size(); index++) {
             var entry = entries.get(index);
@@ -158,12 +159,12 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                 assertThat(text(reopened)).isEqualTo(entry.sql());
             }
         }
-        assertThat(totalBytes).isEqualTo(372366);
+        assertThat(totalBytes).isEqualTo(384523);
         assertThat(provider.getResource("missing.sql")).isNull();
         assertThat(provider.getResource(entries.getFirst().name().toLowerCase())).isNull();
         assertThat(provider.getResource("db/migration/" + entries.getFirst().name())).isNull();
         assertThat(provider.getResource(entries.getFirst().name() + ".conf")).isNull();
-        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(43);
+        assertThat(provider.getResources("V", new String[] {".sql", "", ".sql"})).hasSize(44);
         assertThat(provider.getResources("V1__", new String[] {".txt", ".sql"})).hasSize(1);
         assertThat(provider.getResources("R", new String[] {""})).isEmpty();
         assertThat(provider.getResources("", new String[] {})).isEmpty();
@@ -196,11 +197,11 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
     /** 정상 Boot 시작 뒤 실제 Hibernate 조회와 JDBC 세션 왕복 및 원본 SQL 전체 구조를 비교한다. */
     @Test
     void freshBootSqlHistorySchemaAndSessionReadiness() throws Exception {
-        assertThat(readiness.migrations()).isEqualTo(43);
+        assertThat(readiness.migrations()).isEqualTo(44);
         assertThat(bootFlyway.getConfiguration().getResourceProvider())
                 .isInstanceOf(EmbeddedSqlResourceProvider.class);
         var before = history(jdbc);
-        assertThat(before).hasSize(43);
+        assertThat(before).hasSize(44);
         assertThat(bootFlyway.migrate().migrationsExecuted).isZero();
         bootFlyway.validate();
         assertThat(history(jdbc)).isEqualTo(before);
@@ -232,8 +233,8 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
         }
         try (var legacyDatabase = database()) {
             legacyDatabase.start();
-            var legacy = legacy(legacyDatabase, "43");
-            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(43);
+            var legacy = legacy(legacyDatabase, "44");
+            assertThat(legacy.migrate().migrationsExecuted).isEqualTo(44);
             legacy.validate();
             assertSqlIdentity(bootFlyway, legacy);
             assertThat(schema(jdbc)).isEqualTo(schema(jdbc(legacyDatabase)));
@@ -331,13 +332,13 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                 StandardCharsets.UTF_8);
     }
 
-    /** 빈 폐기형 DB에 embedded SQL43을 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
+    /** 빈 폐기형 DB에 embedded SQL44를 실제 적용하고 재실행·검증·Boot 이력 정체성을 비교한다. */
     @Test
-    void freshEmbeddedFortyThreeThenZero() {
+    void freshEmbeddedFortyFourThenZero() {
         try (var database = database()) {
             database.start();
             var embedded = embedded(database);
-            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(43);
+            assertThat(embedded.migrate().migrationsExecuted).isEqualTo(44);
             var jdbc = jdbc(database);
             var before = history(jdbc);
             assertThat(embedded.migrate().migrationsExecuted).isZero();
@@ -1873,7 +1874,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
      * @return 독립 파일 위치가 없는 전체 embedded SQL Flyway
      */
     private static Flyway embedded(PostgreSQLContainer<?> database) {
-        return embedded(database, "43");
+        return embedded(database, "44");
     }
 
     /** 역사적 목표도 동일한 embedded 공급원으로 실행한다. */
@@ -2087,7 +2088,7 @@ class EmbeddedFlywayBootstrapIT extends DatabaseContextTest {
                     jdbc.queryForObject(
                             "SELECT count(*) FROM public.flyway_schema_history WHERE success",
                             Integer.class);
-            assertThat(migrations).isEqualTo(43);
+            assertThat(migrations).isEqualTo(44);
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM public.spring_session", Integer.class))

@@ -150,7 +150,10 @@ public final class OriginalSqlCatalog {
                             "f4f7b84d62cb8c769cf0af9ae18999bfa705c1817de8e57f4b80d768abfa0eab"),
                     Map.entry(
                             "V43__member_auth_audit_retention.sql",
-                            "6c6411750cf9cdbbf5891bb091302bb3ad012a339db67026d8d0b04fd310d0dc"));
+                            "6c6411750cf9cdbbf5891bb091302bb3ad012a339db67026d8d0b04fd310d0dc"),
+                    Map.entry(
+                            "V44__member_access_history_retention.sql",
+                            "ff46ab46fa83c3f90f5f01171f21e6a68e60c470eaa864ebc5d41f2eb312fea0"));
 
     private static final List<Entry> ENTRIES =
             validate(
@@ -197,12 +200,13 @@ public final class OriginalSqlCatalog {
                             new Entry("V40__exposure_source_erasure.sql", sql40()),
                             new Entry("V41__test_retention_deadlines.sql", sql41()),
                             new Entry("V42__public_game_erasure.sql", sql42()),
-                            new Entry("V43__member_auth_audit_retention.sql", sql43())));
+                            new Entry("V43__member_auth_audit_retention.sql", sql43()),
+                            new Entry("V44__member_access_history_retention.sql", sql44())));
 
     /**
      * 완전성과 이름·바이트 해시가 검증된 원본 전체를 반환한다.
      *
-     * @return 수정 불가능한 전체 43개 원본 목록
+     * @return 수정 불가능한 전체 44개 원본 목록
      */
     public static List<Entry> entries() {
         return ENTRIES;
@@ -7043,6 +7047,210 @@ public final class OriginalSqlCatalog {
           public.guard_member_auth_audit_cleanup() FROM PUBLIC;
         COMMENT ON TABLE public.member_auth_audit_cleanup IS '회원 인증 감사 만료 배치의 최소 원자 영수증. 식별자·해시·원문·출처 시각 범위 없음. 최대90일.';
         COMMENT ON FUNCTION public.consume_member_auth_audit_expiry(integer) IS '저장된 purge_at<=DB 시계인 적격 감사만 전역1..100건 삭제한다. 만료 영수증은 먼저 별도 동일 상한으로 삭제한다. 감사 삭제와 새 영수증은 원자적이며 운영 실행 권한은 별도 명시해야 한다.';
+        """;
+    }
+
+    /** V44 회원 접근 이력 만료와 최소 영수증의 정확한 UTF-8 원본을 반환한다. */
+    private static String sql44() {
+        return """
+        -- 회원 접근 이력의 DB 생성 시각으로 720시간 만료를 소비한다. 운영 역할·권한은 만들지 않는다.
+        CREATE TABLE public.member_access_cleanup (
+          operation_key uuid NOT NULL PRIMARY KEY,
+          policy_ref varchar(40) NOT NULL CHECK (policy_ref='DATA-LIFECYCLE-01'),
+          deleted_count integer NOT NULL CHECK (deleted_count BETWEEN 1 AND 100),
+          completed_at timestamptz NOT NULL,
+          success_code varchar(24) NOT NULL CHECK (success_code='EXPIRED_REMOVED'),
+          receipt_expires_at timestamptz NOT NULL,
+          CONSTRAINT ck_mac_expiry CHECK (receipt_expires_at>completed_at AND
+            receipt_expires_at<=completed_at+interval '2160 hours')
+        );
+        CREATE INDEX ix_access_member_due ON public.access_history(created_at,id) WHERE actor_kind='MEMBER';
+        CREATE INDEX ix_access_actor_due ON public.access_history(actor_key,created_at,id) WHERE actor_kind='MEMBER';
+        CREATE INDEX ix_mac_due ON public.member_access_cleanup(receipt_expires_at,operation_key);
+
+        -- 모든 상태의 PRIMARY 참조를 보존한다. 요청 출처는 행위자의 TEST 참가 여부와 독립적이다.
+        CREATE FUNCTION public.member_access_expiry_eligible(actor uuid, request uuid) RETURNS boolean
+        LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+          SELECT EXISTS (
+            SELECT 1 FROM public.member_account m WHERE m.member_key=actor AND m.state IN ('ACTIVE','BLOCKED')
+            AND NOT EXISTS (SELECT 1 FROM public.privacy_erase e WHERE e.member_id=m.id)
+            AND NOT EXISTS (SELECT 1 FROM public.privacy_target t WHERE t.member_id=m.id)
+            AND NOT EXISTS (SELECT 1 FROM public.game_member g JOIN public.privacy_target t
+              ON t.room_id=g.room_id OR t.game_member_id=g.id WHERE g.member_id=m.id)
+            AND NOT EXISTS (SELECT 1 FROM public.test_member participant JOIN public.test_member peer
+              ON peer.test_id=participant.test_id JOIN public.privacy_erase e ON e.member_id=peer.member_id
+              WHERE participant.member_id=m.id)
+            AND NOT EXISTS (SELECT 1 FROM public.test_member participant JOIN public.privacy_target t
+              ON t.test_id=participant.test_id WHERE participant.member_id=m.id)
+          ) AND NOT EXISTS (
+            SELECT 1 FROM public.test_audit a JOIN public.play_test p
+              ON a.scope_key IN ('test:'||p.test_key::text,'test:'||p.id::text)
+            WHERE a.request_id=request AND a.scope_kind IN ('TEST','PLAYTEST') AND (
+              NOT EXISTS (SELECT 1 FROM public.test_member participant WHERE participant.test_id=p.id)
+              OR EXISTS (SELECT 1 FROM public.privacy_target t WHERE t.test_id=p.id)
+              OR EXISTS (SELECT 1 FROM public.test_member participant JOIN public.privacy_erase e
+                ON e.member_id=participant.member_id WHERE participant.test_id=p.id)
+              OR EXISTS (SELECT 1 FROM public.test_member participant JOIN public.privacy_target t
+                ON t.member_id=participant.member_id WHERE participant.test_id=p.id)
+            )
+          );
+        $$;
+
+        -- MEMBER 전환을 포함한 출처·보관 결속 변경을 금지한다. 비회원의 기존 필드 UPDATE는 유지한다.
+        CREATE FUNCTION public.guard_member_access_binding() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+        BEGIN
+          IF TG_OP='TRUNCATE' THEN
+            RAISE EXCEPTION 'member access truncate unauthorized' USING ERRCODE='42501';
+          END IF;
+          IF (OLD.actor_kind='MEMBER' OR NEW.actor_kind='MEMBER') AND
+            OLD IS DISTINCT FROM NEW THEN
+            RAISE EXCEPTION 'member access binding immutable' USING ERRCODE='42501';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER tr_access_history_binding BEFORE UPDATE ON public.access_history
+        FOR EACH ROW EXECUTE FUNCTION public.guard_member_access_binding();
+        CREATE TRIGGER tr_access_history_truncate BEFORE TRUNCATE ON public.access_history
+        FOR EACH STATEMENT EXECUTE FUNCTION public.guard_member_access_binding();
+
+        -- 실제 PRIMARY 회원 또는 연결된 모든 TEST 중 실제 허가된 출처를 먼저 검사한다. 일반 삭제 우회는 없다.
+        CREATE FUNCTION public.guard_member_access_expiry_delete() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+        DECLARE owner_member bigint;
+        BEGIN
+          IF OLD.actor_kind='MEMBER' THEN
+            SELECT m.id INTO owner_member FROM public.member_account m WHERE m.member_key=OLD.actor_key;
+          END IF;
+          IF OLD.actor_kind='MEMBER' AND (public.privacy_primary_delete_allowed(owner_member,NULL) IS TRUE OR EXISTS (
+            SELECT 1 FROM public.test_audit a JOIN public.play_test p
+              ON a.scope_key IN ('test:'||p.test_key::text,'test:'||p.id::text)
+            WHERE a.request_id=OLD.request_id AND a.scope_kind IN ('TEST','PLAYTEST')
+              AND public.privacy_primary_delete_allowed(NULL,p.id) IS TRUE
+          )) THEN
+            RETURN OLD;
+          END IF;
+          IF (current_user=(SELECT pg_catalog.pg_get_userbyid(p.proowner) FROM pg_catalog.pg_proc p
+               WHERE p.oid=pg_catalog.to_regprocedure('public.consume_member_access_expiry(integer)'))
+              AND OLD.actor_kind='MEMBER'
+              AND OLD.created_at<=pg_catalog.clock_timestamp()-interval '720 hours'
+              AND public.member_access_expiry_eligible(OLD.actor_key,OLD.request_id) IS TRUE) IS NOT TRUE THEN
+            RAISE EXCEPTION 'member access expiry deletion unauthorized' USING ERRCODE='42501';
+          END IF;
+          RETURN OLD;
+        END;
+        $$;
+        DROP TRIGGER tr_access_history_erase ON public.access_history;
+        CREATE TRIGGER tr_access_history_erase BEFORE DELETE ON public.access_history
+        FOR EACH ROW EXECUTE FUNCTION public.guard_member_access_expiry_delete();
+
+        -- 영수증은 실제 소비자 소유자의 INSERT와 만료 DELETE만 허용한다. 소유자·superuser는 신뢰 경계다.
+        CREATE FUNCTION public.guard_member_access_cleanup() RETURNS trigger
+        LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+        BEGIN
+          IF TG_OP IN ('UPDATE','TRUNCATE') OR (current_user=(SELECT pg_catalog.pg_get_userbyid(p.proowner)
+              FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure('public.consume_member_access_expiry(integer)'))) IS NOT TRUE THEN
+            RAISE EXCEPTION 'member access receipt mutation unauthorized' USING ERRCODE='42501';
+          END IF;
+          IF TG_OP='DELETE' THEN
+            IF (OLD.receipt_expires_at<=pg_catalog.clock_timestamp()) IS NOT TRUE THEN
+              RAISE EXCEPTION 'member access receipt not expired' USING ERRCODE='42501';
+            END IF;
+            RETURN OLD;
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER tr_mac_row BEFORE INSERT OR UPDATE OR DELETE ON public.member_access_cleanup
+        FOR EACH ROW EXECUTE FUNCTION public.guard_member_access_cleanup();
+        CREATE TRIGGER tr_mac_truncate BEFORE TRUNCATE ON public.member_access_cleanup
+        FOR EACH STATEMENT EXECUTE FUNCTION public.guard_member_access_cleanup();
+
+        -- 영수증을 먼저 별도 상한으로 지운 뒤 정렬된 부모, 접근 행 순서로 잠근다. 실패는 전체 호출을 롤백한다.
+        -- accesses·receipts는 삭제 수이며 접근 삭제가 없으면 operation_key는 NULL이다.
+        CREATE FUNCTION public.consume_member_access_expiry(batch_limit integer)
+        RETURNS TABLE(accesses integer, receipts integer, operation_key uuid)
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+        DECLARE parents bigint[]; completed timestamptz;
+        BEGIN
+          IF batch_limit IS NULL OR batch_limit<1 OR batch_limit>100 THEN
+            RAISE EXCEPTION 'member access expiry limit must be 1..100' USING ERRCODE='22023';
+          END IF;
+          WITH candidates AS MATERIALIZED (
+            SELECT r.operation_key FROM public.member_access_cleanup r
+            WHERE r.receipt_expires_at<=pg_catalog.clock_timestamp()
+            ORDER BY r.receipt_expires_at,r.operation_key LIMIT batch_limit FOR UPDATE SKIP LOCKED
+          ), removed AS (
+            DELETE FROM public.member_access_cleanup r USING candidates c
+            WHERE r.operation_key=c.operation_key AND r.receipt_expires_at<=pg_catalog.clock_timestamp() RETURNING 1
+          ) SELECT count(*)::integer INTO receipts FROM removed;
+
+          -- 행위자뿐 아니라 공유 TEST와 요청 TEST의 참가자도 같은 정렬·상한으로 잠근다.
+          -- 필요한 부모가 잠겼거나 상한 밖이면 그 이력은 보존한다. 늦은 출처 잠금은 잡지 않는다.
+          WITH actors AS MATERIALIZED (
+            SELECT m.id,m.member_key FROM public.member_account m WHERE EXISTS (
+              SELECT 1 FROM public.access_history a WHERE a.actor_kind='MEMBER' AND a.actor_key=m.member_key
+                AND a.created_at<=pg_catalog.clock_timestamp()-interval '720 hours'
+                AND public.member_access_expiry_eligible(a.actor_key,a.request_id) IS TRUE
+            ) ORDER BY m.id LIMIT batch_limit
+          ), required AS MATERIALIZED (
+            SELECT actor.id FROM actors actor
+            UNION
+            SELECT peer.member_id FROM actors actor JOIN public.test_member participant ON participant.member_id=actor.id
+              JOIN public.test_member peer ON peer.test_id=participant.test_id
+            UNION
+            SELECT participant.member_id FROM actors actor JOIN public.access_history h ON h.actor_key=actor.member_key
+              AND h.actor_kind='MEMBER' AND h.created_at<=pg_catalog.clock_timestamp()-interval '720 hours'
+              JOIN public.test_audit a ON a.request_id=h.request_id AND a.scope_kind IN ('TEST','PLAYTEST')
+              JOIN public.play_test p ON a.scope_key IN ('test:'||p.test_key::text,'test:'||p.id::text)
+              JOIN public.test_member participant ON participant.test_id=p.id
+          )
+          SELECT pg_catalog.array_agg(locked.id ORDER BY locked.id) INTO parents FROM (
+            SELECT m.id FROM public.member_account m WHERE m.id IN (SELECT r.id FROM required r)
+            ORDER BY m.id LIMIT batch_limit FOR UPDATE OF m SKIP LOCKED
+          ) locked;
+          WITH candidates AS MATERIALIZED (
+            SELECT a.id,a.actor_key,a.request_id FROM public.access_history a
+            JOIN public.member_account owner ON owner.member_key=a.actor_key
+            WHERE a.actor_kind='MEMBER' AND owner.id=ANY(parents)
+              AND a.created_at<=pg_catalog.clock_timestamp()-interval '720 hours'
+              AND public.member_access_expiry_eligible(a.actor_key,a.request_id) IS TRUE
+              AND NOT EXISTS (
+                SELECT 1 FROM public.test_member participant JOIN public.test_member peer ON peer.test_id=participant.test_id
+                WHERE participant.member_id=owner.id AND NOT (peer.member_id=ANY(parents))
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM public.test_audit source JOIN public.play_test p
+                  ON source.scope_key IN ('test:'||p.test_key::text,'test:'||p.id::text)
+                  JOIN public.test_member participant ON participant.test_id=p.id
+                WHERE source.request_id=a.request_id AND source.scope_kind IN ('TEST','PLAYTEST')
+                  AND NOT (participant.member_id=ANY(parents))
+              )
+            ORDER BY a.created_at,a.id LIMIT batch_limit FOR UPDATE OF a SKIP LOCKED
+          ), removed AS (
+            DELETE FROM public.access_history a USING candidates c
+            WHERE a.id=c.id AND a.actor_kind='MEMBER' AND a.actor_key=c.actor_key AND a.request_id=c.request_id
+              AND a.created_at<=pg_catalog.clock_timestamp()-interval '720 hours'
+              AND public.member_access_expiry_eligible(a.actor_key,a.request_id) IS TRUE RETURNING 1
+          ) SELECT count(*)::integer INTO accesses FROM removed;
+          operation_key:=NULL;
+          IF accesses>0 THEN
+            operation_key:=pg_catalog.gen_random_uuid();
+            completed:=pg_catalog.clock_timestamp();
+            INSERT INTO public.member_access_cleanup(operation_key,policy_ref,deleted_count,
+              completed_at,success_code,receipt_expires_at)
+            VALUES (operation_key,'DATA-LIFECYCLE-01',accesses,completed,'EXPIRED_REMOVED',completed+interval '2160 hours');
+          END IF;
+          RETURN NEXT;
+        END;
+        $$;
+        REVOKE ALL ON TABLE public.member_access_cleanup FROM PUBLIC;
+        REVOKE ALL ON FUNCTION public.consume_member_access_expiry(integer),
+          public.member_access_expiry_eligible(uuid,uuid),public.guard_member_access_binding(),
+          public.guard_member_access_expiry_delete(),public.guard_member_access_cleanup() FROM PUBLIC;
+        COMMENT ON TABLE public.member_access_cleanup IS '회원 접근 이력 만료 배치의 최소 원자 영수증. 식별자·해시·원문·출처 시각 범위 없음. 최대90일.';
+        COMMENT ON FUNCTION public.consume_member_access_expiry(integer) IS 'MEMBER SERVER/NAV의 created_at 기준720시간이 지난 적격 행만 전역1..100건 삭제한다. 만료 영수증은 먼저 별도 동일 상한으로 삭제하며 접근 삭제와 새 영수증은 원자적이다. 운영 실행 권한은 별도 명시해야 한다.';
         """;
     }
 }

@@ -25,7 +25,7 @@ import java.util.UUID;
 class SchemaIT {
     /** 승인된 최신 물리 구조의 전체 테이블·컬럼·인덱스·FK와 기존 인증/사건 제약을 대조한다. */
     @Test
-    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V43 구조와 회귀 저장 제약 검증")
+    @DisplayName("AUTH-V01/ADMIN-V11/STORY-AUDIT: 격리 PostgreSQL에서 승인된 V1-V44 구조와 회귀 저장 제약 검증")
     void appliesH0Schema() throws Exception {
         DockerImageName image =
                 DockerImageName.parse(
@@ -42,7 +42,7 @@ class SchemaIT {
                                     postgres.getPassword())
                             .locations("classpath:db/migration")
                             .load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(43);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(44);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             flyway.validate();
             try (Connection connection = postgres.createConnection("")) {
@@ -107,6 +107,7 @@ class SchemaIT {
                                 "member_flow",
                                 "member_auth_audit",
                                 "member_auth_audit_cleanup",
+                                "member_access_cleanup",
                                 "member_auth_limit",
                                 "play_test",
                                 "test_member",
@@ -685,6 +686,15 @@ class SchemaIT {
                                 "blocked_until",
                                 "purge_at"));
                 expectedColumns.put(
+                        "member_access_cleanup",
+                        Set.of(
+                                "operation_key",
+                                "policy_ref",
+                                "deleted_count",
+                                "completed_at",
+                                "success_code",
+                                "receipt_expires_at"));
+                expectedColumns.put(
                         "play_test",
                         Set.of(
                                 "id",
@@ -1252,6 +1262,18 @@ class SchemaIT {
                 approvedIndexes.put(
                         "member_auth_audit_cleanup",
                         Set.of("member_auth_audit_cleanup_pkey", "ix_maac_due"));
+                approvedIndexes.put(
+                        "member_access_cleanup",
+                        Set.of("member_access_cleanup_pkey", "ix_mac_due"));
+                approvedIndexes.put(
+                        "access_history",
+                        Set.of(
+                                "pk_access_history",
+                                "uq_access_history_request",
+                                "uq_access_history_event",
+                                "ix_access_history_actor",
+                                "ix_access_member_due",
+                                "ix_access_actor_due"));
                 approvedIndexes.put("member_auth_limit", Set.of("pk_member_auth_limit"));
                 approvedIndexes.put(
                         "privacy_erase",
@@ -1488,6 +1510,7 @@ class SchemaIT {
                         "member_flow", Set.of("fk_mf_member", "fk_mf_identity", "fk_mf_session"));
                 approvedForeignKeys.put("member_auth_audit", Set.of("fk_maa_member"));
                 approvedForeignKeys.put("member_auth_audit_cleanup", Set.of());
+                approvedForeignKeys.put("member_access_cleanup", Set.of());
                 approvedForeignKeys.put("member_auth_limit", Set.of());
                 approvedForeignKeys.put(
                         "privacy_erase",

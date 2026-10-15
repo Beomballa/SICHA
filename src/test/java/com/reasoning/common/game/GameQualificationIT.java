@@ -39,7 +39,7 @@ public class GameQualificationIT extends PlaytestReportFixture {
                                 "SELECT max(version::integer) FROM flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(43);
+                .isEqualTo(44);
         Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .resourceProvider(new com.reasoning.common.migration.EmbeddedSqlResourceProvider())

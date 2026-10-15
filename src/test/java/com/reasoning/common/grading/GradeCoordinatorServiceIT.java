@@ -73,7 +73,7 @@ class GradeCoordinatorServiceIT {
                                 "SELECT max(version::int) FROM public.flyway_schema_history WHERE"
                                         + " success",
                                 Integer.class))
-                .isEqualTo(43);
+                .isEqualTo(44);
     }
 
     @AfterAll

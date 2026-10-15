@@ -46,7 +46,7 @@ class GradeEvidenceSchemaIT {
         postgres.start();
         jdbc = jdbc(postgres);
         var flyway = flyway(postgres, null);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(43);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(44);
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
     }

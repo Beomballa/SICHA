@@ -29,7 +29,7 @@ class MemberAuthAuditCleanupIT extends LocalMemberAuthIT {
     private long policy;
     private long admin;
 
-    /** 부모 fixture와 업무 행을 공유하지 않는 최신 V43 DB를 만든다. 운영 역할은 수정하지 않는다. */
+    /** 부모 fixture와 업무 행을 공유하지 않는 최신 DB를 만든다. 운영 역할은 수정하지 않는다. */
     @BeforeEach
     void auditDatabase() throws Exception {
         String database = "audit_" + UUID.randomUUID().toString().replace("-", "");
@@ -44,7 +44,7 @@ class MemberAuthAuditCleanupIT extends LocalMemberAuthIT {
                         .locations("classpath:audit-no-independent-sql")
                         .resourceProvider(new EmbeddedSqlResourceProvider())
                         .load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(43);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(44);
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
         role = "audit_invoker_" + UUID.randomUUID().toString().replace("-", "");
@@ -887,7 +887,7 @@ class MemberAuthAuditCleanupIT extends LocalMemberAuthIT {
     private void exportSchemaEvidence() throws Exception {
         String destination = System.getenv("AUDIT_RETENTION_SCHEMA_EVIDENCE");
         if (destination == null || destination.isBlank()) return;
-        var output = JSON.createObjectNode().put("migrationVersion", 43);
+        var output = JSON.createObjectNode().put("migrationVersion", 44);
         output.put(
                 "totalForeignKeys",
                 sql.queryForObject(
