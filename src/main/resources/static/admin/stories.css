@@ -29,10 +29,7 @@
 .page-header h1 {
   margin-bottom: var(--gap-helper);
 }
-.list-header,
-.editor-header,
-.report-masthead,
-.register-heading {
+.list-header {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -42,10 +39,6 @@
 .list-header {
   padding-block: var(--gap-group);
   border-bottom: 1px solid var(--color-border);
-}
-.page-header .eyebrow {
-  color: var(--color-info);
-  font-family: var(--font-code);
 }
 #create-panel {
   border-top: var(--space-1) solid var(--color-brand);
@@ -204,13 +197,10 @@ section {
   flex-wrap: wrap;
   gap: var(--gap-label);
 }
-.story-badges span,
-.document-scope {
+.story-badges span {
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-border);
   font-size: var(--font-size-caption);
-}
-.story-badges span {
   background: var(--color-surface-raised);
   border-radius: var(--radius-control);
 }

@@ -699,6 +699,31 @@ try {
   await notice(page, "현재 페이지");
   assert.equal(await page.title(), "시차 · 관리자 사건 목록");
   assert.equal(await text(page, ".workspace-label"), "시차 · 관리자 제작실");
+  assert.equal(await text(page, ".list-header h1"), "사건 기록부");
+  assert.equal(await text(page, "#list-heading"), "사건 조회");
+  assert.equal(
+    await page.$$eval(
+      ".list-header .eyebrow, .register-heading",
+      (nodes) => nodes.length,
+    ),
+    0,
+  );
+  // 정렬 안내는 한 번만 표시하되 정확 코드 검색 방식은 그대로 전달한다.
+  assert.equal(
+    await page.$eval(
+      ".list-panel",
+      (node) => node.textContent.match(/생성 최신순/g)?.length,
+    ),
+    1,
+  );
+  assert.match(
+    await text(page, ".list-panel"),
+    /제목이 아닌 정확한 사건 코드로 검색합니다/,
+  );
+  assert.equal(
+    await page.$eval("#code", (node) => node.getAttribute("pattern")),
+    "[A-Z0-9_]{1,40}",
+  );
   assert.match(await text(page, "#rows"), /접근 가능 사건이 없습니다/);
   await layout(page, "empty-list");
   const failedList = await loseResponse(
@@ -712,13 +737,38 @@ try {
   await page.click("#filter-form button");
   await notice(page, "현재 페이지");
   await page.waitForSelector("#create-panel:not([hidden])");
+  assert.equal(await text(page, "#create-heading"), "새 초안 만들기");
+  assert.equal(
+    await page.$$eval("#create-panel > .ui-badge", (nodes) => nodes.length),
+    0,
+  );
+  assert.match(await text(page, "#create-panel > p"), /버전 1의 비공개 초안/);
+  assert.match(
+    await text(page, "#create-panel > p"),
+    /생성 결과가 불확실하면 자동으로\s+재전송하지 않습니다/,
+  );
+  assert.match(await text(page, "#create-title-help"), /최대 160자/);
+  assert.match(
+    await text(page, "#create-title-help"),
+    /사건 코드는 생성 시\s+부여/,
+  );
+  // 제작 단계는 생성 후 이동·독립 저장·공개 경계라는 서로 다른 안내를 유지한다.
+  assert.match(await text(page, ".creation-steps"), /원고 편집기로 이동/);
+  assert.match(await text(page, ".creation-steps"), /영역별로 저장/);
+  assert.match(await text(page, ".creation-steps"), /공개되지 않습니다/);
+  assert.equal(
+    (await text(page, "#check-create")).trim(),
+    "이 생성의 현재 상태 확인",
+  );
+  assert.equal((await text(page, "#new-create")).trim(), "새 생성 의도 시작");
   await page.type("#title", "합성 검증 사건 <script>확인</script>");
   await Promise.all([
     page.waitForNavigation(),
     page.click("#create-form button"),
   ]);
   await page.waitForSelector("#editor:not([hidden])");
-  assert.equal(await page.title(), "시차 · 관리자 사건 보고서");
+  assert.equal(await page.title(), "시차 · 관리자 사건 제작");
+  assert.equal(await text(page, ".editor-header h1"), "사건 제작");
   assert.equal(await page.$$(".workbench").then((nodes) => nodes.length), 1);
   assert.deepEqual(
     await page.$$eval("[data-workspace-task]", (nodes) =>

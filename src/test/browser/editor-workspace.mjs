@@ -109,7 +109,7 @@ export async function selectEditorTaskFor(page, selector) {
 }
 
 /**
- * 선택한 작업만 보이고 초점이 표시된 노드에 있는지 확인한다.
+ * 선택한 작업·초점과 작업 밖의 사건명·수정번호·미저장·복구 맥락이 보이는지 확인한다.
  * @param {object} page 준비된 Puppeteer Page.
  * @param {string} task 다섯 작업 중 하나.
  * @returns {Promise<void>} DOM 표시·선택 상태를 단언한다.
@@ -138,12 +138,31 @@ async function assertTask(page, task) {
       focused:
         document.activeElement !== document.body &&
         document.activeElement.checkVisibility(),
+      context: [
+        "state-heading",
+        "version-summary",
+        "draft-summary",
+        "workspace-status",
+        "notice",
+      ].every((id) => {
+        const node = document.getElementById(id);
+        return (
+          node?.checkVisibility() &&
+          Boolean(node.textContent.trim()) &&
+          !node.closest("[data-workspace-panel], details")
+        );
+      }),
     };
   });
   assert.deepEqual(state.selected, [task]);
   assert.deepEqual(state.visible, [task]);
   assert.equal(state.controls, true);
   assert.equal(state.focused, true);
+  assert.equal(
+    state.context,
+    true,
+    "작업 이동으로 필수 사건 맥락을 숨기지 않습니다.",
+  );
 }
 
 /**

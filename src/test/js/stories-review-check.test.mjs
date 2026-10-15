@@ -499,6 +499,98 @@ test("five editor tasks preserve DOM, keep buffers and disabled forms with nativ
   });
 });
 
+test("compact editor heading retains long case context and keyboard metadata disclosure without discarding input or requesting data", async () => {
+  const initial = source();
+  initial.sections.basic.title =
+    "긴 사건명과 현재 원고 식별을 유지하는 합성 사건 ".repeat(4);
+  await isolated(async ({ page, requests, identityRequests }) => {
+    assert.equal(await page.title(), "시차 · 관리자 사건 제작");
+    assert.equal(
+      await page.$eval(".editor-header", (node) => node.textContent.trim()),
+      "사건 제작",
+    );
+    assert.equal(
+      (
+        await page.$$(
+          ".editor-header .eyebrow, .editor-header .ui-badge, .report-masthead, .document-scope",
+        )
+      ).length,
+      0,
+    );
+    assert.equal(
+      await page.$eval("#editor-nav .index-label", (node) => node.textContent),
+      "원고 목차",
+    );
+    await edit(page, "basic", "intro", "식별 정보를 접어도 유지할 입력");
+    await page.select("#basic-intro-mode", "keep");
+    const input = await page.$("#basic-intro");
+    const before = {
+      business: requests.length,
+      identity: identityRequests.length,
+    };
+    try {
+      for (const width of [360, 768, 900, 1199, 1200, 1440]) {
+        await page.setViewport({ width, height: 900 });
+        const context = await page.evaluate(() => {
+          const heading = document.getElementById("state-heading");
+          const summary = document.getElementById("version-summary");
+          return {
+            title: heading.textContent,
+            revision: summary.textContent,
+            visible: heading.checkVisibility() && summary.checkVisibility(),
+            overflow: document.documentElement.scrollWidth > innerWidth,
+          };
+        });
+        assert.equal(context.title, initial.sections.basic.title);
+        assert.ok(context.revision.includes(rev));
+        assert.equal(context.visible, true);
+        assert.equal(context.overflow, false, `${width}px 사건 헤더 가로 넘침`);
+
+        // 기존 식별 정보만 키보드로 열고 닫는다. 조회·쓰기 기준 수락이 아니다.
+        const summary =
+          '#editor > section[aria-labelledby="state-heading"] > details > summary';
+        await page.focus(summary);
+        await page.keyboard.press("Enter");
+        assert.equal(
+          await page.$eval("#version-state", (node) => node.checkVisibility()),
+          true,
+        );
+        await page.keyboard.press("Space");
+        assert.equal(
+          await page.$eval("#version-state", (node) => node.checkVisibility()),
+          false,
+        );
+        assert.equal(
+          await page.$eval(summary, (node) => node === document.activeElement),
+          true,
+        );
+      }
+      assert.equal(
+        await input.evaluate(
+          (node) => node === document.getElementById("basic-intro"),
+        ),
+        true,
+      );
+      assert.equal(
+        await page.$eval("#basic-intro-mode", (node) => node.value),
+        "keep",
+      );
+      await page.select("#basic-intro-mode", "value");
+      assert.equal(
+        await input.evaluate((node) => node.value),
+        "식별 정보를 접어도 유지할 입력",
+      );
+      assert.equal(await leavePrevented(page), true);
+      assert.deepEqual(
+        { business: requests.length, identity: identityRequests.length },
+        before,
+      );
+    } finally {
+      await input.dispose();
+    }
+  }, initial);
+});
+
 test("all four sections, clear intents and hidden keep buffers block both POSTs", async () => {
   await isolated(async ({ page, requests }) => {
     for (const [section, key] of [
