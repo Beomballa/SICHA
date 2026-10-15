@@ -151,7 +151,8 @@ form {
 }
 
 .actions a,
-button {
+button,
+details > summary {
   display: inline-flex;
   min-height: 48px;
   align-items: center;
@@ -167,6 +168,11 @@ button {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+details > summary {
+  display: list-item;
+  list-style-position: inside;
 }
 
 .primary-action {
@@ -198,6 +204,7 @@ button {
 
 a:focus-visible,
 button:focus-visible,
+summary:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,

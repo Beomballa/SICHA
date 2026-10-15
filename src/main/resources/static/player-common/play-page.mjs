@@ -22,6 +22,47 @@ const labels = {
   motive: "동기",
   evidence: "근거",
 };
+// 검증된 계약의 고정 값만 표시 이름으로 바꾸며 서버 필드와 명령은 유지한다.
+const modeLabels = { SOLO: "단독 조사", COOP: "협동 조사" };
+const stateLabels = {
+  WAITING: "조사 시작 대기",
+  RUNNING: "조사 중",
+  ENDED: "조사 종료",
+  CANCELLED: "방 취소",
+  EXPIRED: "대기 기한 만료",
+};
+const submissionLabels = {
+  NONE: "아직 제출하지 않음",
+  PROPOSED: "공동 보고서 수락 대기",
+  PENDING: "제출 완료 · 채점 대기",
+};
+const reportStateLabels = { GRADED: "채점 완료", UNGRADABLE: "채점 불가" };
+const outcomeLabels = {
+  SUCCESS: "사건 해결",
+  TIME_LIMIT: "조사 시간 종료",
+  ATTEMPTS_EXHAUSTED: "제출 기회 소진",
+  FORFEIT: "조사 포기",
+  SYSTEM_ERROR: "시스템 오류로 종료",
+  ACCOUNT_DELETED: "계정 삭제로 종료",
+};
+const operationLabels = {
+  PUBLIC_CREATE: "조사 방 만들기",
+  PUBLIC_START: "조사 시작",
+  PUBLIC_CLUE_READ: "단서 읽음 표시",
+  PUBLIC_HINT_OPEN: "힌트 열기",
+  PUBLIC_REPORT_EDIT: "보고서 저장",
+  PUBLIC_REPORT_SUBMIT: "보고서 제출",
+  PUBLIC_REPORT_PROPOSE: "공동 보고서 제안",
+  PUBLIC_REPORT_ACCEPT: "공동 보고서 수락",
+  PUBLIC_REPORT_REJECT: "공동 보고서 거절",
+  PUBLIC_REPORT_WITHDRAW: "공동 보고서 제안 철회",
+  PUBLIC_FORFEIT: "조사 포기",
+  PUBLIC_JOIN: "협동 초대 참가",
+  PUBLIC_INVITE: "협동 초대 발급",
+  PUBLIC_READY: "협동 준비 상태 변경",
+  PUBLIC_SELECTION_REFRESH: "사건 선택 갱신",
+  PUBLIC_LEAVE: "대기실 나가기",
+};
 let session, client;
 let invitation = null,
   bootstrapFailed = false;
@@ -146,6 +187,7 @@ function purge(reason = "SCREEN_CHANGED") {
     "notice-contact",
     "game-title",
     "game-state",
+    "game-revision",
     "game-counts",
     "deadline",
     "basic-intro",
@@ -224,7 +266,8 @@ function render() {
   const coop = gameMode === "COOP";
   element("mode").value = gameMode;
   element("mode").disabled = busy || !!state || !!pending;
-  element("create").textContent = "동의한 " + gameMode + " 방 만들기";
+  element("create").textContent =
+    "동의한 " + modeLabels[gameMode] + " 방 만들기";
   element("start").textContent = coop
     ? "두 계정 협동 조사 시작"
     : "단독 조사 시작";
@@ -288,14 +331,18 @@ function render() {
     busy || !!pending || !running || state.submissionState !== "NONE";
   element("result").hidden = result === null;
   element("uncertain").hidden = !pending?.uncertain;
-  element("intent-name").textContent = pending?.action ?? "";
+  element("intent-name").textContent = pending
+    ? operationLabels[pending.action]
+    : "";
   renderCoop(authenticated, pending);
   if (state) {
     element("game-title").textContent = state.title;
     element("game-state").textContent =
-      `${state.state} · 방 수정번호 ${state.rev} · 초안 수정번호 ${state.draftRev}`;
+      `${modeLabels[state.mode]} · ${stateLabels[state.state]}`;
+    element("game-revision").textContent =
+      `방 수정번호 ${state.rev} · 초안 수정번호 ${state.draftRev}`;
     element("game-counts").textContent =
-      `제출 상태 ${state.submissionState} · 남은 시도 ${state.attemptsRemaining ?? "미제공"} · 남은 힌트 ${state.hintsRemaining ?? "미제공"}`;
+      `${submissionLabels[state.submissionState]} · 남은 시도 ${state.attemptsRemaining ?? "미제공"} · 남은 힌트 ${state.hintsRemaining ?? "미제공"}`;
     element("deadline").textContent = state.playDeadline
       ? "서버 마감 시각: " + state.playDeadline
       : "대기실 서버 만료: " + state.lobbyExpiresAt;
@@ -335,7 +382,7 @@ function renderCoop(authenticated, pending) {
     : "";
   if (waiting)
     element("participants").textContent =
-      `내 자리 ${state.self.slot} · 방장 ${state.host} · 내 준비 ${state.self.effectiveReady} · 상대 참가 ${state.partner.joined} · 상대 준비 ${state.partner.effectiveReady} · 상대 접속 ${state.partner.online}`;
+      `내 자리 ${state.self.slot} · ${state.host ? "방장" : "참가자"} · 내 준비 ${state.self.effectiveReady ? "완료" : "대기"} · 상대 ${state.partner.joined ? "참가함" : "참가 대기"} · 상대 준비 ${state.partner.effectiveReady ? "완료" : "대기"} · 상대 접속 ${state.partner.online ? "연결됨" : "연결 안 됨"}`;
   element("proposal-section").hidden = !proposal || state?.mode !== "COOP";
   if (proposal) {
     element("proposal-revision").textContent =
@@ -473,7 +520,7 @@ async function selectStory(code) {
   ])
     element(target).textContent = value;
   element("story-details").textContent =
-    `게시 버전 ${story.publishedVersionNo} · 수정번호 ${story.playRev} · 제한 ${story.limitSec}초 · 고정 두 역할 단독 조사`;
+    `게시 버전 ${story.publishedVersionNo} · 수정번호 ${story.playRev} · 제한 ${story.limitSec}초`;
 }
 
 function editorReport() {
@@ -589,7 +636,7 @@ function paintMaterials() {
 
 function paintResult() {
   element("result-summary").textContent =
-    `${result.outcome} · 최종 점수 ${result.finalScore ?? "미제공"} · 채점 횟수 ${result.teamAttempts} · 본인 힌트 ${result.ownHintsUsed ?? "미측정"}`;
+    `${outcomeLabels[result.outcome]} · 최종 점수 ${result.finalScore ?? "미제공"} · 채점 횟수 ${result.teamAttempts} · 본인 힌트 ${result.ownHintsUsed ?? "미측정"}`;
   element("score-details").replaceChildren();
   if (result.scoreSummary) {
     paragraph(
@@ -606,7 +653,7 @@ function paintResult() {
   for (const report of result.reports)
     paragraph(
       element("report-results"),
-      `제출 ${report.submitNo} · ${report.state}${report.state === "GRADED" ? " · 기본 " + report.baseScore + " · 성공 " + report.success : ""}`,
+      `제출 ${report.submitNo} · ${reportStateLabels[report.state]}${report.state === "GRADED" ? " · 기본 " + report.baseScore + " · " + (report.success ? "사건 해결" : "해결하지 못함") : ""}`,
     );
   element("reveal").textContent = result.revealText ?? "";
 }

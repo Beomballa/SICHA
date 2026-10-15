@@ -22,7 +22,10 @@ test(
   async () => {
     const directory = mkdtempSync(join(tmpdir(), "sicha-coop-"));
     const fixture = coopFixture();
-    let server, browser;
+    let server,
+      browser,
+      denyGuestState = false,
+      loseSave = true;
     const requests = [],
       errors = [];
     try {
@@ -136,12 +139,20 @@ test(
             )
               ? "host"
               : "guest";
-            const result = fixture.respond(
-              actor,
-              request.method,
-              request.url,
-              body,
-            );
+            const result =
+              denyGuestState &&
+              actor === "guest" &&
+              request.method === "GET" &&
+              request.url === "/api/games/" + fixture.gameKey
+                ? { status: 403, value: { code: "SYNTHETIC_FORBIDDEN" } }
+                : fixture.respond(actor, request.method, request.url, body);
+            // 확정된 합성 저장의 영수증만 유실시켜 같은 키·본문 재시도를 관찰한다.
+            if (actor === "host" && request.method === "PATCH" && loseSave) {
+              loseSave = false;
+              response.statusCode = 200;
+              response.end("{");
+              return;
+            }
             response.statusCode = result.status;
             response.end(
               result.status === 204 ? undefined : JSON.stringify(result.value),
@@ -198,10 +209,26 @@ test(
       await host.click("#story-SYNTHETIC_CASE");
       await idle(host);
       await host.select("#mode", "COOP");
+      assert.equal(
+        await host.$eval("#create", (node) => node.textContent),
+        "동의한 협동 조사 방 만들기",
+      );
       await host.click("#create-consent");
       await host.click("#create");
       await host.waitForSelector("#lobby:not([hidden])");
       await idle(host);
+      assert.equal(
+        await host.$eval("#game-state", (node) => node.textContent),
+        "협동 조사 · 조사 시작 대기",
+      );
+      assert.match(
+        await host.$eval("#participants", (node) => node.textContent),
+        /방장 · 내 준비 대기 · 상대 참가 대기/,
+      );
+      assert.doesNotMatch(
+        await host.$eval("#participants", (node) => node.textContent),
+        /true|false/,
+      );
       await host.click("#issue-invite");
       await idle(host);
       const link = await host.$eval("#issued-link", (node) => node.value);
@@ -223,6 +250,21 @@ test(
       await host.click("#refresh");
       await idle(host);
       await host.click("#ready-consent");
+      const beforeReadyDisclosure = requests.length;
+      await host.focus("#game-metadata > summary");
+      await host.keyboard.press("Enter");
+      await host.waitForFunction(
+        () => document.getElementById("game-metadata").open,
+      );
+      await host.keyboard.press("Space");
+      await host.waitForFunction(
+        () => !document.getElementById("game-metadata").open,
+      );
+      assert.equal(requests.length, beforeReadyDisclosure);
+      assert.equal(
+        await host.$eval("#ready-consent", (node) => node.checked),
+        true,
+      );
       await host.click("#ready");
       await idle(host);
       await guest.click("#refresh");
@@ -239,6 +281,24 @@ test(
       await guest.click("#refresh");
       await guest.waitForSelector("#report-section:not([hidden])");
       await idle(guest);
+      for (const page of [host, guest]) {
+        assert.equal(
+          await page.$eval("#game-state", (node) => node.textContent),
+          "협동 조사 · 조사 중",
+        );
+        assert.doesNotMatch(
+          await page.$eval("#game", (node) => node.innerText),
+          /RUNNING|NONE|COOP|SOLO/,
+        );
+        assert.equal(
+          await page.$eval("#game-metadata", (node) => node.open),
+          false,
+        );
+        assert.equal(
+          await page.$eval("#error", (node) => node.nextElementSibling.id),
+          "uncertain",
+        );
+      }
       assert.match(
         await host.$eval("#clues", (node) => node.textContent),
         /PRIVATE_HOST_ONLY/,
@@ -356,7 +416,7 @@ test(
       await idle(host);
       const hostInput = await host.$("#method");
       const roomRevision = await host.$eval(
-        "#game-state",
+        "#game-revision",
         (node) => node.textContent,
       );
       const localRequests = [];
@@ -404,7 +464,7 @@ test(
       );
       assert.equal(await host.$eval("#culprit", (node) => node.value), "P1");
       assert.equal(
-        await host.$eval("#game-state", (node) => node.textContent),
+        await host.$eval("#game-revision", (node) => node.textContent),
         roomRevision,
       );
       assert.equal(
@@ -413,6 +473,82 @@ test(
       );
       await host.click("#save");
       await idle(host);
+      await host.waitForSelector("#uncertain:not([hidden])");
+      assert.equal(await host.$$eval("#uncertain", (nodes) => nodes.length), 1);
+      assert.equal(
+        await host.$eval("#intent-name", (node) => node.textContent),
+        "보고서 저장",
+      );
+      const originalSave = fixture.calls.find(
+        (call) => call.method === "PATCH",
+      );
+      const recoveryRequests = [];
+      const observeRecovery = (request) => {
+        if (new URL(request.url()).pathname.startsWith("/api/"))
+          recoveryRequests.push(request.url());
+      };
+      host.on("request", observeRecovery);
+      const recoveryInput = await host.$eval("#method", (node) => node.value);
+      await host.focus("#game-metadata > summary");
+      await host.keyboard.press("Enter");
+      await host.waitForFunction(
+        () => document.getElementById("game-metadata").open,
+      );
+      assert.doesNotMatch(
+        await host.$eval("#game-metadata", (node) => node.innerText),
+        /PRIVATE_|inviteSecret|합성 고정/,
+      );
+      await host.keyboard.press("Space");
+      await host.waitForFunction(
+        () => !document.getElementById("game-metadata").open,
+      );
+      await host.setViewport({ width: 360, height: 400 });
+      for (const task of ["investigation", "report"]) {
+        await host.click(`[data-play-task="${task}"]`);
+        assert.equal(
+          await host.$eval("#uncertain", (node) => node.checkVisibility()),
+          true,
+        );
+        await host.focus("#replay");
+        assert.equal(
+          await host.evaluate(() => document.activeElement.id),
+          "replay",
+        );
+      }
+      host.off("request", observeRecovery);
+      assert.deepEqual(recoveryRequests, []);
+      assert.equal(
+        await host.$eval("#method", (node) => node.value),
+        recoveryInput,
+      );
+      assert.equal(
+        await host.$eval("#submit-consent", (node) => node.checked),
+        false,
+      );
+      assert.equal(
+        fixture.calls.filter((call) => call.method === "PATCH").length,
+        1,
+      );
+      await host.click("#refresh");
+      await idle(host);
+      assert.equal(
+        await host.$eval("#uncertain", (node) => node.checkVisibility()),
+        true,
+      );
+      assert.equal(
+        await host.$eval("#method", (node) => node.value),
+        recoveryInput,
+      );
+      assert.match(
+        await host.$eval("#uncertain", (node) => node.textContent),
+        /서버 조회나 수정번호 변화로 명령 성공을\s+추정하지 않습니다/,
+      );
+      await host.click("#replay");
+      await idle(host);
+      assert.equal(await host.$eval("#uncertain", (node) => node.hidden), true);
+      const saves = fixture.calls.filter((call) => call.method === "PATCH");
+      assert.equal(saves.length, 2);
+      assert.deepEqual(saves[1].body, originalSave.body);
       await host.click("#submit-consent");
       await host.click("#submit");
       await host.waitForSelector("#proposal-section:not([hidden])");
@@ -425,6 +561,45 @@ test(
       await guest.waitForSelector("#proposal-section:not([hidden])");
       await idle(guest);
       await guest.click("#proposal-consent");
+      assert.match(
+        await guest.$eval("#game-counts", (node) => node.textContent),
+        /^공동 보고서 수락 대기/,
+      );
+      const proposalBefore = await guest.evaluate(() => ({
+        identity: document.getElementById("proposal-revision").innerText,
+        report: document.getElementById("proposal-report").innerText,
+        basis: document.getElementById("saved-revision").textContent,
+        inputs: [...document.querySelectorAll("input,textarea,select")].map(
+          (node) => [node.id, node.value, node.checked, node.disabled],
+        ),
+      }));
+      assert.match(proposalBefore.identity, /고정 제안 .*원본 초안 .*방 /);
+      const beforeDisclosure = requests.length;
+      await guest.focus("#game-metadata > summary");
+      await guest.keyboard.press("Enter");
+      await guest.waitForFunction(
+        () => document.getElementById("game-metadata").open,
+      );
+      assert.doesNotMatch(
+        await guest.$eval("#game-metadata", (node) => node.innerText),
+        /PRIVATE_|inviteSecret|합성 고정/,
+      );
+      await guest.keyboard.press("Space");
+      await guest.waitForFunction(
+        () => !document.getElementById("game-metadata").open,
+      );
+      assert.equal(requests.length, beforeDisclosure);
+      assert.deepEqual(
+        await guest.evaluate(() => ({
+          identity: document.getElementById("proposal-revision").innerText,
+          report: document.getElementById("proposal-report").innerText,
+          basis: document.getElementById("saved-revision").textContent,
+          inputs: [...document.querySelectorAll("input,textarea,select")].map(
+            (node) => [node.id, node.value, node.checked, node.disabled],
+          ),
+        })),
+        proposalBefore,
+      );
       await guest.click("#refresh");
       await idle(guest);
       assert.equal(
@@ -432,6 +607,36 @@ test(
         true,
         "같은 고정 제안의 재조회는 동의를 버리지 않는다",
       );
+      assert.equal(
+        await host.$eval("#accept-proposal", (node) => node.disabled),
+        true,
+      );
+      assert.equal(
+        await guest.$eval("#withdraw-proposal", (node) => node.disabled),
+        true,
+      );
+      // 같은 보고서 내용이어도 새 제안 식별자는 이전 수락 동의를 승계하지 않는다.
+      await host.click("#proposal-consent");
+      await host.click("#withdraw-proposal");
+      await idle(host);
+      await host.click("#submit-consent");
+      await host.click("#submit");
+      await idle(host);
+      await guest.click("#refresh");
+      await idle(guest);
+      assert.notEqual(
+        await guest.$eval("#proposal-revision", (node) => node.innerText),
+        proposalBefore.identity,
+      );
+      assert.equal(
+        await guest.$eval("#proposal-consent", (node) => node.checked),
+        false,
+      );
+      assert.equal(
+        await guest.$eval("#accept-proposal", (node) => node.disabled),
+        true,
+      );
+      await guest.click("#proposal-consent");
       await guest.click('[data-play-task="report"]');
       await guest.type("#evidence", "새 입력");
       assert.equal(
@@ -449,7 +654,7 @@ test(
       await idle(guest);
       assert.match(
         await guest.$eval("#game-counts", (node) => node.textContent),
-        /PENDING/,
+        /제출 완료 · 채점 대기/,
       );
       assert.equal(
         await guest.$eval("#roles", (node) => node.childElementCount),
@@ -484,6 +689,38 @@ test(
           ),
           /inviteSecret|PRIVATE_|합성 고정/,
         );
+      // 합성 403 이후에도 접힌 정보나 이전 제안으로 동의·행동을 복원하지 않는다.
+      denyGuestState = true;
+      await guest.click("#refresh");
+      await idle(guest);
+      assert.equal(await guest.$eval("#error", (node) => node.hidden), false);
+      for (const id of [
+        "game-revision",
+        "proposal-revision",
+        "proposal-report",
+        "participants",
+      ])
+        assert.equal(
+          await guest.$eval("#" + id, (node) => node.textContent),
+          "",
+        );
+      assert.equal(await guest.$eval("#game", (node) => node.hidden), true);
+      assert.equal(
+        await guest.$eval("#proposal-section", (node) => node.hidden),
+        true,
+      );
+      assert.equal(
+        await guest.$eval("#uncertain", (node) => node.hidden),
+        true,
+      );
+      assert.equal(
+        await guest.$eval("#proposal-consent", (node) => node.checked),
+        false,
+      );
+      assert.equal(
+        await guest.$eval("#accept-proposal", (node) => node.disabled),
+        true,
+      );
       assert.deepEqual(errors, []);
     } finally {
       await browser?.close();

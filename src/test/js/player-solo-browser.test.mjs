@@ -54,11 +54,11 @@ async function inspectPlayer(page) {
     // 체크박스는 글자를 표시하지 않는다. 관련 라벨의 글자·48px 조작 영역은 별도로 측정한다.
     const nodes = [
       ...document.querySelectorAll(
-        "h1,h2,h3,h4,p,label,button,input:not([type=checkbox]),textarea,select,a,.notice-body",
+        "h1,h2,h3,h4,p,label,button,summary,input:not([type=checkbox]),textarea,select,a,.notice-body",
       ),
     ].filter(visible);
     const controls = nodes.filter((node) =>
-      node.matches("button,textarea,select,input:not([type=checkbox])"),
+      node.matches("button,summary,textarea,select,input:not([type=checkbox])"),
     );
     const focus = document.activeElement;
     return {
@@ -157,7 +157,8 @@ test(
       "합성 긴 조사 원문 ".repeat(160) + "LONG_IDENTIFIER_".repeat(20);
     let server,
       browser,
-      loseSave = true;
+      loseSave = true,
+      denyState = false;
     const errors = [],
       apiRequests = [];
     try {
@@ -238,7 +239,12 @@ test(
             const body = chunks.length
               ? JSON.parse(Buffer.concat(chunks).toString("utf8"))
               : {};
-            const result = fixture.respond(request.method, request.url, body);
+            const result =
+              denyState &&
+              request.method === "GET" &&
+              request.url === "/api/games/" + fixture.gameKey
+                ? { status: 403, value: { code: "SYNTHETIC_FORBIDDEN" } }
+                : fixture.respond(request.method, request.url, body);
             // 헤더 전 소켓 종료는 Chrome이 네트워크에서 재전송하므로 확정 처리 뒤 잘린 JSON 영수증을 보낸다.
             if (request.method === "PATCH" && loseSave) {
               loseSave = false;
@@ -285,6 +291,10 @@ test(
       await page.waitForSelector("#story-SYNTHETIC_CASE");
       await page.click("#story-SYNTHETIC_CASE");
       await page.waitForSelector("#story:not([hidden])");
+      assert.equal(
+        await page.$eval("#create", (node) => node.textContent),
+        "동의한 단독 조사 방 만들기",
+      );
       assert.equal(await page.$eval("#create", (node) => node.disabled), true);
       assert.equal(
         await page.$eval("#notice-body", (node) => node.querySelector("img")),
@@ -299,6 +309,22 @@ test(
       await page.click("#start");
       await page.waitForSelector("#report-section:not([hidden])");
       await page.waitForSelector("main[aria-busy='false']");
+      assert.equal(
+        await page.$eval("#game-state", (node) => node.textContent),
+        "단독 조사 · 조사 중",
+      );
+      assert.match(
+        await page.$eval("#game-counts", (node) => node.textContent),
+        /^아직 제출하지 않음/,
+      );
+      assert.doesNotMatch(
+        await page.$eval("#game", (node) => node.innerText),
+        /RUNNING|NONE|SOLO|COOP/,
+      );
+      assert.equal(
+        await page.$eval("#game-metadata", (node) => node.open),
+        false,
+      );
       assert.equal(
         await page.$eval("#report-area", (node) => node.hidden),
         true,
@@ -359,16 +385,56 @@ test(
       await page.waitForSelector("#uncertain:not([hidden])");
       await page.waitForSelector("#replay:not(:disabled)");
       assert.equal(
+        await page.$eval("#intent-name", (node) => node.textContent),
+        "보고서 저장",
+      );
+      assert.equal(
+        await page.$eval("#error", (node) => node.nextElementSibling.id),
+        "uncertain",
+      );
+      assert.equal(await page.$$eval("#uncertain", (nodes) => nodes.length), 1);
+      assert.equal(
         fixture.calls.filter((call) => call.method === "PATCH").length,
         1,
       );
       const first = fixture.calls.find((call) => call.method === "PATCH");
       const methodNode = await page.$("#method");
       const roomRevision = await page.$eval(
-        "#game-state",
+        "#game-revision",
         (node) => node.textContent,
       );
       const beforeSwitch = apiRequests.length;
+      const beforeDisclosure = await page.evaluate(() => ({
+        inputs: [...document.querySelectorAll("input,textarea,select")].map(
+          (node) => [node.id, node.value, node.checked, node.disabled],
+        ),
+        saved: document.getElementById("saved-revision").textContent,
+        intent: document.getElementById("intent-name").textContent,
+      }));
+      await page.focus("#game-metadata > summary");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        () => document.getElementById("game-metadata").open,
+      );
+      assert.match(
+        await page.$eval("#game-revision", (node) => node.innerText),
+        /방 수정번호 .*초안 수정번호/,
+      );
+      await inspectPlayer(page);
+      await page.keyboard.press("Space");
+      await page.waitForFunction(
+        () => !document.getElementById("game-metadata").open,
+      );
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          inputs: [...document.querySelectorAll("input,textarea,select")].map(
+            (node) => [node.id, node.value, node.checked, node.disabled],
+          ),
+          saved: document.getElementById("saved-revision").textContent,
+          intent: document.getElementById("intent-name").textContent,
+        })),
+        beforeDisclosure,
+      );
       await page.click('[data-play-task="investigation"]');
       assert.equal(
         await page.$eval(
@@ -411,7 +477,7 @@ test(
         true,
       );
       assert.equal(
-        await page.$eval("#game-state", (node) => node.textContent),
+        await page.$eval("#game-revision", (node) => node.textContent),
         roomRevision,
       );
       assert.equal(
@@ -428,6 +494,19 @@ test(
       assert.equal(
         await page.$eval("#uncertain", (node) => node.hidden),
         false,
+      );
+      await page.focus("#replay");
+      assert.equal(
+        await page.evaluate(() => document.activeElement.id),
+        "replay",
+      );
+      assert.equal(
+        await page.$eval("#uncertain", (node) => node.checkVisibility()),
+        true,
+      );
+      assert.match(
+        await page.$eval("#uncertain", (node) => node.textContent),
+        /서버 조회나 수정번호 변화로 명령 성공을\s+추정하지 않습니다/,
       );
       assert.equal(
         await page.$eval("#method", (node) => node.value),
@@ -524,7 +603,7 @@ test(
         () =>
           document
             .getElementById("game-counts")
-            .textContent.includes("PENDING") &&
+            .textContent.includes("채점 대기") &&
           document.getElementById("main").getAttribute("aria-busy") === "false",
       );
       assert.equal(await page.$eval("#result", (node) => node.hidden), true);
@@ -562,7 +641,11 @@ test(
       await page.waitForSelector("#result:not([hidden])");
       assert.match(
         await page.$eval("#result-summary", (node) => node.textContent),
-        /SUCCESS.*90/,
+        /사건 해결.*90/,
+      );
+      assert.doesNotMatch(
+        await page.$eval("#report-results", (node) => node.textContent),
+        /GRADED|UNGRADABLE|true|false/,
       );
       assert.equal(
         await page.$eval("#reveal", (node) => node.querySelector("script")),
@@ -573,6 +656,19 @@ test(
         await page.evaluate(() => JSON.stringify({ ...localStorage })),
         /합성 원문|accessToken|flowBinder/,
       );
+      // 합성 권한 거절도 접힌 메타데이터와 종료 원문을 함께 폐기해야 한다.
+      denyState = true;
+      await page.click("#refresh");
+      await page.waitForSelector("main[aria-busy='false']");
+      assert.equal(await page.$eval("#error", (node) => node.hidden), false);
+      assert.equal(await page.$eval("#game", (node) => node.hidden), true);
+      assert.equal(
+        await page.$eval("#game-revision", (node) => node.textContent),
+        "",
+      );
+      assert.equal(await page.$eval("#reveal", (node) => node.textContent), "");
+      assert.equal(await page.$eval("#uncertain", (node) => node.hidden), true);
+      assert.equal(await page.$eval("#submit", (node) => node.disabled), true);
       const other = await browser.newPage();
       await other.goto("about:blank");
       await other.bringToFront();
