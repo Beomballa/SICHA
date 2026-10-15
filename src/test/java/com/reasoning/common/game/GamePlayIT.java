@@ -422,6 +422,11 @@ class GamePlayIT extends PublicGameFixture {
                                 Integer.class,
                                 pending.id()))
                 .isZero();
+        Room later = privateRoom().room();
+        startExpired(later);
+        assertThat(expiry(List.of(pending, later), null, null).settleExpired(1)).isEqualTo(1);
+        assertThat(state(pending)).isEqualTo("RUNNING");
+        assertThat(state(later)).isEqualTo("ENDED");
         assertThatThrownBy(
                         () ->
                                 play.openHint(
@@ -434,6 +439,344 @@ class GamePlayIT extends PublicGameFixture {
                 .hasMessageContaining("PLAY_DEADLINE_EXPIRED");
     }
 
+    @Test
+    void deletedFixedParticipantDoesNotConsumeDiscoveryPrefix() throws Exception {
+        var deleted = privateRoom();
+        startExpired(deleted.room());
+        acceptPresenceErasure(newFamily(deleted));
+        Room later = privateRoom().room();
+        startExpired(later);
+        var before = db.queryForMap("SELECT * FROM game_room WHERE id=?", deleted.room().id());
+        assertThat(expiry(List.of(deleted.room(), later), null, null).settleExpired(1))
+                .isEqualTo(1);
+        assertThat(db.queryForMap("SELECT * FROM game_room WHERE id=?", deleted.room().id()))
+                .isEqualTo(before);
+        assertThat(state(later)).isEqualTo("ENDED");
+    }
+
+    @Test
+    void qualificationAndTestSourcesAreOutsidePublicExpiry() throws Exception {
+        Room publicRoom = privateRoom("SOLO", true).room();
+        long policy =
+                db.queryForObject(
+                        "SELECT id FROM privacy_policy WHERE scope='PLAYTEST' AND state='ACTIVE'",
+                        Long.class);
+        long qualification =
+                db.queryForObject(
+                        "WITH clock AS MATERIALIZED (SELECT clock_timestamp()-interval '31 minutes'"
+                            + " AS n) INSERT INTO game_room"
+                            + " (room_key,purpose,mode,qualification_kind,reviewer_id,selected_member_id,story_id,version_id,snapshot_id,runtime_id,runtime_epoch,config_hash,rubric_hash,policy_id,play_rev,state,difficulty,limit_sec,max_attempts,max_hints,created_at,lobby_until)"
+                            + " SELECT"
+                            + " gen_random_uuid(),'REVIEW_SOLO_QUALIFICATION','SOLO','FUNCTIONAL',?,?,r.story_id,r.version_id,r.snapshot_id,r.runtime_id,r.runtime_epoch,r.config_hash,r.rubric_hash,?,0,'WAITING',r.difficulty,r.limit_sec,r.max_attempts,r.max_hints,n,n+interval"
+                            + " '30 minutes' FROM game_room r,clock WHERE r.id=? RETURNING id",
+                        Long.class,
+                        invitationActor.accountId(),
+                        publicRoom.member(),
+                        policy,
+                        publicRoom.id());
+        var qBefore = db.queryForMap("SELECT * FROM game_room WHERE id=?", qualification);
+        var testsBefore = db.queryForList("SELECT * FROM play_test ORDER BY id");
+        Room q =
+                new Room(
+                        UUID.randomUUID(),
+                        qualification,
+                        publicRoom.member(),
+                        publicRoom.snapshot(),
+                        publicRoom.maxHints());
+        assertThat(expiry(List.of(publicRoom, q), null, null).settleExpired(100)).isEqualTo(1);
+        assertThat(db.queryForMap("SELECT * FROM game_room WHERE id=?", qualification))
+                .isEqualTo(qBefore);
+        assertThat(db.queryForList("SELECT * FROM play_test ORDER BY id")).isEqualTo(testsBefore);
+    }
+
+    @Test
+    void expiryBothModesKeepLiveRoomsAndBoundDiscovery() throws Exception {
+        for (String mode : List.of("SOLO", "COOP")) {
+            Room lobby = privateRoom(mode, true).room();
+            Room running = privateRoom(mode).room();
+            Room liveLobby = privateRoom(mode).room();
+            Room liveRunning = privateRoom(mode).room();
+            if ("COOP".equals(mode)) {
+                addExpiryGuest(running);
+                addExpiryGuest(liveRunning);
+            }
+            startExpired(running);
+            start(liveRunning);
+            var scoped = expiry(List.of(lobby, running, liveLobby, liveRunning), null, null);
+            assertThatThrownBy(() -> scoped.settleExpired(0))
+                    .hasMessageContaining("INVALID_REQUEST");
+            assertThatThrownBy(() -> scoped.settleExpired(101))
+                    .hasMessageContaining("INVALID_REQUEST");
+            assertThat(scoped.settleExpired(1)).isEqualTo(1);
+            assertThat(state(lobby)).isEqualTo("CANCELLED");
+            assertThat(state(running)).isEqualTo("RUNNING");
+            assertThat(scoped.settleExpired(100)).isEqualTo(1);
+            assertThat(state(running)).isEqualTo("ENDED");
+            assertThat(state(liveLobby)).isEqualTo("WAITING");
+            assertThat(state(liveRunning)).isEqualTo("RUNNING");
+            assertThat(scoped.settleExpired(100)).isZero();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM play_record WHERE room_id=?",
+                                    Integer.class,
+                                    lobby.id()))
+                    .isZero();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM play_record WHERE room_id=?",
+                                    Integer.class,
+                                    running.id()))
+                    .isEqualTo("SOLO".equals(mode) ? 1 : 2);
+        }
+    }
+
+    @Test
+    void simulatedMissingLobbyReadAfterRealDiscoverySkipsWithoutLateLock() throws Exception {
+        Room missing = privateRoom("SOLO", true).room();
+        Room later = privateRoom("SOLO", true).room();
+        // 실제 발견 뒤 최초 부모 읽기의 누락만 모사한다. 물리 삭제·PRIMARY·삭제 가드는 실행하지 않는다.
+        assertThat(expiry(List.of(missing, later), null, null, missing.id()).settleExpired(100))
+                .isEqualTo(1);
+        assertThat(state(missing)).isEqualTo("WAITING");
+        assertThat(state(later)).isEqualTo("CANCELLED");
+        // 일시 누락을 해제한 다음 호출은 같은 방을 정상 취소하며 다른 시험에 만료 대기를 남기지 않는다.
+        assertThat(expiry(List.of(missing), null, null).settleExpired(100)).isEqualTo(1);
+        assertThat(state(missing)).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void expirySkipsLockedMemberAndRoomButSettlesLaterIndependentCandidate() throws Exception {
+        for (String table : List.of("member_account", "game_room")) {
+            Room blocked = privateRoom().room();
+            Room later = privateRoom().room();
+            startExpired(blocked);
+            startExpired(later);
+            try (Connection lock = db.getDataSource().getConnection()) {
+                lock.setAutoCommit(false);
+                try (var statement =
+                        lock.prepareStatement(
+                                "SELECT id FROM " + table + " WHERE id=? FOR UPDATE")) {
+                    statement.setLong(
+                            1, table.equals("member_account") ? blocked.member() : blocked.id());
+                    try (var rows = statement.executeQuery()) {
+                        assertThat(rows.next()).isTrue();
+                        assertThat(expiry(List.of(blocked, later), null, null).settleExpired(100))
+                                .isEqualTo(1);
+                        assertThat(state(blocked)).isEqualTo("RUNNING");
+                        assertThat(state(later)).isEqualTo("ENDED");
+                    }
+                } finally {
+                    lock.rollback();
+                }
+            }
+            assertThat(expiry(List.of(blocked), null, null).settleExpired(100)).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void expiryRevalidatesMemberButIgnoresUnrelatedSourceEditAfterDiscovery() throws Exception {
+        for (boolean memberChange : new boolean[] {false, true}) {
+            Room room = privateRoom().room();
+            startExpired(room);
+            var discovered = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var once = new java.util.concurrent.atomic.AtomicBoolean();
+            Runnable boundary =
+                    () -> {
+                        if (once.compareAndSet(false, true)) {
+                            discovered.countDown();
+                            try {
+                                if (!release.await(5, TimeUnit.SECONDS))
+                                    throw new AssertionError("합성 만료 장벽 해제 실패");
+                            } catch (InterruptedException failure) {
+                                Thread.currentThread().interrupt();
+                                throw new AssertionError(failure);
+                            }
+                        }
+                    };
+            try (var pool = Executors.newSingleThreadExecutor()) {
+                var sweep =
+                        pool.submit(() -> expiry(List.of(room), boundary, null).settleExpired(100));
+                try {
+                    assertThat(discovered.await(5, TimeUnit.SECONDS)).isTrue();
+                    if (memberChange) {
+                        db.update(
+                                "UPDATE game_member SET active_yn=false WHERE room_id=?",
+                                room.id());
+                    } else {
+                        db.update(
+                                "UPDATE story SET updated_at=clock_timestamp() WHERE id=(SELECT"
+                                        + " story_id FROM game_room WHERE id=?)",
+                                room.id());
+                    }
+                } finally {
+                    release.countDown();
+                }
+                assertThat(sweep.get(5, TimeUnit.SECONDS)).isEqualTo(memberChange ? 0 : 1);
+            }
+            assertThat(state(room)).isEqualTo(memberChange ? "RUNNING" : "ENDED");
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM play_record WHERE room_id=?",
+                                    Integer.class,
+                                    room.id()))
+                    .isEqualTo(memberChange ? 0 : 1);
+            if (memberChange) {
+                // 경합 관찰용 합성 참가자를 복원하여 다른 시험의 만료 발견에 불완전한 방을 남기지 않는다.
+                db.update("UPDATE game_member SET active_yn=true WHERE room_id=?", room.id());
+                assertThat(expiry(List.of(room), null, null).settleExpired(100)).isEqualTo(1);
+            }
+        }
+    }
+
+    @Test
+    void concurrentExpiryCommitsOneRevisionAuditAndRecord() throws Exception {
+        Room room = privateRoom().room();
+        startExpired(room);
+        var go = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first =
+                    pool.submit(
+                            () -> {
+                                go.await();
+                                return expiry(List.of(room), null, null).settleExpired(100);
+                            });
+            var second =
+                    pool.submit(
+                            () -> {
+                                go.await();
+                                return expiry(List.of(room), null, null).settleExpired(100);
+                            });
+            go.countDown();
+            assertThat(first.get(5, TimeUnit.SECONDS) + second.get(5, TimeUnit.SECONDS))
+                    .isEqualTo(1);
+        }
+        assertThat(db.queryForObject("SELECT rev FROM game_room WHERE id=?", Long.class, room.id()))
+                .isEqualTo(2);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM game_audit WHERE room_id=? AND"
+                                        + " action='PUBLIC_TIME_LIMIT'",
+                                Integer.class,
+                                room.id()))
+                .isEqualTo(1);
+        assertThat(
+                        db.queryForObject(
+                                "SELECT count(*) FROM play_record WHERE room_id=?",
+                                Integer.class,
+                                room.id()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void expirySqlFailureRollsBackOnlyFailingRoomAndKeepsEarlierCommit() throws Exception {
+        for (String failureTable : List.of("game_audit", "play_record")) {
+            Room first = privateRoom().room();
+            Room failed = privateRoom().room();
+            startExpired(first);
+            startExpired(failed);
+            assertThatThrownBy(
+                            () ->
+                                    expiry(List.of(first, failed), null, failureTable)
+                                            .settleExpired(100))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(state(first)).isEqualTo("ENDED");
+            assertThat(state(failed)).isEqualTo("RUNNING");
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT rev FROM game_room WHERE id=?",
+                                    Long.class,
+                                    failed.id()))
+                    .isEqualTo(1);
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT occupying_yn FROM game_member WHERE room_id=?",
+                                    Boolean.class,
+                                    failed.id()))
+                    .isTrue();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM play_record WHERE room_id=?",
+                                    Integer.class,
+                                    failed.id()))
+                    .isZero();
+            assertThat(
+                            db.queryForObject(
+                                    "SELECT count(*) FROM game_audit WHERE room_id=? AND"
+                                            + " actor_kind='SYSTEM'",
+                                    Integer.class,
+                                    failed.id()))
+                    .isZero();
+            assertThat(expiry(List.of(failed), null, null).settleExpired(100)).isEqualTo(1);
+        }
+    }
+
+    /** 합성 ID로 발견만 한정하고 후보 조건·저장·잠금 SQL은 실제 PG에서 실행한다. */
+    private GamePlayService expiry(List<Room> rooms, Runnable beforeLock, String failureTable) {
+        return expiry(rooms, beforeLock, failureTable, null);
+    }
+
+    /** 누락 후보 ID가 있으면 실제 발견 뒤 최초 부모 읽기만 빈 결과로 모사한다. */
+    private GamePlayService expiry(
+            List<Room> rooms, Runnable beforeLock, String failureTable, Long missingParent) {
+        String ids =
+                rooms.stream()
+                        .map(room -> Long.toString(room.id()))
+                        .collect(java.util.stream.Collectors.joining(","));
+        JdbcTemplate template =
+                new JdbcTemplate(db.getDataSource()) {
+                    private int inserts;
+                    private boolean missingRead;
+
+                    @Override
+                    public <T> List<T> queryForList(String sql, Class<T> type, Object... args) {
+                        boolean discovery =
+                                sql.startsWith("SELECT id FROM game_room WHERE purpose='PUBLIC'");
+                        if (discovery) {
+                            sql =
+                                    sql.replace(
+                                            " ORDER BY id LIMIT ?",
+                                            " AND id IN (" + ids + ") ORDER BY id LIMIT ?");
+                        }
+                        return super.queryForList(sql, type, args);
+                    }
+
+                    @Override
+                    public List<Map<String, Object>> queryForList(String sql, Object... args) {
+                        if (!missingRead
+                                && missingParent != null
+                                && sql.startsWith("SELECT r.purpose,r.mode,")
+                                && missingParent.equals(args[0])) {
+                            missingRead = true;
+                            return List.of();
+                        }
+                        if (beforeLock != null
+                                && sql.startsWith("SELECT id FROM admin_account WHERE"))
+                            beforeLock.run();
+                        return super.queryForList(sql, args);
+                    }
+
+                    @Override
+                    public int update(String sql, Object... args) {
+                        if (failureTable != null
+                                && sql.replaceAll("\\s+", " ")
+                                        .replace("public.", "")
+                                        .contains("INSERT INTO " + failureTable)
+                                && ++inserts == 2) {
+                            // 실제 SQL 오류로 소유 거래를 중단하며 스키마·트리거는 변경하지 않는다.
+                            execute("SELECT 1/0");
+                        }
+                        return super.update(sql, args);
+                    }
+                };
+        return new GamePlayService(template, games, service);
+    }
+
+    /** 합성 방의 현재 상태를 독립 연결로 읽는다. */
+    private String state(Room room) {
+        return db.queryForObject("SELECT state FROM game_room WHERE id=?", String.class, room.id());
+    }
+
     private record PresenceFixture(Room room, String email, String token, long session) {}
 
     /** 기존 합성 방과 실제 회원 발급·heartbeat·logout으로 종료 접속 근거를 만든다. */
@@ -442,6 +785,11 @@ class GamePlayIT extends PublicGameFixture {
     }
 
     private PresenceFixture privateRoom(String mode) throws Exception {
+        return privateRoom(mode, false);
+    }
+
+    /** 생성 시각과 대기 마감의 30분 결속을 유지한 합성 방을 발급한다. */
+    private PresenceFixture privateRoom(String mode, boolean expired) throws Exception {
         if (db.queryForObject(
                         "SELECT count(*) FROM privacy_policy WHERE scope='PLAYTEST' AND"
                                 + " state='ACTIVE'",
@@ -471,8 +819,14 @@ class GamePlayIT extends PublicGameFixture {
                                 UUID.randomUUID())
                         .memberKey();
         Room room =
-                room(invitation(List.of(first, peer)), actor.memberId(), policy, false, null, mode);
-        play.heartbeat(token, room.key(), UUID.randomUUID());
+                room(
+                        invitation(List.of(first, peer)),
+                        actor.memberId(),
+                        policy,
+                        expired,
+                        null,
+                        mode);
+        if (!expired) play.heartbeat(token, room.key(), UUID.randomUUID());
         service.logout(token, UUID.randomUUID(), UUID.randomUUID());
         return new PresenceFixture(room, email, token, actor.sessionId());
     }
@@ -1067,12 +1421,37 @@ class GamePlayIT extends PublicGameFixture {
         return new Room(key, id, member, snapshot, maxHints);
     }
 
+    /**
+     * COOP 종료 회귀에 서로 다른 실제 LOCAL 회원의 두 번째 자리를 추가한다.
+     *
+     * @param room 아직 시작하지 않은 합성 COOP 방
+     */
+    private void addExpiryGuest(Room room) throws Exception {
+        String token =
+                account("expiry-guest-" + UUID.randomUUID() + "@example.invalid")
+                        .path("accessToken")
+                        .asText();
+        long guest = service.authenticate(token, false).memberId();
+        db.update(
+                "INSERT INTO game_member(room_id,member_id,identity_id,slot,policy_id,accepted_at)"
+                    + " SELECT r.id,?,i.id,2,r.policy_id,clock_timestamp() FROM game_room r JOIN"
+                    + " member_identity i ON i.member_id=? AND i.active_yn AND i.provider='LOCAL'"
+                    + " WHERE r.id=?",
+                guest,
+                guest,
+                room.id());
+    }
+
+    /**
+     * @param room 슬롯별 고정 역할을 배정하여 현재 DB 시각에 시작할 합성 방
+     */
     private void start(Room room) {
         long version =
                 db.queryForObject(
                         "SELECT version_id FROM game_room WHERE id=?", Long.class, room.id());
         db.update(
-                "UPDATE game_member SET version_id=?,role_code='R1' WHERE room_id=?",
+                "UPDATE game_member SET version_id=?,role_code=CASE WHEN slot=1 THEN 'R1' ELSE 'R2'"
+                        + " END WHERE room_id=?",
                 version,
                 room.id());
         db.update(
@@ -1082,12 +1461,16 @@ class GamePlayIT extends PublicGameFixture {
                 room.id());
     }
 
+    /**
+     * @param room 슬롯별 고정 역할과 실제로 지난 마감을 지정할 합성 방
+     */
     private void startExpired(Room room) {
         long version =
                 db.queryForObject(
                         "SELECT version_id FROM game_room WHERE id=?", Long.class, room.id());
         db.update(
-                "UPDATE game_member SET version_id=?,role_code='R1' WHERE room_id=?",
+                "UPDATE game_member SET version_id=?,role_code=CASE WHEN slot=1 THEN 'R1' ELSE 'R2'"
+                        + " END WHERE room_id=?",
                 version,
                 room.id());
         db.update(

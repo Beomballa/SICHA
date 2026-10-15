@@ -33,6 +33,13 @@ public final class GamePlayService {
     private final MemberAuthService auth;
     private final TransactionTemplate tx;
 
+    /**
+     * 기존 공개 게임 권위를 보관하고 만료 방마다 독립 확정하는 JDBC 거래를 구성한다.
+     *
+     * @param db 게임 저장소와 같은 DataSource를 가진 템플릿이며 null 불가
+     * @param games 공개 게임의 잠금·상태 권위를 소유하는 서비스이며 null 불가
+     * @param auth 현재 회원 인증 서비스이며 null 불가
+     */
     public GamePlayService(JdbcTemplate db, PublicGameService games, MemberAuthService auth) {
         this.db = db;
         this.games = games;
@@ -43,6 +50,7 @@ public final class GamePlayService {
                                 java.util.Objects.requireNonNull(db.getDataSource())));
         tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        tx.setTimeout(15);
     }
 
     public record CurrentRoom(PublicGameService.GameState game, UUID requestId) {}
@@ -273,14 +281,26 @@ public final class GamePlayService {
                 });
     }
 
-    /** 예약 호출점: 최대 limit개의 만료 후보를 각각 별도 쓰기 거래에서 종료한다. 주기적 호출은 외부 scheduler 책임이다. */
+    /**
+     * 공개 만료 후보를 부모 우선 비차단 잠금과 결속 재검증 후 방별 독립 거래로 종료한다. 발견 조회는 거래 밖이며 15초 거래·10초 SQL·1초 잠금 제한은 방별
+     * 처리에만 적용된다. 호출 전체의 제한 시간이 아니다.
+     *
+     * @param limit 발견할 후보 수 1~100
+     * @return 이번 호출에서 종료한 방 수. 경합·결속 변경은 제외한다.
+     * @throws AuthException limit 범위가 잘못되었거나 종결 무결성 검사가 실패한 경우
+     * @throws RuntimeException 실제 저장 실패 시 해당 방만 롤백하고 이전 방의 확정은 유지한다.
+     */
     public int settleExpired(int limit) {
         if (limit < 1 || limit > 100) throw AuthException.badRequest("INVALID_REQUEST");
         List<Long> candidates =
                 db.queryForList(
                         "SELECT id FROM game_room WHERE purpose='PUBLIC' AND ((state='WAITING' AND"
-                                + " lobby_until<=clock_timestamp()) OR (state='RUNNING' AND"
-                                + " deadline_at<=clock_timestamp())) ORDER BY id LIMIT ?",
+                            + " lobby_until<=clock_timestamp()) OR (state='RUNNING' AND"
+                            + " deadline_at<=clock_timestamp() AND NOT EXISTS (SELECT 1 FROM"
+                            + " game_report g WHERE g.room_id=game_room.id AND g.state='ACCEPTED')"
+                            + " AND NOT EXISTS (SELECT 1 FROM game_member m JOIN member_account a"
+                            + " ON a.id=m.member_id WHERE m.room_id=game_room.id AND m.role_code IS"
+                            + " NOT NULL AND a.state='DELETED'))) ORDER BY id LIMIT ?",
                         Long.class,
                         limit);
         int settled = 0;
@@ -288,60 +308,117 @@ public final class GamePlayService {
             Boolean changed =
                     tx.execute(
                             status -> {
-                                db.execute("SET LOCAL lock_timeout = '5s'");
-                                List<Long> owners =
-                                        db.queryForList(
-                                                "SELECT DISTINCT p.owner_id FROM privacy_policy p"
-                                                    + " WHERE p.id=(SELECT policy_id FROM game_room"
-                                                    + " WHERE id=?) OR p.id IN (SELECT"
-                                                    + " profile.policy_id FROM member_profile"
-                                                    + " profile JOIN game_member m ON"
-                                                    + " m.member_id=profile.member_id WHERE"
-                                                    + " m.room_id=?) OR (p.scope='MEMBER_AUTH' AND"
-                                                    + " p.state='ACTIVE') ORDER BY p.owner_id",
-                                                Long.class,
-                                                id,
-                                                id);
+                                db.execute("SET LOCAL statement_timeout = '10s'");
+                                db.execute("SET LOCAL lock_timeout = '1s'");
+                                var parents = expiryParents(id);
+                                if (parents.isEmpty()) return false;
+                                var members = expiryMembers(id);
+                                List<Long> owners = expiryOwners(id);
                                 for (long owner : owners) {
-                                    db.queryForList(
-                                            "SELECT id FROM admin_account WHERE id=? FOR SHARE",
-                                            owner);
-                                    db.queryForList(
-                                            "SELECT account_id FROM admin_credential WHERE"
-                                                    + " account_id=? FOR SHARE",
-                                            owner);
+                                    if (!expiryLock("admin_account", "id", owner, false)
+                                            || !expiryLock(
+                                                    "admin_credential", "account_id", owner, false))
+                                        return false;
                                 }
-                                List<Long> members =
-                                        db.queryForList(
-                                                "SELECT member_id FROM game_member WHERE room_id=?"
-                                                        + " ORDER BY member_id",
-                                                Long.class,
-                                                id);
-                                for (long member : members)
-                                    db.queryForList(
-                                            "SELECT id FROM member_account WHERE id=? FOR UPDATE",
-                                            member);
-                                var parents =
-                                        db.queryForMap(
-                                                "SELECT runtime_id,story_id,version_id FROM"
-                                                        + " game_room WHERE id=?",
-                                                id);
-                                db.queryForList(
-                                        "SELECT id FROM grade_runtime WHERE id=? FOR UPDATE",
-                                        parents.get("runtime_id"));
-                                db.queryForList(
-                                        "SELECT id FROM story WHERE id=? FOR SHARE",
-                                        parents.get("story_id"));
-                                db.queryForList(
-                                        "SELECT id FROM story_version WHERE id=? FOR SHARE",
-                                        parents.get("version_id"));
-                                db.queryForList(
-                                        "SELECT id FROM game_room WHERE id=? FOR UPDATE", id);
+                                for (var member : members)
+                                    if (!expiryLock(
+                                            "member_account", "id", member.get("member_id"), true))
+                                        return false;
+                                var parent = parents.getFirst();
+                                if (!expiryLock(
+                                                "grade_runtime",
+                                                "id",
+                                                parent.get("runtime_id"),
+                                                true)
+                                        || !expiryLock("story", "id", parent.get("story_id"), false)
+                                        || !expiryLock(
+                                                "story_version",
+                                                "id",
+                                                parent.get("version_id"),
+                                                false)
+                                        || !expiryLock("game_room", "id", id, true)) return false;
+                                if (!parents.equals(expiryParents(id))
+                                        || !members.equals(expiryMembers(id))
+                                        || !owners.equals(expiryOwners(id))) return false;
                                 return reconcile(db, id);
                             });
             if (Boolean.TRUE.equals(changed)) settled++;
         }
         return settled;
+    }
+
+    /**
+     * 내부 고정 식별자의 필수 행을 잠그며 누락·경합은 취득 실패로 반환한다.
+     *
+     * @param table 이 클래스가 지정한 고정 테이블명이며 외부 입력 불가
+     * @param key 해당 테이블의 고정 기본키 열명
+     * @param id 잠글 행의 null 불가 식별자
+     * @param exclusive true이면 수정 잠금, false이면 공유 잠금
+     * @return 정확히 한 행의 잠금을 취득했는지 여부
+     */
+    private boolean expiryLock(String table, String key, Object id, boolean exclusive) {
+        return db.queryForList(
+                                "SELECT "
+                                        + key
+                                        + " FROM "
+                                        + table
+                                        + " WHERE "
+                                        + key
+                                        + "=? FOR "
+                                        + (exclusive ? "UPDATE" : "SHARE")
+                                        + " SKIP LOCKED",
+                                id)
+                        .size()
+                == 1;
+    }
+
+    /**
+     * 종료가 참조하는 고정 부모와 정책 결속만 발견한다. 현행 공개·활성 상태는 종료 조건이 아니다.
+     *
+     * @param id 발견한 방의 내부 식별자
+     * @return 고정 결속 한 행 또는 방·필수 부모 누락 시 빈 목록
+     */
+    private List<java.util.Map<String, Object>> expiryParents(long id) {
+        return db.queryForList(
+                "SELECT"
+                    + " r.purpose,r.mode,r.runtime_id,r.runtime_epoch,r.config_hash,r.story_id,r.version_id,r.snapshot_id,r.rubric_hash,r.policy_id,r.play_rev"
+                    + " FROM game_room r JOIN grade_runtime g ON g.id=r.runtime_id JOIN story s ON"
+                    + " s.id=r.story_id JOIN story_version v ON v.id=r.version_id WHERE r.id=?",
+                id);
+    }
+
+    /**
+     * 회원 잠금 전후의 참가자·탈퇴·정책 결속을 같은 순서로 비교한다.
+     *
+     * @param id 발견한 방의 내부 식별자
+     * @return 회원 식별자 오름차순의 현재 참가자 결속
+     */
+    private List<java.util.Map<String, Object>> expiryMembers(long id) {
+        return db.queryForList(
+                "SELECT"
+                    + " m.member_id,m.identity_id,m.policy_id,m.role_code,m.active_yn,a.state,p.policy_id"
+                    + " AS profile_policy_id FROM game_member m JOIN member_account a ON"
+                    + " a.id=m.member_id LEFT JOIN member_profile p ON p.member_id=m.member_id"
+                    + " WHERE m.room_id=? ORDER BY m.member_id",
+                id);
+    }
+
+    /**
+     * 기존 배경 종료가 필요로 하는 정책 소유자 집합을 정렬한다. 전경 입장 조건은 추가하지 않는다.
+     *
+     * @param id 발견한 방의 내부 식별자
+     * @return 중복 없는 소유자 식별자 오름차순 목록
+     */
+    private List<Long> expiryOwners(long id) {
+        return db.queryForList(
+                "SELECT DISTINCT p.owner_id FROM privacy_policy p WHERE p.id=(SELECT policy_id FROM"
+                    + " game_room WHERE id=?) OR p.id IN (SELECT profile.policy_id FROM"
+                    + " member_profile profile JOIN game_member m ON m.member_id=profile.member_id"
+                    + " WHERE m.room_id=?) OR (p.scope='MEMBER_AUTH' AND p.state='ACTIVE') ORDER BY"
+                    + " p.owner_id",
+                Long.class,
+                id,
+                id);
     }
 
     /**
