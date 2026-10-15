@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -20,7 +21,22 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-@SpringBootTest
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {
+            "server.ssl.enabled=false",
+            "app.member-web.enabled=false",
+            "app.member-web.origin=",
+            "app.member-auth.collection-enabled=false"
+        })
 @AutoConfigureMockMvc
 @Testcontainers
 class SecurityIT extends DatabaseContextTest {
@@ -45,6 +61,91 @@ class SecurityIT extends DatabaseContextTest {
     @Autowired MockMvc mvc;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired com.reasoning.admin.auth.session.AdminSessionAdapter sessions;
+    @LocalServerPort int port;
+
+    /** 기본 비활성 회원 설정·빈 origin에서도 실제 HTTP로 공개 문서와 고정 자산만 익명 열람한다. */
+    @Test
+    void defaultHttpFrontendDoesNotNeedAdministratorOrMemberActivation() throws Exception {
+        try (var client =
+                HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
+            for (String path :
+                    List.of(
+                            "/",
+                            "/account",
+                            "/play",
+                            "/coop-invite",
+                            "/records",
+                            "/player-public.css",
+                            "/player-common/web-api.mjs",
+                            "/player-common/web-session.mjs",
+                            "/player-common/account.mjs",
+                            "/player-common/game-model.mjs",
+                            "/player-common/game-client.mjs",
+                            "/player-common/play-page.mjs",
+                            "/player-common/invite-bootstrap.js",
+                            "/player-common/records-page.mjs")) {
+                for (String method : List.of("GET", "HEAD")) {
+                    var request =
+                            HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                                    .timeout(Duration.ofSeconds(10))
+                                    .method(method, HttpRequest.BodyPublishers.noBody())
+                                    .build();
+                    var response =
+                            client.send(
+                                    request,
+                                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                    assertThat(response.statusCode()).as(method + " " + path).isEqualTo(200);
+                    assertThat(response.headers().allValues("Location")).isEmpty();
+                    assertThat(response.headers().allValues("WWW-Authenticate")).isEmpty();
+                    assertThat(response.headers().allValues("Set-Cookie")).isEmpty();
+                    assertThat(response.headers().firstValue("Cache-Control")).contains("no-store");
+                    assertThat(response.headers().firstValue("Referrer-Policy"))
+                            .contains("no-referrer");
+                    if (method.equals("GET") && path.equals("/play")) {
+                        assertThat(response.body())
+                                .contains("단독·협동 사건 조사", "/player-common/play-page.mjs");
+                    }
+                }
+            }
+            var notice =
+                    client.send(
+                            HttpRequest.newBuilder(
+                                            URI.create("http://localhost:" + port + "/privacy"))
+                                    .timeout(Duration.ofSeconds(10))
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            assertThat(notice.statusCode()).isEqualTo(503);
+            assertThat(notice.body()).contains("현재 고지를 확인할 수 없습니다");
+            assertThat(notice.headers().allValues("Location")).isEmpty();
+            assertThat(notice.headers().allValues("Set-Cookie")).isEmpty();
+        }
+    }
+
+    /** 공개 틀이 열려도 관리자·회원 원문 API와 HTTPS·회원 웹 활성화 조건은 그대로 남는다. */
+    @Test
+    void publicShellDoesNotAuthorizeAdministratorOrMemberData() throws Exception {
+        mvc.perform(get("/admin").secure(true))
+                .andExpect(status().isSeeOther())
+                .andExpect(header().string("Location", "/admin/login"));
+        mvc.perform(get("/admin/api/auth/me").secure(true)).andExpect(status().isUnauthorized());
+        for (String path :
+                List.of("/api/member/auth/me", "/api/games/current", "/api/member/records")) {
+            mvc.perform(get(path).secure(true)).andExpect(status().isUnauthorized());
+            mvc.perform(get(path)).andExpect(status().isForbidden());
+        }
+        mvc.perform(
+                        get("/api/member/browser-auth/me")
+                                .secure(true)
+                                .header("X-Sicha-Player-Web", "1"))
+                .andExpect(status().isForbidden());
+        for (String path :
+                List.of("/play/extra", "/player-public.css/extra", "/player-common/private.mjs")) {
+            mvc.perform(get(path).secure(true)).andExpect(status().isUnauthorized());
+        }
+        mvc.perform(post("/play")).andExpect(status().isForbidden());
+        mvc.perform(get("/play?token=synthetic")).andExpect(status().isForbidden());
+    }
 
     @Test
     @DisplayName("SESSION-V02: framework session can save, read and delete minimal principal")

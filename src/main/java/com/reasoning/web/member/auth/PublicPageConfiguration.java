@@ -5,7 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -18,11 +18,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-/** 소개 페이지와 전용 스타일만 기존 인증 체인보다 먼저 격리한다. */
+/** 공개 화면·정적 모듈의 열람을 회원 인증 활성화와 분리하고 관리자 체인보다 먼저 격리한다. */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "app.member-web.enabled", havingValue = "true")
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class PublicPageConfiguration {
-    /** 소개·고지·전용 스타일의 정확한 경로만 무세션 HTTPS 읽기로 허용한다. */
+    /**
+     * 정확한 공개 화면·정적 자산만 HTTP와 HTTPS에서 익명으로 읽게 한다. 회원·관리자 API는 포함하지 않는다.
+     *
+     * @param http 공개 경로 전용 필터 체인 구성기이며 null 불가
+     * @return 쿠키·세션·관리자 인증 없이 GET/HEAD만 제공하는 체인
+     * @throws Exception 보안 필터를 구성할 수 없는 경우
+     */
     @Bean
     @Order(-2)
     SecurityFilterChain publicPageSecurity(HttpSecurity http) throws Exception {
@@ -82,11 +88,14 @@ public class PublicPageConfiguration {
         return http.build();
     }
 
-    /** 쿼리나 비보안 전송을 읽기 경로로 취급하지 않는다. */
+    /**
+     * 공개 문서와 코드만 읽게 하며 쿼리·변경 요청은 허용하지 않는다.
+     *
+     * @param request 이미 정확한 공개 경로와 일치한 요청이며 null 불가
+     * @return 쿼리 없는 GET/HEAD이면 true
+     */
     private static boolean allowed(HttpServletRequest request) {
-        return request.isSecure()
-                && "https".equals(request.getScheme())
-                && request.getQueryString() == null
+        return request.getQueryString() == null
                 && ("GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod()));
     }
 

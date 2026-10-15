@@ -5,14 +5,14 @@ import com.reasoning.common.member.auth.MemberAuthService;
 
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
-/** 공개 소개·고지와 회원 계정 문서를 같은 HTTPS 원점에서 제공한다. */
+/** 회원 웹 인증 활성화와 무관하게 공개 문서를 제공하며 개인정보는 기존 API 권위에 남긴다. */
 @Controller
-@ConditionalOnProperty(name = "app.member-web.enabled", havingValue = "true")
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class PublicPageController {
     private final MemberAuthService auth;
 

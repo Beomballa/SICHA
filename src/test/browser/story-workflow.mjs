@@ -44,7 +44,8 @@ const browser = await puppeteer.launch({
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   headless: true,
   acceptInsecureCerts: true,
-  protocolTimeout: 15000,
+  // 기존 재인증의 최대 31초 TOTP 대기를 CDP의 더 짧은 한도로 중단하지 않는다.
+  protocolTimeout: 45000,
   enableExtensions: [resolve("src/test/browser/zoom-extension")],
   args: ["--no-sandbox", "--enable-unsafe-extension-debugging"],
 });

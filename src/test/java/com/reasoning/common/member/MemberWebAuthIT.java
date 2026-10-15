@@ -73,7 +73,7 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
         mvc.perform(publicPage(head("/"))).andExpect(status().isOk());
     }
 
-    /** 쿼리·변경 메서드·HTTP는 헤더가 붙은 403이고 CSS 이외의 자산은 공개하지 않는다. */
+    /** 쿼리·변경 메서드는 헤더가 붙은 403이며 HTTP와 HTTPS에서 같은 공개 문서만 읽는다. */
     @Test
     void publicIntroductionAdmissionIsNarrow() throws Exception {
         for (var request :
@@ -82,11 +82,8 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                         publicPage(post("/")),
                         publicPage(get("/privacy?token=forbidden")),
                         publicPage(post("/privacy")),
-                        get("/privacy"),
                         publicPage(get("/player-public.css?version=1")),
-                        publicPage(post("/player-public.css")),
-                        get("/"),
-                        get("/player-public.css"))) {
+                        publicPage(post("/player-public.css")))) {
             var rejected = mvc.perform(request).andExpect(status().isForbidden()).andReturn();
             assertThat(rejected.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
             assertThat(rejected.getResponse().getHeader("Referrer-Policy"))
@@ -104,10 +101,14 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
                 .contains("--accent: #eab308", "--background: #14161b");
         assertThat(css.getResponse().getHeaders("Set-Cookie")).isEmpty();
         mvc.perform(publicPage(head("/player-public.css"))).andExpect(status().isOk());
+        for (String path : List.of("/", "/privacy", "/player-public.css")) {
+            mvc.perform(get(path)).andExpect(status().isOk());
+            mvc.perform(head(path)).andExpect(status().isOk());
+        }
         mvc.perform(publicPage(get("/player-public.js"))).andExpect(status().is4xxClientError());
     }
 
-    /** 공통 모듈만 HTTPS 읽기로 제공하고 변경·쿼리·임의 자산은 차단한다. */
+    /** HTTP·HTTPS에서 공통 모듈만 읽게 하고 변경·쿼리·임의 자산은 차단한다. */
     @Test
     void sharedWebModulesAreSecureStatelessResources() throws Exception {
         for (String path :
@@ -126,7 +127,7 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
             assertThat(result.getResponse().getHeader("Referrer-Policy")).isEqualTo("no-referrer");
             assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
             mvc.perform(publicPage(head(path))).andExpect(status().isOk());
-            mvc.perform(get(path)).andExpect(status().isForbidden());
+            mvc.perform(get(path)).andExpect(status().isOk());
             mvc.perform(publicPage(post(path))).andExpect(status().isForbidden());
             mvc.perform(publicPage(get(path + "?token=forbidden")))
                     .andExpect(status().isForbidden());
@@ -153,12 +154,12 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
         assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
         assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
         mvc.perform(publicPage(head("/account"))).andExpect(status().isOk());
-        mvc.perform(get("/account")).andExpect(status().isForbidden());
+        mvc.perform(get("/account")).andExpect(status().isOk());
         mvc.perform(publicPage(post("/account"))).andExpect(status().isForbidden());
         mvc.perform(publicPage(get("/account?token=forbidden"))).andExpect(status().isForbidden());
     }
 
-    /** 단독 문서와 세 모듈만 HTTPS 읽기로 제공하고 query/변경/원문 주입을 막는다. */
+    /** 단독·협동 문서와 고정 모듈만 익명으로 읽게 하고 query·변경·원문 주입을 막는다. */
     @Test
     void soloDocumentAndAssetsStayStatelessAndNarrow() throws Exception {
         var result = mvc.perform(publicPage(get("/play"))).andExpect(status().isOk()).andReturn();
@@ -182,14 +183,14 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
             if (path.endsWith(".mjs"))
                 assertThat(asset.getResponse().getContentType())
                         .isIn("text/javascript", "application/javascript");
-            mvc.perform(get(path)).andExpect(status().isForbidden());
+            mvc.perform(get(path)).andExpect(status().isOk());
             mvc.perform(publicPage(post(path))).andExpect(status().isForbidden());
             mvc.perform(publicPage(get(path + "?secret=forbidden")))
                     .andExpect(status().isForbidden());
         }
     }
 
-    /** 기록 문서는 서버 자격/원문 없이 제공하며 변경/query/비보안 전송을 열지 않는다. */
+    /** 기록 문서는 HTTP·HTTPS에서 자격·원문 없이 제공하며 변경·query를 열지 않는다. */
     @Test
     void recordDocumentAndAssetStayStrictAndStateless() throws Exception {
         for (String path : List.of("/records", "/player-common/records-page.mjs")) {
@@ -198,7 +199,7 @@ public class MemberWebAuthIT extends LocalMemberAuthIT {
             assertThat(result.getResponse().getHeaders("Set-Cookie")).isEmpty();
             mvc.perform(publicPage(head(path))).andExpect(status().isOk());
             mvc.perform(publicPage(post(path))).andExpect(status().isForbidden());
-            mvc.perform(get(path)).andExpect(status().isForbidden());
+            mvc.perform(get(path)).andExpect(status().isOk());
             mvc.perform(publicPage(get(path + "?record=forbidden")))
                     .andExpect(status().isForbidden());
             if (path.equals("/records")) {
