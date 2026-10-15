@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="same-origin" />
+    <title>로컬 개발 진입 · SICHA</title>
+    <link rel="stylesheet" href="/player-public.css" />
+    <script type="module" src="/__development/client.mjs"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 이동</a>
+    <header class="site-header">
+      <div class="shell">
+        <a class="brand" href="/">SICHA</a>
+        <nav class="actions" aria-label="제품 화면">
+          <a href="/play">플레이</a>
+          <a href="/account">회원 계정</a>
+          <a href="/records">기록</a>
+          <a href="/admin">관리자</a>
+        </nav>
+      </div>
+    </header>
+    <main id="main" class="shell account-shell">
+      <h1>로컬 개발 진입</h1>
+      <p class="eyebrow">개발 전용 · 합성 계정 · 별도 영속 DB</p>
+      <p>
+        이 화면은 실제 관리자 세션과 회원 인증을 사용합니다. 운영 계정이나 운영
+        DB가 아니며 실제 메일을 보내지 않습니다. 합성 자료는 실제 사건 품질이나
+        서비스 준비 완료를 뜻하지 않습니다.
+      </p>
+      <p
+        id="development-status"
+        role="status"
+        aria-live="polite"
+        th:attr="data-ready=${ready}"
+        th:text="${ready} ? '개발 계정 준비 완료. 사용할 계정을 선택하세요.' : '개발 계정이 아직 준비되지 않았습니다. 진입 요청은 준비 완료 전 거절됩니다.'"
+      >
+        개발 계정 준비 상태를 확인할 수 없습니다.
+      </p>
+      <p id="error" role="alert" hidden></p>
+      <section class="section" aria-labelledby="administrator-heading">
+        <h2 id="administrator-heading">관리자</h2>
+        <p>
+          합성 관리자 계정으로 진입합니다. 기존 관리자 권한·세션·CSRF 검증은
+          유지됩니다.
+        </p>
+        <form
+          id="administrator-entry"
+          action="/__development/login/admin"
+          method="post"
+        >
+          <button type="submit" class="primary-action">개발 관리자 진입</button>
+        </form>
+        <p><a href="/admin/login">원래 관리자 로그인 · MFA 사용</a></p>
+      </section>
+      <section class="section" aria-labelledby="member-heading">
+        <h2 id="member-heading">회원</h2>
+        <p>
+          선택한 합성 회원으로 실제 로그인한 뒤 플레이로 이동합니다. 비밀번호는
+          화면·주소·브라우저 저장소에 남기지 않습니다. 다른 화면의 미저장 입력은
+          자동 저장되지 않으며, 이 선택은 현재 브라우저의 회원 계정을 바꿉니다.
+        </p>
+        <div class="actions">
+          <button type="button" data-account="a">개발 회원 A로 플레이</button>
+          <button type="button" data-account="b">개발 회원 B로 플레이</button>
+        </div>
+        <p><a href="/account">원래 회원 가입·로그인·계정 관리</a></p>
+        <noscript
+          ><p>
+            회원 자동 진입에는 JavaScript가 필요합니다. 원래 회원 계정 화면을
+            이용하세요.
+          </p></noscript
+        >
+      </section>
+    </main>
+  </body>
+</html>

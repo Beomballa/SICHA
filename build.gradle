@@ -13,10 +13,26 @@ java {
     }
 }
 
+// 개발 자동 진입과 합성 자료는 main·일반 시험·배포 JAR 클래스패스에 넣지 않는다.
+sourceSets {
+    development {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+    developmentTest {
+        compileClasspath += sourceSets.main.output + sourceSets.development.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.development.output
+    }
+}
+
 configurations {
     compileOnly {
         extendsFrom annotationProcessor
     }
+    developmentImplementation.extendsFrom implementation
+    developmentRuntimeOnly.extendsFrom runtimeOnly
+    developmentTestImplementation.extendsFrom testImplementation, developmentImplementation
+    developmentTestRuntimeOnly.extendsFrom testRuntimeOnly, developmentRuntimeOnly
 }
 
 tasks.named('processResources') {
@@ -57,6 +73,40 @@ dependencies {
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:postgresql'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    developmentImplementation 'com.icegreen:greenmail:2.1.14'
+}
+
+tasks.register('developmentTest', Test) {
+    description = '별도 폐기 PG에서 개발 자동 진입·실제 세션·출처 경계를 검증한다.'
+    group = 'verification'
+    inputs.files('src/test/browser/development-access.mjs', 'src/test/browser/editor-workspace.mjs')
+    testClassesDirs = sourceSets.developmentTest.output.classesDirs
+    classpath = sourceSets.developmentTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter tasks.named('test')
+}
+
+tasks.named('bootRun') {
+    // 기존 명시 localDemo 흐름은 보존하고 기본 bootRun만 별도 개발 실행기로 연결한다.
+    if (!providers.gradleProperty('localDemo').isPresent()) {
+        dependsOn tasks.named('developmentClasses')
+        mainClass = 'com.reasoning.development.DevelopmentLauncher'
+        classpath = sourceSets.development.runtimeClasspath
+        doFirst {
+            if (!getArgs().empty || getSystemProperties().keySet().any {
+                it.toString().toLowerCase().matches('^(spring|server|app)[._-].*')
+            } || getJvmArgs().any {
+                it.toString().toLowerCase().matches('^-d(spring|server|app)[._-].*')
+            }) {
+                throw new GradleException('개발 bootRun에는 별도 응용 인자·Spring 설정 JVM 인자를 전달할 수 없습니다.')
+            }
+            setEnvironment(getEnvironment().findAll { name, value ->
+                def key = name.toString().toUpperCase()
+                !['SPRING', 'SERVER', 'AUTH', 'MEMBER', 'GRADING', 'APP'].any { key.startsWith(it) } &&
+                    !['JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS'].contains(key)
+            })
+        }
+    }
 }
 
 tasks.named('test') {
@@ -106,6 +156,7 @@ tasks.register('browserTest', Test) {
 
 tasks.named('check') {
     dependsOn tasks.named('integrationTest')
+    dependsOn tasks.named('developmentTest')
 }
 
 tasks.register('playerWebBrowserTest', Test) {

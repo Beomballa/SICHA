@@ -35,6 +35,7 @@ import java.util.List;
             "server.ssl.enabled=false",
             "app.member-web.enabled=false",
             "app.member-web.origin=",
+            "app.development.enabled=true",
             "app.member-auth.collection-enabled=false"
         })
 @AutoConfigureMockMvc
@@ -145,6 +146,34 @@ class SecurityIT extends DatabaseContextTest {
         }
         mvc.perform(post("/play")).andExpect(status().isForbidden());
         mvc.perform(get("/play?token=synthetic")).andExpect(status().isForbidden());
+    }
+
+    /** 개발 플래그를 켜도 일반 실행에는 자동 진입 클래스·경로·자격 발급이 존재하지 않는다. */
+    @Test
+    void developmentFlagCannotInstallDevelopmentRuntime() throws Exception {
+        assertThat(
+                        org.springframework.util.ClassUtils.isPresent(
+                                "com.reasoning.development.DevelopmentLauncher",
+                                getClass().getClassLoader()))
+                .isFalse();
+        for (String path :
+                List.of(
+                        "/__development",
+                        "/__development/client.mjs",
+                        "/__development/member-credentials")) {
+            mvc.perform(get(path).secure(true)).andExpect(status().isUnauthorized());
+        }
+        for (String path :
+                List.of("/__development/login/admin", "/__development/member-credentials")) {
+            mvc.perform(
+                            post(path)
+                                    .secure(true)
+                                    .header("Origin", "https://localhost")
+                                    .header("X-Sicha-Development", "1")
+                                    .contentType("application/json")
+                                    .content("{\"account\":\"a\"}"))
+                    .andExpect(status().isForbidden());
+        }
     }
 
     @Test
