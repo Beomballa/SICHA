@@ -315,7 +315,7 @@ test(
       );
       assert.match(
         await page.$eval("#game-counts", (node) => node.textContent),
-        /^아직 제출하지 않음/,
+        /^처리 중인 제출 없음/,
       );
       assert.doesNotMatch(
         await page.$eval("#game", (node) => node.innerText),
@@ -642,6 +642,15 @@ test(
       assert.match(
         await page.$eval("#result-summary", (node) => node.textContent),
         /사건 해결.*90/,
+      );
+      // NONE은 제출 이력이 아니라 현재 대기 여부다. 이미 채점한 뒤에도 이력을 부정하지 않는다.
+      assert.match(
+        await page.$eval("#game-counts", (node) => node.textContent),
+        /^처리 중인 제출 없음/,
+      );
+      assert.doesNotMatch(
+        await page.$eval("#game-counts", (node) => node.textContent),
+        /아직 제출하지 않음/,
       );
       assert.doesNotMatch(
         await page.$eval("#report-results", (node) => node.textContent),

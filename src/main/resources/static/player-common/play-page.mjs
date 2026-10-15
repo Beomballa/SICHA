@@ -32,7 +32,7 @@ const stateLabels = {
   EXPIRED: "대기 기한 만료",
 };
 const submissionLabels = {
-  NONE: "아직 제출하지 않음",
+  NONE: "처리 중인 제출 없음",
   PROPOSED: "공동 보고서 수락 대기",
   PENDING: "제출 완료 · 채점 대기",
 };
